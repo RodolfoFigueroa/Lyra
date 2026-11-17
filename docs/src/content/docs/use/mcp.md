@@ -228,3 +228,29 @@ Each relationship identifies:
 - The receiving input name or location binding path
 
 The tool returns at most 50 relationships in a consistent order, with an omission count in `omitted_relationships`. Node descriptions have a 240-character limit. Relationships include declared location operations; available selection routes do not add dependencies.
+
+## Read retained location inputs
+
+Use your saved `result_ref` to retrieve location inputs through MCP. Choose `input_name` from `location_inputs` in the [retained result description](#describe-a-retained-result). Each entry describes the input’s schema, dataset scope, and availability, including empty and unavailable selections.
+
+If the description exceeds the response limit, follow the preview’s authenticated JSON download URL. The download includes every output and input description without truncating schemas.
+
+Call `lyra_get_location_input_rows` with `result_ref` and `input_name`. Set a positive integer `limit` to change the default of 100 rows. Read `rows` and `next_cursor` directly from `structuredContent`, using the [row cell encodings](#read-retained-row-pages).
+
+Pass `next_cursor` unchanged as `cursor` with the same result and input until it returns `null`. Continue after short pages when a cursor remains; output-table cursors aren’t valid here. For correspondence inputs, each row maps an immediate source record to a target record, preserving repeated targets under different sources.
+
+Call `lyra_download_location_input` with `result_ref` and `input_name` to validate the input and obtain an Arrow download URL. Read these fields directly from `structuredContent`:
+
+- `result_ref`: the saved result
+- `input_name`: the selected location input
+- `download_url`: the absolute URL, including your deployment’s public path prefix
+
+Fetch `download_url` with your agent Bearer credential. The Arrow stream includes the declared schema and CRS even for empty selections.
+
+When `isError` is `true`, inspect `structuredContent.error` using the [HTTP error codes and fields](../rest-api/#read-retained-location-inputs). Handle input-specific failures as follows:
+
+- `location_input_unavailable`: retrying doesn’t materialize the input or change its availability
+- `row_too_large`: fetch the authenticated Arrow `download_url`; the cursor remains at the oversized row
+- `result_not_found`: check the result reference and declared location-input names; ordinary metric dependencies aren’t location inputs
+
+Missing or wrongly typed tool arguments produce SDK validation errors in text content. See [location-input payload examples](../../reference/mcp-payloads/#retained-location-inputs) for request and response fields.

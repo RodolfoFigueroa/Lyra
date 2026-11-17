@@ -230,3 +230,20 @@ def database(monkeypatch: pytest.MonkeyPatch) -> Database:
     monkeypatch.setattr(event, "listen", MagicMock())
     monkeypatch.setattr(sa.MetaData, "create_all", MagicMock())
     return database
+
+
+def fail_insert(
+    database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    table: str,
+    cause: Exception,
+) -> None:
+    """Inject a storage failure at a selected publication boundary."""
+    execute = database.connection.execute.side_effect
+
+    def inject(statement: object, parameters: object = None) -> object:
+        if isinstance(statement, Insert) and statement.table.name == table:
+            raise cause
+        return execute(statement, parameters)
+
+    monkeypatch.setattr(database.connection.execute, "side_effect", inject)

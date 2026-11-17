@@ -3,22 +3,35 @@
 from contextlib import closing, contextmanager
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, cast
 
 import pyarrow as pa
 from shapely.errors import GEOSException
 from sqlalchemy.exc import SQLAlchemyError
 
 from lyra.contracts.errors import (
+    LocationInputUnavailableError,
     ReportIntegrityError,
     ReportNotFoundError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
-from lyra.contracts.references import validate_execution_id, validate_result_reference
+from lyra.contracts.references import (
+    validate_execution_id,
+    validate_result_reference,
+    validate_retrieval_name,
+)
 from lyra.contracts.reports import ExecutionReport
 from lyra.contracts.results import ResultDescription
 from lyra.data.arrow_tables import table_batch, table_schema
+from lyra.runtime.input_selection import InputRows
+from lyra.runtime.location_inputs import _input_traversal
+from lyra.runtime.pagination import (
+    CandidatePage,
+    candidates,
+    validate_pagination,
+    validate_position,
+)
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.results import RunMetadata, RunResult
 from lyra.runtime.sqlite_store import DamagedDataError, MissingValueError, SQLiteStore
@@ -26,9 +39,10 @@ from lyra.runtime.sqlite_store import DamagedDataError, MissingValueError, SQLit
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    import geopandas as gpd
     import pandas as pd
 
-    from lyra.runtime.pagination import CandidatePage
+    from lyra.runtime.output_selection import OutputSelection
 
 
 class ResultStore:
@@ -67,16 +81,18 @@ class ResultStore:
 
     @contextmanager
     def _lookup(
-        self, result_ref: str, output_name: str | None
+        self, result_ref: str, output_name: str | None, *, input_name: str | None = None
     ) -> "Generator[ResultDescriptions]":
         if self._closed:
             msg = "Result store is closed"
             raise RuntimeError(msg)
-        validate_result_reference(result_ref, output_name)
+        validate_result_reference(result_ref, output_name, input_name=input_name)
         try:
             yield ResultDescriptions(self._store)
         except MissingValueError as error:
-            raise ResultNotFoundError(result_ref, output_name) from error
+            raise ResultNotFoundError(
+                result_ref, output_name, input_name=input_name
+            ) from error
         except (
             DamagedDataError,
             SQLAlchemyError,
@@ -85,12 +101,18 @@ class ResultStore:
             TypeError,
             GEOSException,
         ) as error:
-            raise ResultIntegrityError(result_ref, output_name) from error
+            raise ResultIntegrityError(
+                result_ref, output_name, input_name=input_name
+            ) from error
 
-    def describe(self, result_ref: str) -> ResultDescription:
+    def describe_result(self, result_ref: str) -> ResultDescription:
         """Return complete public metadata without reading tables or report bodies."""
         with self._lookup(result_ref, None) as lookup:
             return lookup.describe(result_ref)
+
+    def describe(self, result_ref: str) -> ResultDescription:
+        """Return the complete description through the description-only reader."""
+        return self.describe_result(result_ref)
 
     def read_result(self, result_ref: str) -> RunResult:
         """Return native outputs, detached metadata, and an eager complete report.
@@ -135,11 +157,91 @@ class ResultStore:
 
     def read_table(self, result_ref: str, output_name: str) -> "pd.DataFrame":
         """Return one independent native output, including typed empty tables."""
+        validate_retrieval_name(output_name)
         with self._lookup(result_ref, output_name) as lookup:
             return lookup.read(result_ref, output_name)[1][output_name]
 
+    def read_location_input(
+        self, result_ref: str, input_name: str
+    ) -> "gpd.GeoDataFrame":
+        """Return a detached geographic input using only retained values."""
+        with self._select_location_input(result_ref, input_name) as selected:
+            return cast("gpd.GeoDataFrame", selected.frame())
+
+    @contextmanager
+    def _select_location_input(
+        self, result_ref: str, input_name: str
+    ) -> "Generator[InputRows]":
+        validate_retrieval_name(input_name)
+        with (
+            self._lookup(result_ref, None, input_name=input_name) as lookup,
+            self._store.engine.connect() as connection,
+            _input_traversal(self._store, connection) as inputs,
+        ):
+            bindings = lookup.input_bindings_connection(connection, result_ref, inputs)
+            if input_name not in bindings.names:
+                raise MissingValueError(input_name)
+            selections = tuple(
+                inputs.borrow_selection(connection, key)
+                for key in bindings.selections[input_name]
+            )
+            if selections[0].description.availability == "not_materialized":
+                inputs.descriptions(connection, bindings)
+                raise LocationInputUnavailableError(result_ref, input_name)
+            yield InputRows.prepare(self._store, connection, selections)
+
+    def validate_location_input(self, result_ref: str, input_name: str) -> None:
+        """Validate lookup, availability and pair completion for a download link."""
+        with self._select_location_input(result_ref, input_name):
+            pass
+
+    @contextmanager
+    def location_input_page_candidates(
+        self,
+        result_ref: str,
+        input_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> "Generator[CandidatePage]":
+        """Yield bounded candidates with an input-specific opaque continuation.
+
+        The context owns the connection and iterator, including on early exit.
+        """
+        validate_retrieval_name(input_name)
+        validate_result_reference(result_ref, input_name=input_name)
+        after = validate_pagination(
+            result_ref, None, limit, cursor, input_name=input_name
+        )
+        with self._select_location_input(result_ref, input_name) as selected:
+            validate_position(selected, result_ref, None, after, input_name=input_name)
+            with closing(
+                candidates(
+                    selected,
+                    result_ref,
+                    input_name,
+                    limit,
+                    after,
+                )
+            ) as rows:
+                yield CandidatePage(selected.registration, None, rows)
+
+    def stream_location_input(
+        self, result_ref: str, input_name: str
+    ) -> "Generator[bytes]":
+        """Generate Arrow with lookup/availability preflight before the first chunk.
+
+        Close the generator on early exit. The selection, batches, writer and
+        connection remain owned until exhaustion or close, as for output streams.
+
+        Yields:
+            Arrow IPC chunks with retained schema and GeoArrow geometry metadata.
+        """
+        with self._select_location_input(result_ref, input_name) as selected:
+            yield from self._stream_selection(selected)
+
     def validate_table(self, result_ref: str, output_name: str) -> None:
         """Validate a retained output without materializing its rows or report."""
+        validate_retrieval_name(output_name)
         with (
             self._lookup(result_ref, output_name) as lookup,
             lookup.select(result_ref, output_name),
@@ -155,6 +257,7 @@ class ResultStore:
         cursor: str | None = None,
     ) -> "Generator[CandidatePage]":
         """Yield internal SQL page candidates with shared lookup error handling."""
+        validate_retrieval_name(output_name)
         with (
             self._lookup(result_ref, output_name) as lookup,
             lookup.page_candidates(result_ref, output_name, limit, cursor) as page,
@@ -168,9 +271,18 @@ class ResultStore:
         Subsequent chunks read bounded SQL batches. Consumers must close the
         generator on early exits; normal exhaustion releases all resources.
         """
+        validate_retrieval_name(output_name)
         with (
             self._lookup(result_ref, output_name) as lookup,
             lookup.select(result_ref, output_name) as selected,
+        ):
+            yield from self._stream_selection(selected)
+
+    @staticmethod
+    def _stream_selection(
+        selected: "OutputSelection | InputRows",
+    ) -> "Generator[bytes]":
+        with (
             closing(selected.batches()) as batches,
             BytesIO() as sink,
         ):

@@ -360,3 +360,49 @@ An oversized row produces `isError: true` with this structured error. The reques
 ```
 
 Download the complete Arrow table with the same credential. It includes rows already returned in previous pages. Missing or wrongly typed arguments instead produce SDK validation errors in text content.
+
+## Retained location inputs
+
+Location-input tools return saved rows or authenticated Arrow download URLs for a completed result. Choose `input_name` from the result description’s `location_inputs`.
+
+This request reads the first page using the default limit of 100 rows. Replace `result_ref` with your saved reference:
+
+```json {2,4-5}
+{
+  "name": "lyra_get_location_input_rows",
+  "arguments": {
+    "result_ref": "12345678901234567890123456789012",
+    "input_name": "streets"
+  }
+}
+```
+
+The response includes `rows` and `next_cursor` directly in `structuredContent`. Input rows contain provider attributes and geometry, with no metric `row_key`. Correspondence rows map immediate source records to target records through `source_location_id` and `location_id`.
+
+`lyra_download_location_input` accepts the same `result_ref` and `input_name` without pagination arguments. Its response contains these fields directly in `structuredContent`:
+
+| Field | Value |
+| --- | --- |
+| `result_ref` | The requested result reference |
+| `input_name` | The requested location-input name |
+| `download_url` | An absolute Arrow download URL using the deployment’s public API base URL |
+
+Fetch `download_url` with your agent Bearer credential. The URL uses the [HTTP input-download route](../../use/rest-api/#read-retained-location-inputs), including any configured public path prefix.
+
+For an unavailable input, the tool sets `isError` to `true` and returns this payload in `structuredContent`:
+
+```json {3,5-6}
+{
+  "error": {
+    "code": "location_input_unavailable",
+    "message": "The location input was not materialized for this result.",
+    "result_ref": "12345678901234567890123456789012",
+    "input_name": "streets"
+  }
+}
+```
+
+Branch on the code and identifiers, independently of message wording. Other input lookup errors include `output_name=null`, with additional fields for these failures:
+
+- `invalid_pagination`: `parameter` identifies the invalid limit or cursor
+- `row_too_large`: `download_url` identifies the complete authenticated Arrow stream

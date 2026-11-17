@@ -12,6 +12,7 @@ import pytest
 from lyra.contracts.jobs import JobEnvelope
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import PreparationError
+from lyra.runtime.result_store import ResultStore
 from lyra.runtime.results import RunResult
 from lyra.sdk import Dependency, Input, LocationDependency, PluginDefinition, metric
 from lyra.server import worker
@@ -165,6 +166,18 @@ def test_metric_reuse_parity(
             assert all(events.count(("close", resource)) == 1 for resource in opened)
         else:
             assert events == work == []
+        if len(results) == 1:
+            with ResultStore(
+                worker.SQLiteStore(results[-1].metadata.store_path)
+            ) as reader:
+                reference = results[-1].metadata.result_ref
+                assert set(
+                    reader.read_location_input(reference, "places").location_id
+                ) == set(ids)
+                if name == "comparison":
+                    assert set(
+                        reader.read_location_input(reference, "reference").location_id
+                    ) == {"x", "y"}
         owner = results[-1].metadata.outputs["rows"].owner_scope
         assert owner is not None
         assert owner.provider_id == "target"

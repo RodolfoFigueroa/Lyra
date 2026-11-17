@@ -33,12 +33,19 @@ from tests.sqlite_helpers import database
 from tests.table_client_helpers import ClientHarness, arrow_response, client
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Awaitable, Callable, Iterator
     from typing import IO
 
 __all__ = ["client", "database", "destinations", "retained"]
 _ID = "a" * 32
 _MEDIA = "application/vnd.apache.arrow.stream"
+
+
+@pytest.fixture(params=["download_table", "download_location_input"])
+def download_client(
+    request: pytest.FixtureRequest, client: ClientHarness
+) -> tuple[ClientHarness, Callable[..., Awaitable[None] | None]]:
+    return client, getattr(client.client.results, request.param)
 
 
 @pytest.fixture(params=[False, True])
@@ -130,11 +137,12 @@ def test_native_table_values_and_isolation(
 )
 def test_public_download_preserves_bytes_and_reads_normally(
     retained: Retained,
-    client: ClientHarness,
+    download_client: tuple[ClientHarness, Callable[..., Awaitable[None] | None]],
     destinations: list[IO[bytes]],
     monkeypatch: pytest.MonkeyPatch,
     download_path: Path,
 ) -> None:
+    client, download = download_client
     path = download_path
     directory = path.parent
     existing = path.exists()
@@ -158,12 +166,7 @@ def test_public_download_preserves_bytes_and_reads_normally(
         return replace(source, target)
 
     monkeypatch.setattr(Path, "replace", after_close)
-    assert (
-        client.resolve(
-            client.client.results.download_table(retained.reference, "rows", path)
-        )
-        is None
-    )
+    assert client.resolve(download(retained.reference, "rows", path)) is None
     assert path.read_bytes() == body
     assert list(directory.iterdir()) == [path]
     with path.open("rb") as source, pa.ipc.open_stream(source) as reader:
@@ -303,7 +306,15 @@ def test_encoded_output_path_and_invalid_reference(
 def break_file_operation(
     file: IO[bytes], stage: str, failure: Exception, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    if stage == "write":
+    if stage == "cancel_write":
+        write = file.write
+
+        def cancelled_write(data: bytes) -> int:
+            write(data[:2])
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(file, "write", cancelled_write)
+    elif stage == "write":
 
         def failing_write(_data: bytes) -> int:
             raise failure
@@ -320,15 +331,25 @@ def break_file_operation(
 
 
 @pytest.mark.parametrize(
-    "stage", ["stream", "write", "file_close", "response_close", "replace", "interrupt"]
+    "stage",
+    [
+        "stream",
+        "write",
+        "file_close",
+        "response_close",
+        "replace",
+        "interrupt",
+        "cancel_write",
+    ],
 )
 def test_download_failure_preserves_destination(
-    client: ClientHarness,
+    download_client: tuple[ClientHarness, Callable[..., Awaitable[None] | None]],
     preserved_destination: Path,
     destinations: list[IO[bytes]],
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
 ) -> None:
+    client, download = download_client
     path = preserved_destination
     failure = httpx.ReadTimeout("stalled") if stage == "stream" else OSError(stage)
 
@@ -356,30 +377,30 @@ def test_download_failure_preserves_destination(
     if stage == "replace":
         monkeypatch.setattr(Path, "replace", fail)
     expected = (
-        KeyboardInterrupt
+        asyncio.CancelledError
+        if stage == "cancel_write"
+        else KeyboardInterrupt
         if stage == "interrupt"
         else DownloadError
         if stage == "stream"
         else OSError
     )
     with pytest.raises(expected):
-        client.resolve(client.client.results.download_table(_ID, "rows", path))
+        client.resolve(download(_ID, "rows", path))
     assert stream.closed
     assert response.is_closed
     assert destinations[0].closed
 
 
 def test_download_requires_existing_parent(
-    client: ClientHarness, tmp_path: Path
+    download_client: tuple[ClientHarness, Callable[..., Awaitable[None] | None]],
+    tmp_path: Path,
 ) -> None:
+    client, download = download_client
     response = arrow_response(b"body")
     client.responses.append(response)
     with pytest.raises(FileNotFoundError):
-        client.resolve(
-            client.client.results.download_table(
-                _ID, "rows", tmp_path / "missing" / "out"
-            )
-        )
+        client.resolve(download(_ID, "rows", tmp_path / "missing" / "out"))
     assert response.is_closed
     assert not list(tmp_path.iterdir())
 

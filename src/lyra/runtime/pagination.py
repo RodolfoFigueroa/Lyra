@@ -1,4 +1,4 @@
-"""Internal SQL page candidates and opaque retained-output continuations."""
+"""Internal SQL page candidates and interface-bound retained continuations."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from lyra.contracts.errors import InvalidPaginationError
+from lyra.runtime.input_selection import InputRows
 from lyra.runtime.output_selection import RowAddress
 
 if TYPE_CHECKING:
@@ -22,23 +23,38 @@ if TYPE_CHECKING:
     from lyra.runtime.sqlite_schema import Registration
 
 
-class _Cursor(BaseModel):
+class _PositionCursor(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     version: Literal[1] = 1
     result_ref: str
-    output_name: str
-    computation: int = Field(ge=0)
-    key: tuple[str | Annotated[int, Field(ge=-(2**63), le=2**63 - 1)], ...]
 
     def encode(self) -> str:
         return base64.urlsafe_b64encode(self.model_dump_json().encode()).decode()
 
 
+class _Cursor(_PositionCursor):
+    output_name: str
+    computation: int = Field(ge=0)
+    key: tuple[str | Annotated[int, Field(ge=-(2**63), le=2**63 - 1)], ...]
+
+
+class _InputCursor(_PositionCursor):
+    interface: Literal["location_input"] = "location_input"
+    input_name: str
+    computation: int = Field(ge=0)
+    key: tuple[str | Annotated[int, Field(ge=-(2**63), le=2**63 - 1)], ...]
+
+
 def validate_pagination(
-    result_ref: str, output_name: str, limit: int, cursor: str | None
+    result_ref: str,
+    output_name: str | None,
+    limit: int,
+    cursor: str | None,
+    *,
+    input_name: str | None = None,
 ) -> RowAddress | None:
-    """Validate request bounds and decode an exact result/output-bound cursor.
+    """Validate request bounds and decode a result/name/interface-bound cursor.
 
     Returns:
         The exclusive private position, or None for an initial request.
@@ -47,31 +63,43 @@ def validate_pagination(
         InvalidPaginationError: If the limit or cursor is invalid.
     """
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-        raise InvalidPaginationError(result_ref, output_name, "limit")
+        raise InvalidPaginationError(
+            result_ref, output_name, "limit", input_name=input_name
+        )
     if cursor is None:
         return None
+    if not isinstance(cursor, str):
+        raise InvalidPaginationError(
+            result_ref, output_name, "cursor", input_name=input_name
+        )
+    cursor_type = _Cursor if input_name is None else _InputCursor
     try:
-        if not isinstance(cursor, str):
-            raise InvalidPaginationError(result_ref, output_name, "cursor")
-        decoded = _Cursor.model_validate_json(
+        decoded = cursor_type.model_validate_json(
             base64.b64decode(cursor, altchars=b"-_", validate=True)
         )
-        if (
-            decoded.result_ref != result_ref
-            or decoded.output_name != output_name
-            or decoded.encode() != cursor
-        ):
-            raise InvalidPaginationError(result_ref, output_name, "cursor")
     except (ValueError, ValidationError, binascii.Error) as error:
-        raise InvalidPaginationError(result_ref, output_name, "cursor") from error
+        raise InvalidPaginationError(
+            result_ref, output_name, "cursor", input_name=input_name
+        ) from error
+    name = decoded.output_name if isinstance(decoded, _Cursor) else decoded.input_name
+    if (
+        decoded.result_ref != result_ref
+        or name != (output_name if input_name is None else input_name)
+        or decoded.encode() != cursor
+    ):
+        raise InvalidPaginationError(
+            result_ref, output_name, "cursor", input_name=input_name
+        )
     return RowAddress(decoded.computation, decoded.key)
 
 
 def validate_position(
-    selected: OutputSelection,
+    selected: OutputSelection | InputRows,
     result_ref: str,
-    output_name: str,
+    output_name: str | None,
     after: RowAddress | None,
+    *,
+    input_name: str | None = None,
 ) -> None:
     """Require a continuation to address a row in the selected retained scope.
 
@@ -80,8 +108,16 @@ def validate_position(
     """
     if after is None:
         return
+    if isinstance(selected, InputRows):
+        if not selected.contains(after):
+            raise InvalidPaginationError(
+                result_ref, output_name, "cursor", input_name=input_name
+            )
+        return
     if after.computation >= len(selected.computations):
-        raise InvalidPaginationError(result_ref, output_name, "cursor")
+        raise InvalidPaginationError(
+            result_ref, output_name, "cursor", input_name=input_name
+        )
     computation = selected.computations[after.computation]
     expected = (
         (str, str) if computation.registration.output_scope == "location" else (int,)
@@ -89,7 +125,9 @@ def validate_position(
     if len(after.key) != len(expected) or any(
         type(value) is not kind for value, kind in zip(after.key, expected, strict=True)
     ):
-        raise InvalidPaginationError(result_ref, output_name, "cursor")
+        raise InvalidPaginationError(
+            result_ref, output_name, "cursor", input_name=input_name
+        )
     query = (
         computation.select(*computation.keys)
         .where(
@@ -103,7 +141,9 @@ def validate_position(
     result = selected.connection.execute(query)
     try:
         if result.mappings().one_or_none() is None:
-            raise InvalidPaginationError(result_ref, output_name, "cursor")
+            raise InvalidPaginationError(
+                result_ref, output_name, "cursor", input_name=input_name
+            )
     finally:
         result.close()
 
@@ -131,7 +171,7 @@ class CandidatePage:
 
 
 def candidates(
-    selected: OutputSelection,
+    selected: OutputSelection | InputRows,
     result_ref: str,
     output_name: str,
     limit: int,
@@ -154,15 +194,22 @@ def candidates(
                 break
             following = next(rows, None)
             cells, address = current
-            continuation = (
-                _Cursor(
-                    result_ref=result_ref,
-                    output_name=output_name,
-                    computation=address.computation,
-                    key=address.key,
+            continuation = None
+            if following is not None:
+                continuation = (
+                    _Cursor(
+                        result_ref=result_ref,
+                        output_name=output_name,
+                        computation=address.computation,
+                        key=address.key,
+                    )
+                    if not isinstance(selected, InputRows)
+                    else _InputCursor(
+                        result_ref=result_ref,
+                        input_name=output_name,
+                        computation=address.computation,
+                        key=address.key,
+                    )
                 ).encode()
-                if following is not None
-                else None
-            )
             yield RowCandidate(cells, continuation)
             current = following

@@ -21,7 +21,6 @@ from lyra.contracts.jobs import FailedJobResult, TableJobResult
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.metric_tables import MetricTables
-from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import MetricParameters, PluginDefinition, metric
@@ -29,7 +28,7 @@ from lyra.server import worker
 from lyra.server.job_store import JobStore
 from lyra.server.results import ResultService
 from tests.queue_helpers import accepted_envelope, read_retained
-from tests.sqlite_helpers import Database, database
+from tests.sqlite_helpers import Database, database, fail_insert
 from tests.worker_graph_integration_helpers import VALUES, install, native_job
 
 __all__ = ["database"]
@@ -161,11 +160,12 @@ def test_worker_persistence_failure_uses_failed_job_path(
             return result
 
         database.connection.execute.side_effect = inject
+    elif boundary == "publication":
+        fail_insert(database, monkeypatch, "final_results", cause)
     else:
         writer = {
             "setup": SQLiteStore,
             "values": MetricTables,
-            "publication": ResultDescriptions,
         }[boundary]
         monkeypatch.setattr(
             writer,

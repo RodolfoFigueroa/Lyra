@@ -2,7 +2,11 @@
 
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from lyra.contracts.references import validate_execution_id, validate_result_reference
+from lyra.contracts.references import (
+    validate_execution_id,
+    validate_result_reference,
+    validate_retrieval_name,
+)
 
 
 def result_description_path(result_ref: str) -> str:
@@ -29,7 +33,7 @@ def report_download_path(execution_id: str) -> str:
 
 def _table_path(result_ref: str, output_name: str) -> str:
     reference = validate_result_reference(result_ref, output_name)
-    segment = quote(output_name, safe="")
+    segment = quote(validate_retrieval_name(output_name), safe="")
     if segment in {".", ".."}:
         segment = segment.replace(".", "%2E")
     return f"results/{quote(reference, safe='')}/tables/{segment}"
@@ -43,6 +47,24 @@ def table_download_path(result_ref: str, output_name: str) -> str:
 def table_rows_path(result_ref: str, output_name: str) -> str:
     """Return the JSON row-page route for a named output."""
     return f"{_table_path(result_ref, output_name)}/rows"
+
+
+def _location_input_path(result_ref: str, input_name: str) -> str:
+    reference = validate_result_reference(result_ref, input_name=input_name)
+    segment = quote(validate_retrieval_name(input_name), safe="")
+    if segment in {".", ".."}:
+        segment = segment.replace(".", "%2E")
+    return f"results/{quote(reference, safe='')}/location-inputs/{segment}"
+
+
+def location_input_download_path(result_ref: str, input_name: str) -> str:
+    """Return the Arrow download route for a named root location input."""
+    return f"{_location_input_path(result_ref, input_name)}/download"
+
+
+def location_input_rows_path(result_ref: str, input_name: str) -> str:
+    """Return the JSON page route for a named root location input."""
+    return f"{_location_input_path(result_ref, input_name)}/rows"
 
 
 def absolute_api_url(base_url: str, path: str) -> str:

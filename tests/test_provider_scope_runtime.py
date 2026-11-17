@@ -310,9 +310,12 @@ def test_scope_changes_separate_equal_bare_ids_and_reject_stale_acceptance(
 
 
 def test_scope_projection_ignores_editorial_metadata() -> None:
-    original = ProviderScope(provider_id="records", origins=[ORIGIN])
+    original = ProviderScope(
+        provider_id="records", origins=[ORIGIN], description="Original"
+    )
     changed = ProviderScope(
         provider_id="records",
+        description="Edited",
         origins=[Origin(id="external", revision="1", description="Other")],
     )
     assert executable_contract(contract(original)) == executable_contract(

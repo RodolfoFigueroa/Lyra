@@ -7,7 +7,7 @@ from lyra.runtime.planning.preparation import PreparationError, prepare_executio
 from test_support.accepted_sources import declarations
 from test_support.location_operations import Parameters
 from test_support.manifest_catalog import compile_catalog
-from test_support.manifest_graph import build_graph
+from test_support.manifest_graph import PluginGraph, build_graph
 from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest
 from test_support.preparation_workload import preparation_workload
@@ -48,13 +48,30 @@ class IdentitySuite:
     version = "2"
     params: ClassVar[list[int]] = [10, 1000]
 
-    def setup(self, nodes: int) -> None:
-        """Compile declarations before deriving their identity."""
-        self.graph = build_graph(
-            {"benchmark-fixture": workload(1, "catalog", nodes).plugin.node_manifests}
-        )
+    def setup_cache(self) -> dict[int, PluginGraph]:
+        """Build metadata graphs once in the ASV cache process.
 
-    def time_compile_identity(self, _nodes: int) -> None:
+        Returns:
+            Metadata graphs indexed by node count.
+        """
+        return {
+            nodes: build_graph(
+                {
+                    "benchmark-fixture": workload(
+                        1, "catalog", nodes
+                    ).plugin.node_manifests
+                }
+            )
+            for nodes in self.params
+        }
+
+    def setup(self, graphs: dict[int, PluginGraph], nodes: int) -> None:
+        """Select a prepared graph outside timing."""
+        self.graph = graphs[nodes]
+
+    def time_compile_identity(
+        self, _graphs: dict[int, PluginGraph], _nodes: int
+    ) -> None:
         """Compile the production computation and revision identities."""
         compile_computation(self.graph, {})
 

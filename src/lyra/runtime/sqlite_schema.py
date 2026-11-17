@@ -197,6 +197,23 @@ class Layout:
                 ["stored_results.value_key", "stored_results.output_scope"],
             ),
         )
+        self.input_selections = sa.Table(
+            "input_selections",
+            self.metadata,
+            sa.Column("selection_key", sa.Text, primary_key=True),
+            sa.Column("description", sa.Text, nullable=False),
+        )
+        self.metric_inputs = sa.Table(
+            "metric_inputs",
+            self.metadata,
+            sa.Column(
+                "value_key",
+                sa.Text,
+                sa.ForeignKey("stored_results.value_key"),
+                primary_key=True,
+            ),
+            sa.Column("bindings", sa.Text, nullable=False),
+        )
         self.tables: dict[str, DataTable] = {}
         self.descriptions: dict[str, Registration] = {}
 
@@ -252,7 +269,12 @@ class Layout:
                     ["stored_partitions.value_key", "stored_partitions.location_id"],
                 )
             )
-            sa.Index("groups_" + key, table.c[value_column], table.c[owner])
+            sa.Index(
+                "groups_" + key,
+                table.c[value_column],
+                table.c[owner],
+                *((table.c.location_id,) if registration.kind == "operation" else ()),
+            )
         else:
             table.append_constraint(
                 sa.ForeignKeyConstraint(

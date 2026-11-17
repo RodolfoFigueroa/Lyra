@@ -20,9 +20,10 @@ class NodeCacheSuite:
     param_names: ClassVar[list[str]] = ["graph", "state"]
     number = 1
     warmup_time = 0
+    partition_count = 100
 
     def setup(self, graph: str, state: str) -> None:
-        """Prepare 100 partitions, half overlapping for partial reuse."""
+        """Prepare partitions, half overlapping for partial reuse."""
         self.directory = TemporaryDirectory(prefix="lyra-node-cache-")
         self.path = Path(self.directory.name) / "results.sqlite"
         self.work = cache_workload(hybrid=graph == "hybrid")
@@ -30,11 +31,14 @@ class NodeCacheSuite:
             {"bench": self.work.plugin}, result_store_path=self.path
         )
         self.inputs = cache_inputs(
-            50 if state == "partial" else 0, 100, hybrid=graph == "hybrid"
+            self.partition_count // 2 if state == "partial" else 0,
+            self.partition_count,
+            hybrid=graph == "hybrid",
         )
         if state != "cold":
             self.runner.run(
-                "root", inputs=cache_inputs(0, 100, hybrid=graph == "hybrid")
+                "root",
+                inputs=cache_inputs(0, self.partition_count, hybrid=graph == "hybrid"),
             )
         if state == "invalidated":
             self.work = cache_workload(hybrid=graph == "hybrid", revision="2")

@@ -111,6 +111,14 @@ Damaged required data causes an integrity error. Lookup doesn’t fabricate an e
 
 Writing the same key again preserves its existing value. An invoked `off` node executes even when its value is retained. Disabling caching preserves stored values, while repeated references within one graph can share that run’s validated results.
 
+Metric publication commits all newly computed partitions from one successful
+invocation together, including every named output, completion record, and retained
+input binding. If publication fails, none of that invocation's new metric values
+remain. Previously committed partitions and successful dependencies remain reusable.
+Each partition keeps its own computation identity, so overlapping requests can
+reuse individual partitions. Captured inputs can remain stored after a failure;
+they do not mark the failed metric as complete.
+
 ## Keep cached results current
 
 Your plugin must return the same logical values and membership for the same identity and effective inputs, even with caching off. Represent differences that affect outputs through declared identities or effective parameters.

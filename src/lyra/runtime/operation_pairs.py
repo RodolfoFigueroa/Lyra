@@ -48,9 +48,9 @@ class OperationPairs:
         """
         self.store.load_registrations()
         with self.store.engine.connect() as connection:
-            return self._read(connection, header, sources, required=required)
+            return self.read_connection(connection, header, sources, required=required)
 
-    def _read(
+    def read_connection(
         self,
         connection: sa.Connection,
         header: Header,
@@ -58,6 +58,14 @@ class OperationPairs:
         *,
         required: bool = False,
     ) -> dict[str, tuple[str, ...]] | None:
+        """Read completed groups within a caller-owned connection.
+
+        Returns:
+            Completed mappings, or None for an optional absent computation.
+
+        Raises:
+            DamagedDataError: If required completion or pair rows are damaged.
+        """
         try:
             saved = self.store.header(connection, header.value_key, required=required)
         except MissingValueError:
@@ -165,7 +173,7 @@ class OperationPairs:
                 self.store.layout.register(registration)
         with self.store.transaction() as connection:
             for header, ids in selections:
-                if self._read(connection, header, ids) is not None:
+                if self.read_connection(connection, header, ids) is not None:
                     continue
                 publication = header.model_copy(
                     update={

@@ -187,7 +187,7 @@ def test_native_async_lifecycle_and_timeouts(
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("boundary", ["transport", "reports", "tables"])
+@pytest.mark.parametrize("boundary", ["transport", "reports", "tables", "inputs"])
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_atomic_download_cancellation_preserves_destination(
@@ -218,6 +218,8 @@ def test_atomic_download_cancellation_preserves_destination(
                 if isinstance(client, AsyncHTTPTransport)
                 else client.results.download_table("a" * 32, "rows", path)
                 if boundary == "tables"
+                else client.results.download_location_input("a" * 32, "rows", path)
+                if boundary == "inputs"
                 else client.reports.download("a" * 32, path)
             )
             task = asyncio.create_task(operation)
@@ -244,6 +246,8 @@ def test_atomic_download_cancellation_preserves_destination(
                 if boundary == "transport"
                 else f"/results/{'a' * 32}/tables/rows/download"
                 if boundary == "tables"
+                else f"/results/{'a' * 32}/location-inputs/rows/download"
+                if boundary == "inputs"
                 else f"/executions/{'a' * 32}/report/download"
             )
             assert harness.calls == [("GET", route)]
@@ -254,8 +258,12 @@ def test_atomic_download_cancellation_preserves_destination(
 
 
 @pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize(
+    ("method", "interface"),
+    [("table", "tables"), ("location_input", "location-inputs")],
+)
 def test_table_read_cancellation_settles_in_caller(
-    monkeypatch: pytest.MonkeyPatch, *, cleanup_fails: bool
+    monkeypatch: pytest.MonkeyPatch, method: str, interface: str, *, cleanup_fails: bool
 ) -> None:
     async def exercise() -> None:
         harness = CancellationHarness("download", cleanup_fails=cleanup_fails)
@@ -265,7 +273,9 @@ def test_table_read_cancellation_settles_in_caller(
             partial(httpx.AsyncClient, transport=httpx.MockTransport(harness.respond)),
         )
         async with AsyncLyraClient("example.test") as client:
-            task = asyncio.create_task(client.results.table("a" * 32, "rows"))
+            task = asyncio.create_task(
+                getattr(client.results, method)("a" * 32, "rows")
+            )
             await harness.entered.wait()
             task.cancel()
             await harness.closing.wait()
@@ -276,7 +286,7 @@ def test_table_read_cancellation_settles_in_caller(
             assert harness.cleaned
             assert harness.tasks == [task, task]
             assert harness.calls == [
-                ("GET", f"/results/{'a' * 32}/tables/rows/download")
+                ("GET", f"/results/{'a' * 32}/{interface}/rows/download")
             ]
 
     asyncio.run(exercise())

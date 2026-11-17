@@ -19,19 +19,26 @@ from lyra.contracts.inspection import MAX_INSPECTION_BYTES
 from lyra.contracts.jobs import JobCreateRequest, JobId
 from lyra.contracts.reports import ExecutionReportInspection
 from lyra.contracts.results import (
+    LocationInputDownload,
     ResultDescriptionInspection,
     ResultRowPage,
     TableDownload,
 )
-from lyra.contracts.retrieval_paths import absolute_api_url, table_download_path
+from lyra.contracts.retrieval_paths import (
+    absolute_api_url,
+    location_input_download_path,
+    table_download_path,
+)
 from lyra.contracts.types import JsonValue
 from lyra.server.agent_auth import AgentBearerAuthMiddleware
 from lyra.server.mcp import tools
 from lyra.server.mcp.models import (
     DescribeResultInput,
+    DownloadLocationInputInput,
     DownloadResultOutput,
     DownloadTableInput,
     GetJobResultInput,
+    GetLocationInputRowsInput,
     GetMetricDependenciesInput,
     GetMetricInput,
     GetResultRowsInput,
@@ -178,6 +185,10 @@ SERVER_INSTRUCTIONS = (
     "Use lyra_download_table with result_ref and output_name for an authenticated "
     "Arrow IPC stream download_url. Read the link from structuredContent; creating "
     "the link validates the retained output without materializing its rows. "
+    "Use lyra_get_location_input_rows with result_ref and input_name for bounded "
+    "retained input pages, and lyra_download_location_input for an authenticated "
+    "Arrow link. Descriptions include every location input and its availability. "
+    "Unavailable inputs return location_input_unavailable; reads never acquire data. "
     "Administrative plugin, "
     "worker, queue, and server-management "
     "operations are not available through MCP."
@@ -455,12 +466,76 @@ def _register_retained_tools(
         return link
 
     @server.tool(annotations=read_only)
+    async def lyra_get_location_input_rows(
+        result_ref: Annotated[
+            str, GetLocationInputRowsInput.model_fields["result_ref"]
+        ],
+        input_name: Annotated[
+            str, GetLocationInputRowsInput.model_fields["input_name"]
+        ],
+        limit: Annotated[int, GetLocationInputRowsInput.model_fields["limit"]] = 100,
+        cursor: Annotated[
+            str | None, GetLocationInputRowsInput.model_fields["cursor"]
+        ] = None,
+    ) -> ResultRowPage:
+        """Read retained root location-input rows within the complete response budget.
+
+        Returns:
+            Complete rows and next_cursor directly in structuredContent.
+        """
+        del result_ref, input_name, limit, cursor
+        arguments = _arguments(GetLocationInputRowsInput)
+        return await backend.location_input_rows(
+            arguments.result_ref,
+            arguments.input_name,
+            arguments.limit,
+            arguments.cursor,
+            context=RowPageContext(
+                public_api_base_url,
+                server.retrieval_budget("lyra_get_location_input_rows"),
+            ),
+        )
+
+    @server.tool(annotations=read_only)
+    async def lyra_download_location_input(
+        result_ref: Annotated[
+            str, DownloadLocationInputInput.model_fields["result_ref"]
+        ],
+        input_name: Annotated[
+            str, DownloadLocationInputInput.model_fields["input_name"]
+        ],
+    ) -> LocationInputDownload:
+        """Return an authenticated Arrow stream link after validating the input.
+
+        Returns:
+            Validated result_ref, input_name, and absolute download_url.
+        """
+        del result_ref, input_name
+        arguments = _arguments(DownloadLocationInputInput)
+        await backend.validate_location_input(
+            arguments.result_ref, arguments.input_name
+        )
+        link = LocationInputDownload(
+            result_ref=arguments.result_ref,
+            input_name=arguments.input_name,
+            download_url=absolute_api_url(
+                public_api_base_url,
+                location_input_download_path(
+                    arguments.result_ref, arguments.input_name
+                ),
+            ),
+        )
+        server.retrieval_budget("lyra_download_location_input").require_fits(link)
+        return link
+
+    @server.tool(annotations=read_only)
     async def lyra_describe_result(
         result_ref: Annotated[str, DescribeResultInput.model_fields["result_ref"]],
     ) -> ResultDescriptionInspection:
         """Inspect retained metadata using a durable result_ref, independently of jobs.
 
-        A complete response includes every output schema and effective parameter.
+        A complete response includes every output and location-input schema,
+        plus effective parameters.
         A preview omits the whole description; follow its authenticated download_url
         for complete JSON. Read the variant from structuredContent.result.
 

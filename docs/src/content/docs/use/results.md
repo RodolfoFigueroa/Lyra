@@ -208,7 +208,7 @@ Every successful run receives a distinct execution ID and result reference, even
 from lyra.runtime.results import ResultStore
 
 with ResultStore.open(store_path) as store:
-    description = store.describe(result_ref)
+    description = store.describe_result(result_ref)
     report = store.read_report(execution_id)
     restored = store.read_result(report.result_ref)
     maintenance = store.read_table(result_ref, "maintenance")
@@ -225,12 +225,13 @@ Run `uv run python reopen_result.py`. To read in another process, reuse the seco
 
 Choose the read method for the data you need:
 
-- `describe()`: complete `ResultDescription`, with no inspection limit or table or report-body reads
+- `describe_result()` (also `describe()`): complete `ResultDescription`, with no inspection limit or table or report-body reads
 - `read_report()`: complete `ExecutionReport`, without loading output tables
 - `read_result()`: all named tables, metadata, and the complete report attached as `.report`
-- `read_table()`: one named DataFrame or GeoDataFrame
+- `read_table()`: one named output DataFrame or GeoDataFrame
+- `read_location_input()`: one named root location input as an independent GeoDataFrame
 
-The metadata describes the metric, effective parameters, output schemas and ownership, and saved addresses. Both table-reading methods reconstruct declared types and the coordinate reference system (CRS), including empty and all-null columns.
+The metadata describes the metric, effective parameters, output schemas and ownership, and saved addresses. Table-reading methods reconstruct declared types and the coordinate reference system (CRS), including empty and all-null columns.
 
 Leaving the context closes the reader’s connections, but you can still use the returned values. Editing them, including nested report fields, doesn’t change saved values or later reads. Field access doesn’t copy them again.
 
@@ -256,11 +257,97 @@ These result exceptions expose `result_ref` and `output_name`; whole-result read
 | `ReportNotFoundError` | A valid execution ID has no retained report in this store |
 | `ReportIntegrityError` | The retained report or its required relationships are damaged |
 
-Report exceptions expose `execution_id`, and all six lookup exceptions inherit from `ResultAccessError`. Inspect these fields instead of parsing messages.
+Report exceptions expose `execution_id`, and these lookup exceptions inherit from `ResultAccessError`. Inspect these fields instead of parsing messages.
 
 The exception follows the lookup you requested. Reading an existing result with a missing required report raises `ResultIntegrityError`. Looking up a valid execution ID without a saved report raises `ReportNotFoundError`, including after a failed attempt.
 
 Lookup doesn’t repair missing data or rerun a calculation. Reports can describe intermediates that execution didn’t need to store. Report-only reads check descriptive relationships without loading every stored table; table reads check the data they need.
+
+## Read retained location inputs
+
+Every named root `LocationDependency` appears in `description.location_inputs`,
+including reference inputs and operation-derived inputs. Ordinary metric dependencies
+are excluded. `RunResult.tables` and `read_result()` contain metric outputs; load
+geographic inputs explicitly when you need them.
+
+For the city result above, inspect and read the `streets` input:
+
+```python title="reopen_result.py"
+with ResultStore.open(store_path) as store:
+    input_description = store.describe_result(result_ref).location_inputs["streets"]
+    streets = store.read_location_input(result_ref, "streets")
+
+print(input_description.provider_scope)
+print(streets.geometry)
+```
+
+Descriptions load neither tables nor complete reports. Native reads preserve captured
+schemas, nullable types, units, CRS, provider revisions and origin descriptions.
+They work without current plugins, after job expiry, and after active registrations
+change. Returned frames and nested descriptions remain usable after closure; editing
+them cannot change retained data or later reads.
+
+An input represents its complete logical selection. If A/B were cached and C was
+freshly computed, the primary input contains A/B/C. A shared reference selection
+appears once. An operation input contains each immediate
+`(source_location_id, location_id)` pair with the target's attributes and geometry.
+A repeated target under two sources appears twice. A route A → P → T retains the
+final pair P → T. Read `source_scope` and `provider_scope` for those roles; equal
+bare IDs across providers or revisions do not establish equality. Input tables have
+no metric `row_key` or output ownership.
+
+Check `availability` before reading:
+
+| State | Read behavior |
+| --- | --- |
+| `available` | Returns the complete input, including a typed empty frame for a known empty selection or completed zero-match operation |
+| `not_materialized` | Raises `LocationInputUnavailableError`; execution skipped work without a complete retained binding |
+
+An empty output can still have nonempty inputs. Skipping an empty-primary root may
+leave its independent reference input unavailable. Later runs cannot change this
+published state. Missing required data for an available input raises
+`ResultIntegrityError`; reads never acquire provider data or rerun selection to repair it.
+Unknown input names raise `ResultNotFoundError`. Input lookup errors identify
+`result_ref` and `input_name`, with `output_name=None` where that field is present.
+
+### Read the same input remotely
+
+With a connected Python client and the saved result reference, choose a declared
+`input_name` from the complete description:
+
+```python title="read_location_input.py"
+description = client.results.describe(result_ref)
+input_description = description.location_inputs[input_name]
+frame = client.results.location_input(result_ref, input_name)
+page = client.results.location_input_rows(result_ref, input_name, limit=100)
+client.results.download_location_input(result_ref, input_name, "input.arrow")
+```
+
+With `AsyncLyraClient`, await each of these four calls. Native reads return a
+GeoDataFrame; downloads accept a string or `Path`, return `None`, and atomically
+replace the destination only on success. Failure or cancellation preserves the
+previous file. The parent directory must exist. Arrow preserves GeoArrow WKB geometry,
+CRS and nullable types; empty inputs still have a complete stream schema.
+
+Pages use the [JSON encodings and byte limits](#read-paginated-rows) for output rows.
+Follow `next_cursor` until it is `None`; keep the same result and input name.
+Output cursors cannot be used for inputs, even if their names match. An oversized
+row raises `RowTooLargeError` with an authenticated Arrow download link.
+
+| Access | Description or input operation |
+| --- | --- |
+| HTTP description | `GET /results/{result_ref}`; full JSON at `/results/{result_ref}/description/download` |
+| HTTP rows | `GET /results/{result_ref}/location-inputs/{input_name}/rows?limit=100` |
+| HTTP Arrow | `GET /results/{result_ref}/location-inputs/{input_name}/download` |
+| MCP description | `lyra_describe_result(result_ref)` |
+| MCP rows | `lyra_get_location_input_rows(result_ref, input_name, limit=100, cursor=None)` |
+| MCP Arrow link | `lyra_download_location_input(result_ref, input_name)` |
+
+Use the agent Bearer credential for HTTP reads and download links. Arrow responses
+use `application/vnd.apache.arrow.stream`. Oversized HTTP/MCP descriptions omit the
+whole body with `omitted=["description"]` and provide a complete JSON download link.
+Both Python clients follow that fallback automatically. See the
+[REST guide](../rest-api/) and [MCP guide](../mcp/) for transport error contracts.
 
 ## Retrieve tables in Python
 

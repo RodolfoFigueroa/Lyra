@@ -42,6 +42,8 @@ from lyra.contracts.results import (
 )
 from lyra.contracts.retrieval_errors import decode_error
 from lyra.contracts.retrieval_paths import (
+    location_input_download_path,
+    location_input_rows_path,
     report_download_path,
     report_inspection_path,
     result_description_path,
@@ -69,6 +71,15 @@ def get_table_download(result_ref: str, output_name: str) -> DownloadSpec:
     return DownloadSpec(
         table_download_path(result_ref, output_name),
         "download table",
+        "application/vnd.apache.arrow.stream",
+    )
+
+
+def get_location_input_download(result_ref: str, input_name: str) -> DownloadSpec:
+    """Return the shared input Arrow operation for native reads and saved files."""
+    return DownloadSpec(
+        location_input_download_path(result_ref, input_name),
+        "download location input",
         "application/vnd.apache.arrow.stream",
     )
 
@@ -516,6 +527,26 @@ def get_result_rows(
         "GET",
         table_rows_path(result_ref, output_name),
         "get result rows",
+        TypeAdapter(ResultRowPage),
+        params=params,
+        require_json=True,
+    )
+
+
+def get_location_input_rows(
+    result_ref: str,
+    input_name: str,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> RequestSpec[ResultRowPage]:
+    """Return a bounded input page request with an optional continuation cursor."""
+    params: dict[str, Any] = {"limit": limit}
+    if cursor is not None:
+        params["cursor"] = cursor
+    return RequestSpec(
+        "GET",
+        location_input_rows_path(result_ref, input_name),
+        "get location input rows",
         TypeAdapter(ResultRowPage),
         params=params,
         require_json=True,

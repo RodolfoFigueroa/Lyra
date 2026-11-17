@@ -36,6 +36,12 @@ from lyra.runtime.arguments import (
     PreparedResolvedInvocation,
     prepare_dependency,
 )
+from lyra.runtime.input_capture import (
+    capture_inputs,
+    capture_skipped_inputs,
+    remember_inputs,
+)
+from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.native_inputs import NativeLocationInput
@@ -76,8 +82,8 @@ from lyra.runtime.resources import ResourceScope, collect_resources
 from lyra.runtime.result_descriptions import (
     ComputationSelection,
     ResultDescription,
-    ResultDescriptions,
     ResultOutput,
+    _ResultPublication,
 )
 from lyra.runtime.results import ExecutionMetadata, RunOutputMetadata
 from lyra.runtime.reuse import publication_required, reuse_allowed
@@ -202,6 +208,7 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
         self.routes: dict[str, AcceptedSource] = {}
         self.memberships: dict[tuple[int, bool], BoundLocation] = {}
         self.bound_root: BoundInvocation | None = None
+        self.input_selections: dict[str, tuple[str, ...]] = {}
         self.completions: dict[tuple[str, str], MetricCompletion] = {}
 
     def observe_partial_reuse(
@@ -221,6 +228,7 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
         self.resolver = None
         self.prepared.clear()
         self.memberships.clear()
+        self.input_selections.clear()
         self.completions.clear()
         self.parameter_uses.clear()
         self.routes.clear()
@@ -701,7 +709,7 @@ class GraphExecutor:
             completed.report.observe_memory_reuse(bound, keys.values())
             # A later consumer may require retention of work already done in memory.
             if pairs is not None and publication_required(
-                node.cache, required=retain_membership
+                node.cache, required=retain_membership or self.retain_result
             ):
                 with persistence_boundary(completed.report.execution_id):
                     pairs.publish(tuple(selections), memo.groups)
@@ -809,6 +817,7 @@ class GraphExecutor:
         )
         completed.resolver = resolver
         bound = self._resolve_bound(bound, completed)
+        completed.bound_root = bound
         outputs = self._bound_metric(bound, None, (bound.node,), completed)
         completed.root_identity = bound.demand().identity
         node = self.graph.nodes[bound.node].node
@@ -1249,16 +1258,29 @@ class GraphExecutor:
                         for group, key in completion.computations
                     ),
                 )
-            completed.root_artifact = ResultDescriptions(store).publish(
-                ResultDescription(
-                    metric_name=metadata.metric_name,
-                    code_revision=entry.node.code_revision,
-                    parameters=metadata.parameters,
-                    output_names=tuple(sorted(metadata.outputs)),
-                    outputs=outputs,
-                ),
-                completed.report.complete(uuid4().hex),
+            description = ResultDescription(
+                metric_name=metadata.metric_name,
+                code_revision=entry.node.code_revision,
+                parameters=metadata.parameters,
+                output_names=tuple(sorted(metadata.outputs)),
+                outputs=outputs,
+                input_computations=next(iter(outputs.values())).computations,
+                location_inputs=capture_skipped_inputs(
+                    store,
+                    self.catalog,
+                    completed.bound_root,
+                    completed.input_selections,
+                )
+                if not next(iter(outputs.values())).computations
+                and completed.bound_root is not None
+                else InputBindings(),
             )
+            report = completed.report.complete(uuid4().hex)
+            reference, projection = _ResultPublication(store).publish_metadata(
+                description, report
+            )
+            metadata.location_inputs = projection.location_inputs
+            completed.root_artifact = reference
 
     def _prepared_locations(
         self,
@@ -1817,14 +1839,20 @@ class GraphExecutor:
                         "started",
                     )
                 )
-            outputs = plugin.invoke(invocation, dependencies, context_factory)
-            if tables is not None and (
-                publication_required(
-                    entry.node.cache, required=len(path) == 1 and self.retain_result
+            retain = tables is not None and publication_required(
+                entry.node.cache, required=len(path) == 1 and self.retain_result
+            )
+            with persistence_boundary(completed.report.execution_id):
+                captured = capture_inputs(
+                    store, self.catalog, invocation, selections, enabled=retain
                 )
-            ):
+            remember_inputs(invocation, captured, completed.input_selections)
+            outputs = plugin.invoke(invocation, dependencies, context_factory)
+            if retain and tables is not None:
                 with persistence_boundary(completed.report.execution_id):
-                    self._publish_metric(invocation.node, tables, selections, outputs)
+                    self._publish_metric(
+                        invocation.node, tables, selections, outputs, captured
+                    )
             if fragments:
                 outputs = self._assemble_metric([*fragments, outputs])
             completed[key] = outputs
@@ -1850,19 +1878,13 @@ class GraphExecutor:
         tables: MetricTables,
         selections: tuple[tuple[Header, tuple[str, ...]], ...],
         outputs: NativeOutputs,
+        captured: dict[str, InputBindings],
     ) -> None:
         """Publish validated complete partitions across all named outputs."""
         plugin = self.plugins[self.graph.nodes[node].distribution]
-        for header, partitions in selections:
-            selected = (
-                outputs
-                if header.output_scope == "unpartitioned"
-                else {
-                    name: frame.loc[frame.location_id.isin(partitions)].copy(deep=True)
-                    for name, frame in outputs.items()
-                }
-            )
-            tables.publish(header, selected, plugin.output_storage(node), partitions)
+        tables.publish(
+            selections, outputs, plugin.output_storage(node), location_inputs=captured
+        )
 
     def _operation(
         self,
@@ -1987,7 +2009,7 @@ class GraphExecutor:
                 )
             )
             if pairs is not None and publication_required(
-                node.cache, required=retain_membership
+                node.cache, required=retain_membership or self.retain_result
             ):
                 with persistence_boundary(completed.report.execution_id):
                     pairs.publish(

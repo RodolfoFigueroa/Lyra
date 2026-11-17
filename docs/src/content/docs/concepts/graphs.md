@@ -68,3 +68,11 @@ A failed invocation stops the graph. The job returns no partial result and does 
 Lyra never caches failed invocations. Successful dependencies can remain cached when a later calculation fails, so a new submission can reuse them.
 
 Use [plugin tests](../../plugins/testing/) to verify forwarding and reuse with fake sources. See [troubleshooting](../../operate/troubleshooting/#diagnose-a-graph-failure) to investigate deployed failures.
+
+Metric publication commits all newly computed partitions from one successful
+invocation together, including every named output, completion record, and retained
+input binding. If publication fails, none of that invocation's new metric values
+remain. Previously committed partitions and successful dependencies remain reusable.
+Each partition keeps its own computation identity, so overlapping requests can
+reuse individual partitions. Captured inputs can remain stored after a failure;
+they do not mark the failed metric as complete.

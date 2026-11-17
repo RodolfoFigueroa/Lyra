@@ -17,3 +17,9 @@ STORAGE_BENCH = (
     r"|results\.ResultSuite\.(time_worker|peakmem_worker))"
 )
 """Storage, data conversion, location acquisition, cache, and worker measurements."""
+
+RETAINED_INPUT_BENCH = r"^(retained_inputs|retained_input_scaling)\."
+"""Retained geographic inputs: execution, storage growth, metadata and values."""
+
+RETAINED_INPUT_SCALING_BENCH = r"^retained_input_scaling\."
+"""Shared-input scaling, isolated correspondences, encoded pages and memory."""

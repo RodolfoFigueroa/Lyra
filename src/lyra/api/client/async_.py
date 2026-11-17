@@ -282,9 +282,14 @@ class _ResultsResource:
         Nullable scalar types, geometry, and CRS come from retained Arrow
         metadata. The frame remains usable after client closure.
         """
-        content = await self._transport.read_bytes(
+        return await self._native_table(
             endpoints.get_table_download(result_ref, output_name)
         )
+
+    async def _native_table(
+        self, spec: endpoints.DownloadSpec
+    ) -> pd.DataFrame | gpd.GeoDataFrame:
+        content = await self._transport.read_bytes(spec)
         from lyra.api.client._arrow import (  # ruff: ignore[import-outside-top-level] - optional private adapter
             decode_table,
         )
@@ -303,6 +308,50 @@ class _ResultsResource:
         await self._transport.download(
             spec.path,
             path,
+            operation=spec.operation,
+            atomic=True,
+            content_type=spec.content_type,
+        )
+
+    async def location_input(
+        self, result_ref: str, input_name: str
+    ) -> gpd.GeoDataFrame:
+        """Return an independent retained input with nullable types, geometry and CRS.
+
+        Known empty inputs retain their schema. The complete logical selection
+        remains usable after closing the client.
+        """
+        return cast(
+            "gpd.GeoDataFrame",
+            await self._native_table(
+                endpoints.get_location_input_download(result_ref, input_name)
+            ),
+        )
+
+    async def location_input_rows(
+        self,
+        result_ref: str,
+        input_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ResultRowPage:
+        """Return a bounded page of the retained logical input selection."""
+        return await self._transport.request(
+            endpoints.get_location_input_rows(result_ref, input_name, limit, cursor)
+        )
+
+    async def download_location_input(
+        self, result_ref: str, input_name: str, destination: str | os.PathLike[str]
+    ) -> None:
+        """Atomically save the input as Arrow IPC and return None.
+
+        The parent directory must exist. Failure or cancellation preserves the
+        destination and removes the temporary file.
+        """
+        spec = endpoints.get_location_input_download(result_ref, input_name)
+        await self._transport.download(
+            spec.path,
+            destination,
             operation=spec.operation,
             atomic=True,
             content_type=spec.content_type,

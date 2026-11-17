@@ -131,3 +131,28 @@ def test_scope_code_revision_is_opaque_strict_text() -> None:
     assert ProviderScope(provider_id="tracts", code_revision="any revision / 1")
     with pytest.raises(ValidationError):
         ProviderScope.model_validate({"provider_id": "tracts", "code_revision": 1})
+
+
+@pytest.mark.parametrize("value", [12, True, b"text", []])
+def test_scope_description_is_strict(value: object) -> None:
+    with pytest.raises(ValidationError):
+        ProviderScope.model_validate({"provider_id": "tracts", "description": value})
+
+
+def test_provider_description_is_metadata_not_identity() -> None:
+    original = ProviderScope(provider_id="tracts", description="Original")
+    edited = original.model_copy(update={"description": "Edited"})
+    assert original == edited
+    assert hash(original) == hash(edited)
+    assert original.identity_payload == edited.identity_payload
+    assert original != object()
+    assert (
+        RecordIdentity(scope=original, location_id="a").key
+        == RecordIdentity(scope=edited, location_id="a").key
+    )
+    assert (
+        ProviderScope.model_validate_json(edited.model_dump_json()).description
+        == "Edited"
+    )
+    assert original.description == "Original"
+    assert ProviderScope(provider_id="tracts").description is None

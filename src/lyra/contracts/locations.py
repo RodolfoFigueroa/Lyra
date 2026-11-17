@@ -52,7 +52,7 @@ class LocationContractReference(StrictBaseModel):
 
     @property
     def identity_payload(self) -> dict[str, object]:
-        """Canonical identity without origin descriptions."""
+        """Canonical identity without provider or origin descriptions."""
         result = self.model_dump(mode="json")
         if self.provider_scope is not None:
             result["provider_scope"] = self.provider_scope.identity_payload

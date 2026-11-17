@@ -177,7 +177,16 @@ def test_partition_keys_survive_batch_changes(
         )
         == 3
     )
-    assert sorted(row["location_id"] for row in database.rows["stored_partitions"]) == [
+    keys = {
+        row["value_key"]
+        for row in database.rows["stored_results"]
+        if row["node_id"] == "make"
+    }
+    assert sorted(
+        row["location_id"]
+        for row in database.rows["stored_partitions"]
+        if row["value_key"] in keys
+    ) == [
         "0",
         "1",
         "2",

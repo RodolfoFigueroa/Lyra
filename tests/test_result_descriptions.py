@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from rq.job import Job
 from sqlalchemy.sql.dml import Insert
 
+from lyra.contracts.reports import ExecutionReport
 from lyra.contracts.results import ResultDescription as PublicResultDescription
 from lyra.runtime import provider_acquisition
 from lyra.runtime.metric_tables import MetricTables
@@ -20,37 +21,22 @@ from lyra.runtime.result_store import ResultStore
 from lyra.runtime.sqlite_store import DamagedDataError, SQLiteStore
 from lyra.sdk import loading
 from test_support.publication import publish_result
-from tests.result_description_helpers import publish_values
+from tests.result_description_helpers import (
+    location_descriptions,
+    publish_values,
+    retain_descriptions,
+)
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
 
 
-@pytest.mark.parametrize("keys", [(), ("one",), ("one", "two")])
-@pytest.mark.parametrize("spatial", [False, True])
-def test_complete_description_without_report_or_values(
-    database: Database,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    keys: tuple[str, ...],
-    *,
-    spatial: bool,
-) -> None:
-    path = tmp_path / "values.sqlite"
-    writer = SQLiteStore(path)
-    retained = publish_values(writer, keys, spatial=spatial)
-    reference = publish_result(ResultDescriptions(writer), retained)
-    expected_outputs = ResultStore(writer).read_result(reference).metadata.outputs
-    execution_id = database.rows["final_results"][0]["execution_id"]
-    # Descriptions check association and presence, not the full report body.
-    database.rows["final_results"][0]["report"] = "{"
-    writer.close()
-    path.touch()
-    before = deepcopy(database.rows)
+def _forbid_value_reads(database: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     forbidden = Mock(side_effect=AssertionError("No execution or value reads"))
     for target, names in (
         (Job, ("fetch",)),
         (MetricTables, ("read_connection",)),
+        (ExecutionReport, ("model_validate_json",)),
         (SQLiteStore, ("initialize",)),
         (loading, ("load_plugin_definition", "load_installed_plugin_definition")),
         (
@@ -70,6 +56,7 @@ def test_complete_description_without_report_or_values(
             "final_results",
             "storage_registrations",
             "stored_results",
+            "input_selections",
         }
         if source.name == "final_results":
             # Presence predicates are allowed; transferring the body is not.
@@ -77,32 +64,83 @@ def test_complete_description_without_report_or_values(
         return execute(statement, parameters)
 
     database.connection.execute.side_effect = metadata_only
+
+
+@pytest.mark.parametrize("keys", [(), ("one",), ("one", "two")])
+@pytest.mark.parametrize(
+    "shape", [(False, False), (False, True), (True, False), (True, True)]
+)
+def test_complete_description_without_report_or_values(
+    database: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    keys: tuple[str, ...],
+    shape: tuple[bool, bool],
+) -> None:
+    spatial, with_inputs = shape
+    path = tmp_path / "values.sqlite"
+    writer = SQLiteStore(path)
+    retained = publish_values(writer, keys, spatial=spatial)
+    if with_inputs:
+        retained = retained.model_copy(
+            update={"location_inputs": retain_descriptions(writer)}
+        )
+    reference = publish_result(ResultDescriptions(writer), retained)
+    result = ResultStore(writer).read_result(reference)
+    expected_outputs = result.metadata.outputs
+    assert result.metadata.location_inputs == (
+        location_descriptions() if with_inputs else {}
+    )
+    assert set(result.tables) == {"a", "b"}
+    assert isinstance(result.report, ExecutionReport)
+    execution_id = database.rows["final_results"][0]["execution_id"]
+    # Descriptions check association and presence, not the full report body.
+    database.rows["final_results"][0]["report"] = "{"
+    writer.close()
+    path.touch()
+    before = deepcopy(database.rows)
+    _forbid_value_reads(database, monkeypatch)
     with ResultStore.open(path) as reader:
-        description = reader.describe(reference)
+        description = reader.describe_result(reference)
         assert isinstance(description, PublicResultDescription)
         assert description.result_ref == reference
         assert description.execution_id == execution_id
         assert description.metric_name == retained.metric_name
         assert description.parameters == retained.parameters
         assert description.outputs == expected_outputs
+        assert description.location_inputs == (
+            location_descriptions() if with_inputs else {}
+        )
         assert set(description.model_dump()) == {
             "result_ref",
             "execution_id",
             "metric_name",
             "parameters",
             "outputs",
+            "location_inputs",
         }
         for output in description.outputs.values():
             assert set(output.model_dump()) == {"scope", "table_schema", "owner_scope"}
         description.parameters.clear()
         description.outputs["a"].table_schema.columns.clear()
         description.outputs["b"].owner_scope = None
+        if with_inputs:
+            description.location_inputs["blocks"].table_schema.columns[-1].parameters[
+                "crs"
+            ] = "EPSG:4326"
+            description.location_inputs["blocks"].table_schema.columns.clear()
+            description.location_inputs["nearby_trees"].source_scope = None
+            description.location_inputs["reference_blocks"].availability = "available"
+            description.location_inputs.pop("known_empty")
         again = reader.describe(reference)
         assert again.parameters == retained.parameters
         assert again.outputs == expected_outputs
+        assert again.location_inputs == (location_descriptions() if with_inputs else {})
+        assert reader.describe_result(reference) == again
     assert again.outputs == expected_outputs
+    assert again.location_inputs == (location_descriptions() if with_inputs else {})
     with pytest.raises(RuntimeError, match="closed"):
-        reader.describe(reference)
+        reader.describe_result(reference)
     with SQLiteStore(path, read_only=True) as store:
         assert ResultDescriptions(store).describe(reference) == again
     assert database.rows == before
@@ -141,12 +179,21 @@ def test_reopen_assembly(
     assert reopened.read(second)[0] == description
 
 
-@pytest.mark.parametrize("failure", ["insert", "commit", "missing", "group"])
+@pytest.mark.parametrize("failure", ["insert", "commit", "missing", "group", "input"])
 def test_failed_description_keeps_values(
     database: Database, tmp_path: Path, failure: str
 ) -> None:
     store = SQLiteStore(tmp_path / "values.sqlite")
     description = publish_values(store, ("one",))
+    description = description.model_copy(
+        update={"location_inputs": retain_descriptions(store)}
+    )
+    valid = description.model_copy(deep=True)
+    values = deepcopy(database.rows)
+    if failure == "input":
+        description = description.model_copy(
+            update={"input_computations": (ComputationSelection(value_key="absent"),)}
+        )
     if failure in {"missing", "group"}:
         description.outputs["b"] = description.outputs["b"].model_copy(
             update={
@@ -173,6 +220,13 @@ def test_failed_description_keeps_values(
         publish_result(ResultDescriptions(store), description)
     assert not database.rows.get("final_results")
     assert len(database.rows["stored_results"]) == 1
+    assert {name: rows for name, rows in database.rows.items() if rows} == values
+    assert not database.in_transaction
+    database.connection.execute.side_effect = execute
+    database.fail_commit = False
+    writer = ResultDescriptions(store)
+    reference = publish_result(writer, valid)
+    assert writer.describe(reference).location_inputs == location_descriptions()
 
 
 @pytest.mark.parametrize("damage", ["missing", "extra"])
@@ -216,3 +270,36 @@ def test_empty_selected_groups_keep_scope_and_schema(
             assert str(frame.value.dtype) == "Int64"
             assert frame.crs.to_epsg() == 4326
     assert database.rows == before
+
+
+@pytest.mark.parametrize("keys", [(), ("one",), ("one", "two")])
+def test_publication_projection_is_detached(
+    database: Database, tmp_path: Path, keys: tuple[str, ...]
+) -> None:
+    store = SQLiteStore(tmp_path / "values.sqlite")
+    description = publish_values(store, keys, spatial=True)
+    description = description.model_copy(
+        update={"location_inputs": retain_descriptions(store)}
+    )
+    writer = ResultDescriptions(store)
+    reference = publish_result(writer, description)
+    report = ExecutionReport.model_validate_json(
+        database.rows["final_results"][0]["report"]
+    )
+    projection = writer.metadata(description, reference, report.execution_id)
+    assert not database.in_transaction
+    expected = writer.describe(reference)
+    assert projection == expected
+    before = deepcopy(database.rows)
+    projection.parameters.clear()
+    projection.outputs["a"].table_schema.columns.clear()
+    projection.outputs["b"].owner_scope = None
+    projection.location_inputs["blocks"].table_schema.columns.clear()
+    projection.location_inputs["nearby_trees"].source_scope = None
+    projection.location_inputs.pop("known_empty")
+    assert writer.describe(reference) == expected
+    assert database.rows == before
+    # A later read must inspect persisted inputs afresh after publication.
+    database.rows["input_selections"].clear()
+    with pytest.raises(DamagedDataError):
+        writer.describe(reference)

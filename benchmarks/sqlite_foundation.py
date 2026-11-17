@@ -11,6 +11,7 @@ from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import Point
 
 from lyra.contracts.provider_scope import ProviderScope
+from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.sqlite_schema import Registration, StoredColumn
 from lyra.runtime.sqlite_store import Header, SQLiteStore
@@ -167,7 +168,10 @@ class ScopedMetricSuite:
             owner_scope=ProviderScope(provider_id="places"),
         )
         self.tables.publish(
-            self.header, {"value": self.frame}, {"value": self.description}, self.groups
+            ((self.header, self.groups),),
+            {"value": self.frame},
+            {"value": self.description},
+            location_inputs={self.header.value_key: InputBindings()},
         )
 
     def teardown(self, _rows: int, _columns: int, _geometry: str) -> None:
@@ -179,10 +183,19 @@ class ScopedMetricSuite:
         """Publish a complete computation with one hundred partitions."""
         self.sequence += 1
         self.tables.publish(
-            self.header.model_copy(update={"value_key": str(self.sequence)}),
+            (
+                (
+                    self.header.model_copy(update={"value_key": str(self.sequence)}),
+                    self.groups,
+                ),
+            ),
             {"value": self.frame},
             {"value": self.description},
-            self.groups,
+            location_inputs={
+                self.header.model_copy(
+                    update={"value_key": str(self.sequence)}
+                ).value_key: InputBindings()
+            },
         )
 
     def time_read(self, _rows: int, _columns: int, _geometry: str) -> None:

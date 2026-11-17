@@ -200,6 +200,11 @@ def test_mutating_consumers_and_repeated_reads(
         with ResultStore(
             SQLiteStore(tmp_path / "values.sqlite", read_only=True)
         ) as store:
+            captured = store.read_location_input(result.metadata.result_ref, "places")
+            assert set(captured.location_id) == set(ids)
+            assert captured.crs == "EPSG:4326"
+            assert captured["count"].tolist() == [1] * len(ids)
+            assert all(geometry == Point(0, 0) for geometry in captured.geometry)
             first = store.read_result(result.metadata.result_ref)
             check(first.tables["data"], set(ids), empty=empty)
             mutate(first.tables["data"])

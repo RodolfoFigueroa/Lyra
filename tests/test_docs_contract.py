@@ -487,7 +487,13 @@ def validate_retrieval_example(payload: dict, tools: dict[str, Tool]) -> bool:
         )
         validate(payload, tools[name].outputSchema)
     elif "rows" in payload or "download_url" in payload:
-        name = "lyra_get_result_rows" if "rows" in payload else "lyra_download_table"
+        name = (
+            "lyra_get_result_rows"
+            if "rows" in payload
+            else "lyra_download_location_input"
+            if "input_name" in payload
+            else "lyra_download_table"
+        )
         validate(payload, tools[name].outputSchema)
     elif payload.get("error", {}).get("code") == "row_too_large":
         validate(payload["error"], RowTooLargeErrorPayload.model_json_schema())

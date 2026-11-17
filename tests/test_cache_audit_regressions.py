@@ -50,10 +50,20 @@ def test_off_mapping_has_no_unneeded_storage(
         assert bool(result.result_ref) == retain
         assert ("mapping", frozenset(ids)) in events if ids else not events
         assert set(seen[-1].location_id) == ({"t"} if ids else set())
-    assert {r["node_id"] for r in database.rows.get("stored_results", [])} == (
+    metric_rows = [
+        r
+        for r in database.rows.get("stored_results", [])
+        if r["node_id"] in {"consumer", "derived"}
+    ]
+    assert {r["node_id"] for r in metric_rows} == (
         {"derived" if derived else "consumer"} if retain else set()
     )
-    assert not database.rows.get("stored_partitions")
+    metric_keys = {r["value_key"] for r in metric_rows}
+    assert not [
+        r
+        for r in database.rows.get("stored_partitions", [])
+        if r["value_key"] in metric_keys
+    ]
 
 
 def test_operation_policy_round_trip(tmp_path: Path, database: Database) -> None:

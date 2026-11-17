@@ -10,6 +10,7 @@ from lyra.contracts.jobs import (
     JobId,
     ResultLifetime,
 )
+from lyra.contracts.references import RetrievalName
 from lyra.contracts.strict import StrictBaseModel
 
 MAX_METRIC_PAGE_SIZE = 20
@@ -30,11 +31,24 @@ class DescribeResultInput(StrictBaseModel):
 class DownloadTableInput(DescribeResultInput):
     """Exact retained output name; selection validates its availability."""
 
-    output_name: str = Field(strict=True)
+    output_name: RetrievalName
 
 
 class GetResultRowsInput(DownloadTableInput):
     """Typed pagination arguments; semantic validation belongs to the pager."""
+
+    limit: int = Field(default=100, strict=True)
+    cursor: str | None = Field(default=None, strict=True)
+
+
+class DownloadLocationInputInput(DescribeResultInput):
+    """Exact retained root location-input name."""
+
+    input_name: RetrievalName
+
+
+class GetLocationInputRowsInput(DownloadLocationInputInput):
+    """Typed input pagination arguments with domain-owned semantic validation."""
 
     limit: int = Field(default=100, strict=True)
     cursor: str | None = Field(default=None, strict=True)

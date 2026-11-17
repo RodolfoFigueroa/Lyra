@@ -11,33 +11,21 @@ import pandera.pandas as pda
 import pyarrow as pa
 import pytest
 import shapely
-from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 from pydantic import BaseModel
 
 from lyra.contracts.errors import RowTooLargeError
 from lyra.contracts.results import ResultRowPage
 from lyra.runtime.result_store import ResultStore
-from lyra.server.mcp.serialization import mcp_response_budget
 from lyra.server.mcp.server import LyraFastMCP
 from lyra.server.response_budget import ResponseBudget, http_response_budget
 from lyra.server.result_rows import RowPageBuilder
 from tests.arrow_download_helpers import BASE, Retained, retained
 from tests.retained_table_helpers import retained_service
+from tests.row_page_helpers import budget
 from tests.sqlite_helpers import database
 
-__all__ = ["database", "retained"]
+__all__ = ["budget", "database", "retained"]
 pytestmark = pytest.mark.usefixtures("database")
-
-
-@pytest.fixture(params=["http", "mcp"])
-def budget(request: pytest.FixtureRequest) -> ResponseBudget[BaseModel]:
-    if request.param == "http":
-        return http_response_budget()
-
-    def rows() -> ResultRowPage:
-        raise NotImplementedError
-
-    return mcp_response_budget(func_metadata(rows), 'request-雪"\\')
 
 
 @pytest.mark.parametrize(

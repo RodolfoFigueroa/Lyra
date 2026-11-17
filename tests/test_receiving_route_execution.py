@@ -8,12 +8,19 @@ import pandas as pd
 import pytest
 from pydantic import Field
 
+from lyra.contracts.errors import ExecutionPersistenceError
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.operation_pairs import OperationPairs
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.provider_records import ProviderRecords
+from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.parameters import MetricParameters
 from tests.receiving_route_helpers import Trace, definitions, request
+from tests.sqlite_helpers import database
+
+__all__ = ["database"]
 
 
 @pytest.mark.parametrize(
@@ -163,3 +170,54 @@ def test_equal_provider_uses_no_automatic_operation() -> None:
     assert result.tables["rows"].value.tolist() == [30, 30]
     assert trace.parameters == [("measure", [3])]
     assert "source_location_id" not in trace.frames["measure"][0]
+
+
+@pytest.mark.parametrize("development", [False, True])
+@pytest.mark.usefixtures("database")
+def test_retained_final_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, development: bool
+) -> None:
+
+    trace = Trace()
+    path = tmp_path / "route.sqlite"
+    plugins = definitions(trace)
+    for name, provider in plugins["providers"].resources.items():
+        monkeypatch.setattr(provider, "description", f"Captured {name}")
+    runner = LocalRunner.from_definitions(plugins, result_store_path=path)
+    payload = request()
+    run = runner.run_development if development else runner.run
+    result = run("producer", inputs=payload["inputs"], parameters={"weights": [3]})
+    path.touch()
+    before = len(trace.events)
+    with ResultStore.open(path) as reader:
+        captured = reader.describe_result(result.metadata.result_ref).location_inputs[
+            "places"
+        ]
+        assert captured.provider_scope.description == "Captured target"
+        assert captured.source_scope is not None
+        assert captured.source_scope.provider_id == "middle"
+        assert captured.source_scope.description == "Captured middle"
+        saved = reader.read_location_input(result.metadata.result_ref, "places")
+        assert set(zip(saved.source_location_id, saved.location_id, strict=True)) == {
+            ("x", "X"),
+            ("y", "Y"),
+            ("z", "Z"),
+        }
+        assert saved.crs == "EPSG:4326"
+        assert "row_key" not in saved
+    assert len(trace.events) == before
+
+
+@pytest.mark.usefixtures("database")
+@pytest.mark.parametrize("writer", ["pairs", "records"])
+def test_route_retention_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writer: str
+) -> None:
+
+    target = OperationPairs if writer == "pairs" else ProviderRecords
+    monkeypatch.setattr(target, "publish", Mock(side_effect=OSError("write failed")))
+    runner = LocalRunner.from_definitions(
+        definitions(Trace()), result_store_path=tmp_path / "failed.sqlite"
+    )
+    with pytest.raises(ExecutionPersistenceError):
+        runner.run("producer", inputs=request()["inputs"], parameters={"weights": [3]})

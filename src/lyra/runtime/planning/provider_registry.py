@@ -158,13 +158,14 @@ def _capture_provider(
         msg = "Providers require an origins collection of Origin values"
         raise ValueError(msg)
     required = {name: getattr(provider, name) for name in ("id", "schema")}
+    description = TypeAdapter(str | None).validate_python(
+        getattr(provider, "description", None), strict=True
+    )
     scope = ProviderScope(
         provider_id=required["id"],
         code_revision=getattr(provider, "code_revision", None),
         origins=origins,
-    )
-    description = TypeAdapter(str | None).validate_python(
-        getattr(provider, "description", None), strict=True
+        description=description,
     )
     schema = ProviderSchema(required["schema"])
     return RegisteredProvider(

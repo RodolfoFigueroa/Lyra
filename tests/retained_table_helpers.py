@@ -10,6 +10,7 @@ import pandera.pandas as pa
 from lyra.contracts.jobs import JobStatusInfo
 from lyra.contracts.origins import Origin
 from lyra.contracts.provider_scope import ProviderScope
+from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.result_descriptions import (
     ComputationSelection,
@@ -33,9 +34,21 @@ def retained_service(
     writer = SQLiteStore(path)
     layout = describe(schema, metadata=compile_output(schema)[1])
     MetricTables(writer).publish(
-        Header(value_key="value", node_id="native", output_scope="unpartitioned"),
+        (
+            (
+                Header(
+                    value_key="value", node_id="native", output_scope="unpartitioned"
+                ),
+                (),
+            ),
+        ),
         {"rows": frame},
         {"rows": layout},
+        location_inputs={
+            Header(
+                value_key="value", node_id="native", output_scope="unpartitioned"
+            ).value_key: InputBindings()
+        },
     )
     registration = next(iter(writer.layout.descriptions.values()))
     key = publish_result(
@@ -105,15 +118,27 @@ def mixed_result(store: SQLiteStore) -> tuple[ResultDescriptions, str]:
             }
         )
         MetricTables(store).publish(
-            Header(
-                value_key=key,
-                node_id="metric",
-                output_scope="location",
-                owner_scope=owner,
+            (
+                (
+                    Header(
+                        value_key=key,
+                        node_id="metric",
+                        output_scope="location",
+                        owner_scope=owner,
+                    ),
+                    ("same", "next", "empty"),
+                ),
             ),
             {"a": frame},
             {"a": layout},
-            ("same", "next", "empty"),
+            location_inputs={
+                Header(
+                    value_key=key,
+                    node_id="metric",
+                    output_scope="location",
+                    owner_scope=owner,
+                ).value_key: InputBindings()
+            },
         )
     registration = next(iter(store.layout.descriptions.values()))
     descriptions = ResultDescriptions(store)

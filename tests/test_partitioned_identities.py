@@ -1,5 +1,9 @@
 """Logical partition references remain independent of physical handler batches."""
 
+import gc
+import hashlib
+import json
+import weakref
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -12,8 +16,13 @@ from pydantic import Field
 from lyra.contracts.metric_scope import CachePolicy
 from lyra.contracts.origins import Origin
 from lyra.runtime.arguments import PreparedResolvedInvocation
+from lyra.runtime.execution import RunState
 from lyra.runtime.native_inputs import NativeLocationInput
-from lyra.runtime.planning.bindings import BoundLocation, bind_execution
+from lyra.runtime.planning.bindings import (
+    BoundInvocation,
+    BoundLocation,
+    bind_execution,
+)
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk import Dependency, Input, LocationDependency, metric
 from lyra.sdk.parameters import MetricParameters
@@ -584,3 +593,266 @@ def test_empty_executions_keep_fresh_report_identity_without_handlers() -> None:
         root = report.uses[report.root_use_id]
         assert root.node == "findings"
         assert report.uses[dict(root.inputs)["main"]].kind == "provider"
+
+
+def canonical_location(location: BoundLocation) -> str:
+    """Independent canonical JSON contract, without optimized location keys."""
+    payload = {
+        "provider": location.provider.provider_scope.identity_payload
+        if location.provider.provider_scope
+        else location.provider.identity_payload,
+        "ids": sorted(set(location.ids)) if location.ids is not None else None,
+        "upstream": [
+            {"computation": key, "group": group}
+            for key, group in sorted(
+                location.computations, key=lambda item: (item[0], item[1] or "")
+            )
+        ]
+        if location.computations
+        else location.upstream.identity
+        if location.upstream
+        else None,
+    }
+    return canonical_hash(payload)
+
+
+def canonical_hash(payload: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+
+
+def canonical_partition(bound: BoundInvocation, groups: frozenset[str] | None) -> str:
+    primary = bound.locations.get(bound.primary_input or "")
+    selected = (
+        primary.select(groups)
+        if primary is not None and groups is not None
+        else primary
+    )
+    inputs: dict = {}
+    for name, location in bound.locations.items():
+        related = location.related(selected) if selected is not None else None
+        inputs[name] = canonical_location(related or location)
+    for name, dependency in bound.dependencies.items():
+        upstream = dependency.locations.get(dependency.primary_input or "")
+        related = (
+            upstream.related(selected)
+            if upstream is not None and selected is not None
+            else None
+        )
+        demanded = frozenset(related.ids or ()) if related is not None else None
+        if dependency.per_location:
+            assert upstream is not None
+            assert upstream.ids is not None
+            keys = {
+                group: canonical_partition(dependency, frozenset({group}))
+                for group in sorted(demanded if demanded is not None else upstream.ids)
+            }
+            reference = {"output": bound.outputs[name], "partitions": keys}
+            if not keys:
+                reference["empty_context"] = canonical_partition(
+                    dependency, frozenset()
+                )
+        else:
+            reference = {
+                "computation": canonical_partition(dependency, None),
+                "output": bound.outputs[name],
+            }
+            if demanded is not None and dependency.primary_input is not None:
+                reference["groups"] = sorted(demanded)
+        inputs[name] = reference
+    descriptor = bound.descriptor
+    payload = {
+        "kind": descriptor.kind,
+        "implementation": [descriptor.node_id, descriptor.code_revision],
+        "output_scope": descriptor.output_scope,
+        "computation_scope": "per_location" if bound.per_location else "complete",
+        "parameters": descriptor.parameters,
+        "inputs": inputs,
+    }
+    if descriptor.primary_input is not None:
+        payload["primary_input"] = descriptor.primary_input
+    if descriptor.kind == "operation":
+        payload["target"] = (
+            descriptor.target.identity_payload if descriptor.target else None
+        )
+    else:
+        payload["origins"] = sorted(
+            (
+                {"id": origin.id, "revision": origin.revision}
+                for origin in descriptor.origins
+            ),
+            key=lambda item: json.dumps(item, sort_keys=True),
+        )
+    return canonical_hash(payload)
+
+
+@pytest.mark.parametrize("policy", ["full", "per_location"])
+@pytest.mark.parametrize("ids", [(), ("A", "B"), ("B", "A")])
+def test_partition_snapshot_matches_canonical_contract(
+    policy: CachePolicy, ids: tuple[str, ...]
+) -> None:
+    bound = bound_invocation(ids, policy).bound_use
+    assert bound is not None
+    expected = (
+        {group: canonical_partition(bound, frozenset({group})) for group in ids}
+        if bound.per_location
+        else {None: canonical_partition(bound, None)}
+    )
+    assert bound.demand().computation_keys == expected
+    assert bound.demand().computation_key(frozenset()) == canonical_partition(
+        bound, frozenset()
+    )
+    for location in bound.locations.values():
+        assert location.identity == canonical_location(location)
+
+
+def test_identity_snapshot_owns_nested_values_and_returned_maps() -> None:
+    original = bound_invocation(("A", "B")).bound_use
+    assert original is not None
+    parameters = {"nested": ["original"]}
+    locations = dict(original.locations)
+    bound = replace(
+        original,
+        descriptor=replace(original.descriptor, parameters=parameters),
+        locations=locations,
+    )
+    expected = canonical_partition(bound, frozenset({"A"}))
+    parameters["nested"].append("changed")
+    locations.clear()
+    assert bound.demand(frozenset({"A"})).computation_keys == {"A": expected}
+    returned = bound.demand().computation_keys
+    assert returned is not None
+    returned.clear()
+    assert bound.demand(frozenset({"A"})).computation_keys == {"A": expected}
+    assert bound.demand().computation_keys
+    revised = replace(
+        bound, descriptor=replace(bound.descriptor, parameters=parameters)
+    )
+    assert revised.demand().computation_keys != bound.demand().computation_keys
+
+
+@pytest.mark.parametrize(
+    "invalid", [float("nan"), float("inf"), {1: "bad"}, {"bad": object()}]
+)
+def test_identity_snapshot_rejects_unsupported_nested_values(invalid: object) -> None:
+    bound = bound_invocation(("A",)).bound_use
+    assert bound is not None
+    with pytest.raises(ValueError, match="finite JSON"):
+        replace(
+            bound,
+            descriptor=replace(bound.descriptor, parameters={"nested": [invalid]}),
+        )
+
+
+def test_resolved_membership_owns_fresh_partition_keys() -> None:
+    bound = bound_invocation(("A", "B")).bound_use
+    assert bound is not None
+    unknown = replace(
+        bound,
+        locations=dict(bound.locations)
+        | {"main": replace(bound.locations["main"], ids=None)},
+    )
+    assert unknown.demand().computation_keys is None
+    assert unknown.demand().identity
+    known = replace(unknown, locations=bound.locations)
+    assert known.demand().computation_keys == bound.demand().computation_keys
+    empty = replace(
+        unknown,
+        locations=dict(bound.locations)
+        | {"main": replace(bound.locations["main"], ids=())},
+    )
+    assert empty.demand().computation_keys == {}
+    assert empty.demand().identity != unknown.demand().identity
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_identity_cache_lifetime_follows_graph(*, failure: bool) -> None:
+    """Run cleanup must release the graph and its memoized identity components."""
+    state = RunState()
+    bound = bound_invocation(("A", "B")).bound_use
+    assert bound is not None
+    state.bound_root = bound
+    assert bound.demand().computation_keys
+    reference = weakref.ref(bound)
+    del bound
+
+    def finish() -> None:
+        if failure:
+            message = "failed execution"
+            raise ValueError(message)
+
+    try:
+        finish()
+    except ValueError:
+        pass
+    finally:
+        state.clear()
+    gc.collect()
+    assert reference() is None
+
+
+@pytest.mark.parametrize(
+    ("policy", "ids", "expected"),
+    [
+        (
+            "full",
+            (),
+            "13fc560e1bfce2651fa799e8f88af5067071710e29ebc257c579b1c8f0d76af0",
+        ),
+        (
+            "full",
+            ("A", "B"),
+            "57bf13c79081d98e78f454a9469e8f54cba42b203239f3d7b8028baf354001d1",
+        ),
+        (
+            "per_location",
+            (),
+            "6915b3695186cf65b6ce419430b0e6fa6fc0b9491d6c7a78131317a1023d5bef",
+        ),
+        (
+            "per_location",
+            ("A", "B"),
+            "f51c2cf4e60186f106721aab1fb7f1c3ae7eceb6df0cbef6160f80c37bdd165d",
+        ),
+    ],
+)
+def test_fixed_canonical_keys(
+    policy: CachePolicy, ids: tuple[str, ...], expected: str
+) -> None:
+    bound = bound_invocation(ids, policy).bound_use
+    assert bound is not None
+    assert bound.demand().identity == expected
+
+
+@pytest.mark.parametrize("policy", ["full", "per_location"])
+def test_multihop_identity_matches_independent_contract(policy: CachePolicy) -> None:
+    bound = bound_invocation(("A", "B"), policy).bound_use
+    assert bound is not None
+    source = bound.locations["main"]
+    middle = BoundLocation(
+        source.provider,
+        ("X", "Y"),
+        source=source,
+        pairs=(("A", "X"), ("B", "Y")),
+        computations=(("first", "A"), ("second", "B")),
+    )
+    final = BoundLocation(
+        source.provider,
+        ("P", "Q"),
+        source=middle,
+        pairs=(("X", "P"), ("Y", "Q")),
+        computations=(("third", "X"), ("fourth", "Y")),
+    )
+    routed = replace(
+        bound,
+        locations=dict(bound.locations) | {"main": final},
+        dependencies={"upstream": bound},
+        outputs={"upstream": "data"},
+    )
+    for groups in (None, frozenset(), frozenset({"P"}), frozenset({"Q"})):
+        assert routed.demand().computation_key(groups) == canonical_partition(
+            routed, groups
+        )

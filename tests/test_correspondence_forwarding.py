@@ -1,6 +1,10 @@
 """Correspondence tables preserve provider values and immediate pair identities."""
 
+import gc
+import traceback
+import weakref
 from collections.abc import Mapping
+from dataclasses import fields, replace
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -18,6 +22,7 @@ from lyra.runtime.local import LocalRunner
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.native_inputs import NativeLocationInput, inputs_equal
 from lyra.runtime.operations import acquire_operation_targets, forward_correspondences
+from lyra.runtime.planning.bindings import BoundLocation
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.resources import ResourceScope
 from lyra.sdk import (
@@ -351,3 +356,106 @@ def test_operation_derived_owner_is_target(*, empty: bool) -> None:
     assert description.owner_scope is not None
     assert description.owner_scope.provider_id == Targets.id
     assert result.tables["data"].empty is empty
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_bound_pair_snapshots_preserve_order_and_shared_targets(
+    *, reverse: bool
+) -> None:
+    runner = chain_runner([])
+    provider = runner.catalog.provider_registry[Targets.id].contract.reference
+    source = BoundLocation(provider, ("A", "B", "C"))
+    pairs = (("B", "Y"), ("A", "X"), ("A", "Y"), ("B", "Y"))
+    if reverse:
+        pairs = pairs[::-1]
+    target = BoundLocation(
+        provider,
+        ("X", "Y"),
+        pairs=pairs,
+        source=source,
+        computations=(("all", None), ("a", "A"), ("b", "B"), ("c", "C")),
+    )
+    identity = target.identity
+    shared = target.select(frozenset({"Y"}))
+    assert shared.pairs == tuple(pair for pair in pairs if pair[1] == "Y")
+    assert shared.computations == (("all", None), ("a", "A"), ("b", "B"))
+    assert target.select(frozenset({"Y", "X"})) is target
+    assert shared.select(frozenset({"X"})).pairs == ()
+    assert target.identity == identity
+    assert replace(target) == target
+    assert "_pair_index" not in {field.name for field in fields(target)}
+    for ids in (frozenset({"A"}), frozenset({"A", "B"}), frozenset({"C"})):
+        selected = target.related(source.select(ids))
+        assert selected is not None
+        assert selected.pairs == tuple(pair for pair in pairs if pair[0] in ids)
+        assert selected.computations == tuple(
+            (key, group)
+            for key, group in target.computations
+            if group is None or group in ids
+        )
+    replacement = replace(target, pairs=(("C", "Y"),))
+    assert replacement.select(frozenset({"Y"})).pairs == (("C", "Y"),)
+    restricted = replacement.related(source.select(frozenset({"A"})))
+    assert restricted is not None
+    assert restricted.pairs == ()
+    assert target.related(BoundLocation(provider, ("A",))) is None
+
+
+def test_bound_pair_multihop_and_sibling_selections() -> None:
+    runner = chain_runner([])
+    provider = runner.catalog.provider_registry[Targets.id].contract.reference
+    source = BoundLocation(provider, ("A", "B", "C"))
+    middle = BoundLocation(
+        provider,
+        ("X", "Y"),
+        source=source,
+        pairs=(("A", "X"), ("B", "Y"), ("A", "Y")),
+    )
+    final = BoundLocation(
+        provider,
+        ("P", "Q"),
+        source=middle,
+        pairs=(("Y", "Q"), ("X", "P"), ("Y", "P")),
+    )
+    sibling = BoundLocation(
+        provider,
+        ("S", "T"),
+        source=source,
+        pairs=(("C", "T"), ("B", "S"), ("A", "S")),
+    )
+    selected = final.related(source.select(frozenset({"B"})))
+    assert selected is not None
+    assert selected.pairs == (("Y", "Q"), ("Y", "P"))
+    ancestor = source.related(selected)
+    branch = sibling.related(selected)
+    empty = final.related(source.select(frozenset({"C"})))
+    assert ancestor is not None
+    assert ancestor.ids == ("A", "B")
+    assert branch is not None
+    assert branch.pairs == (("B", "S"), ("A", "S"))
+    assert empty is not None
+    assert empty.ids == ()
+    unknown = BoundLocation(provider, None)
+    assert unknown.select(frozenset()).ids is None
+    assert BoundLocation(provider, ()).select(frozenset()).ids == ()
+
+
+def test_pair_index_lifetime_follows_snapshot_after_failure() -> None:
+    """Indexes must not retain a graph after its owner releases it on failure."""
+    runner = chain_runner([])
+    provider = runner.catalog.provider_registry[Targets.id].contract.reference
+    references = []
+
+    def traverse() -> None:
+        location = BoundLocation(provider, ("X", "Y"), pairs=(("A", "X"),))
+        location.select(frozenset({"X"}))
+        references.append(weakref.ref(vars(location)["_pair_index"]))
+        message = "failed traversal"
+        raise ValueError(message)
+
+    try:
+        traverse()
+    except ValueError as error:
+        traceback.clear_frames(error.__traceback__)
+    gc.collect()
+    assert all(reference() is None for reference in references)

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from functools import cached_property
+from hashlib import sha256
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from lyra.contracts.dependencies import Input
-from lyra.contracts.value_identity import ComputationIdentity, value_key
+from lyra.contracts.value_identity import (
+    ComputationIdentity,
+    check_json_value,
+    value_key,
+)
 from lyra.runtime.planning.graph import ResolvedDependency
 from lyra.runtime.planning.parameters import (
     prepare_parameter_uses,
@@ -30,6 +36,67 @@ if TYPE_CHECKING:
     )
 
 
+class _PairIndex:
+    """Position buckets owned by one immutable correspondence snapshot."""
+
+    def __init__(self, pairs: tuple[tuple[str, str], ...]) -> None:
+        self.forward: dict[str, list[int]] = {}
+        self.reverse: dict[str, list[int]] = {}
+        for position, (source, target) in enumerate(pairs):
+            self.forward.setdefault(source, []).append(position)
+            self.reverse.setdefault(target, []).append(position)
+
+    def matching(
+        self,
+        pairs: tuple[tuple[str, str], ...],
+        ids: frozenset[str],
+        *,
+        reverse: bool = False,
+    ) -> tuple[tuple[str, str], ...]:
+        buckets = self.reverse if reverse else self.forward
+        return tuple(
+            pairs[position]
+            for position in sorted(
+                position for key in ids for position in buckets.get(key, ())
+            )
+        )
+
+
+class _IdentityComponents:
+    """Checked canonical JSON fragments owned by one invocation snapshot."""
+
+    def __init__(self, descriptor: ComputationIdentity, *, per_location: bool) -> None:
+        payload = descriptor.payload
+        self.original_key = value_key(payload)
+        self.partitions: dict[
+            frozenset[str] | None, tuple[tuple[str | None, str], ...]
+        ] = {}
+        payload["computation_scope"] = "per_location" if per_location else "complete"
+        self.parts = tuple(
+            (
+                name,
+                json.dumps(
+                    value, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ),
+            )
+            for name, value in sorted(payload.items())
+            if name != "inputs"
+        )
+
+    def key(self, inputs: dict) -> str:
+        check_json_value(inputs, "identity.inputs")
+        encoded = json.dumps(
+            inputs, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        parts = sorted((*self.parts, ("inputs", encoded)))
+        payload = (
+            "{"
+            + ",".join(json.dumps(name) + ":" + value for name, value in parts)
+            + "}"
+        )
+        return sha256(payload.encode("utf-8")).hexdigest()
+
+
 @dataclass(frozen=True)
 class BoundLocation:
     """Provider identity and selection lineage, independent of acquired records."""
@@ -44,11 +111,34 @@ class BoundLocation:
     source: BoundLocation | None = None
     lineage: object = field(default_factory=object, compare=False)
 
+    def __post_init__(self) -> None:
+        """Own membership containers and capture a strictly checked identity."""
+        if self.ids is not None:
+            object.__setattr__(self, "ids", tuple(self.ids))
+        object.__setattr__(
+            self, "computations", tuple(tuple(item) for item in self.computations)
+        )
+        object.__setattr__(self, "pairs", tuple(tuple(item) for item in self.pairs))
+        # Evaluate at the ownership boundary, before any caller can mutate inputs.
+        _ = self.identity
+
+    @cached_property
+    def _pair_index(self) -> _PairIndex:
+        # Not a dataclass field: replace() cannot carry it into a new snapshot,
+        # and equality, repr and dataclass serialization cannot observe it.
+        return _PairIndex(self.pairs)
+
+    def matching_pairs(
+        self, ids: frozenset[str], *, reverse: bool = False
+    ) -> tuple[tuple[str, str], ...]:
+        """Return snapshot pairs in declaration order for one side's membership."""
+        return self._pair_index.matching(self.pairs, ids, reverse=reverse)
+
     def select(self, ids: frozenset[str]) -> BoundLocation:
         """Return target owners with every incoming source pair."""
         if ids == frozenset(self.ids or ()):
             return self
-        pairs = tuple(pair for pair in self.pairs if pair[1] in ids)
+        pairs = self.matching_pairs(ids, reverse=True)
         sources = {source for source, _ in pairs}
         return replace(
             self,
@@ -72,7 +162,7 @@ class BoundLocation:
             ancestors[current.lineage] = ids
             if current.source is None:
                 break
-            ids = frozenset(a for a, b in current.pairs if b in ids)
+            ids = frozenset(a for a, _ in current.matching_pairs(ids, reverse=True))
             current = current.source
         chain = []
         current = self
@@ -83,7 +173,7 @@ class BoundLocation:
             current = current.source
         selected = current.select(ancestors[current.lineage])
         for hop in reversed(chain):
-            pairs = tuple((a, b) for a, b in hop.pairs if a in (selected.ids or ()))
+            pairs = hop.matching_pairs(frozenset(selected.ids or ()))
             selected = replace(
                 hop.select(frozenset(b for _, b in pairs)),
                 pairs=pairs,
@@ -95,7 +185,7 @@ class BoundLocation:
             )
         return selected
 
-    @property
+    @cached_property
     def identity(self) -> str:
         """Canonical unordered selection, or the operation discovering target IDs."""
         return value_key(
@@ -137,6 +227,14 @@ class BoundInvocation:
 
     report_token: object = field(default_factory=object, compare=False, repr=False)
 
+    def __post_init__(self) -> None:
+        """Detach maps and capture descriptor values before memoizing demand keys."""
+        for name in ("locations", "dependencies", "bindings", "outputs"):
+            object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
+        vars(self)["_identity_components"] = _IdentityComponents(
+            self.descriptor, per_location=self.per_location
+        )
+
     def parameter_values(self) -> dict:
         """Return detached complete values for a handler or inspection."""
         return json.loads(self.effective_json)
@@ -144,6 +242,11 @@ class BoundInvocation:
     def demand(self, groups: frozenset[str] | None = None) -> BoundDemand:
         """Return requested work separate from this use's original binding."""
         return BoundDemand(self, groups)
+
+
+def _identity_components(bound: BoundInvocation) -> _IdentityComponents:
+    # Stored outside dataclass fields so replacements cannot inherit cached state.
+    return cast("_IdentityComponents", vars(bound)["_identity_components"])
 
 
 @dataclass(frozen=True)
@@ -201,25 +304,34 @@ class BoundDemand:
             inputs[name] = dependency.demand(
                 frozenset(selected.ids or ()) if selected is not None else None
             ).reference(bound.outputs[name])
-        return replace(
-            bound.descriptor,
-            inputs=inputs,
-            computation_scope="per_location" if bound.per_location else "complete",
-        ).key
+        return _identity_components(bound).key(inputs)
 
     @property
     def computation_keys(self) -> dict[str | None, str] | None:
         """Applicable keys, or None while partition membership is unknown."""
         bound = self.invocation
-        if not bound.per_location:
-            return {None: self.computation_key()}
-        primary = bound.locations[bound.primary_input or ""]
-        if primary.ids is None:
+        primary = (
+            bound.locations[bound.primary_input or ""] if bound.per_location else None
+        )
+        if primary is not None and primary.ids is None:
             return None
-        groups = self.groups if self.groups is not None else frozenset(primary.ids)
-        return {
-            group: self.computation_key(frozenset({group})) for group in sorted(groups)
-        }
+        groups = (
+            (self.groups if self.groups is not None else frozenset(primary.ids or ()))
+            if bound.per_location and primary is not None
+            else None
+        )
+        memo = _identity_components(bound).partitions
+        if groups not in memo:
+            keys = (
+                {
+                    group: self.computation_key(frozenset({group}))
+                    for group in sorted(groups)
+                }
+                if groups is not None
+                else {None: self.computation_key()}
+            )
+            memo[groups] = tuple(keys.items())
+        return dict(memo[groups])
 
     def reference(self, output: str) -> dict:
         """Return complete producer or independent partition references."""
@@ -241,7 +353,7 @@ class BoundDemand:
         """Use the same logical computations for execution-local memoization."""
         keys = self.computation_keys
         if keys is None:
-            return self.invocation.descriptor.key
+            return _identity_components(self.invocation).original_key
         if not self.invocation.per_location:
             return keys[None]
         return value_key(

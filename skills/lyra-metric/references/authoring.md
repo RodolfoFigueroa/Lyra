@@ -1112,3 +1112,19 @@ Return empty tuples or omit source keys to accept no matches. Raise a domain err
 Provider ID, code revision, and deduplicated origin identities fix membership and record contents. Configuration locates that collection. Change origin identities when external contents change, and provider revisions when acquisition changes affect output.
 
 Unversioned identities also promise fixed contents. Revision labels identify content but do not archive it. Credentials and aliases do not change provider scope; neither do candidate IDs or expressions.
+
+### Inspect retained location inputs
+
+`result.metadata.location_inputs` describes every named root `LocationDependency`.
+`ResultStore.describe_result(result_ref)` returns complete metadata without table or
+report reads. Use `read_location_input(result_ref, input_name)` for an independent
+GeoDataFrame; `RunResult.tables` remains the named metric outputs.
+
+Inputs retain complete logical selections across cached and fresh partitions and
+complete shared references. Correspondences retain immediate source/target pairs
+with target geometry, qualified by the captured provider scopes. They have no metric
+`row_key`. Known empty inputs are available; skipped unresolved inputs are
+`not_materialized` and raise `LocationInputUnavailableError` on read. Availability
+is fixed at publication. Damaged available inputs raise `ResultIntegrityError`
+without acquisition fallback. Retaining records does not change declared cache
+policies. Required input persistence failures prevent successful publication.

@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from shapely.errors import GEOSException
 from sqlalchemy import exc
 
@@ -15,6 +15,11 @@ from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.reports import ExecutionReport, ReportOutput
 from lyra.contracts.results import ResultDescription as PublicResultDescription
 from lyra.contracts.types import JsonObject
+from lyra.runtime.location_inputs import (
+    InputBindings,
+    _input_traversal,
+    _InputTraversal,
+)
 from lyra.runtime.output_selection import OutputSelection, prepare_computation
 from lyra.runtime.pagination import (
     CandidatePage,
@@ -61,6 +66,8 @@ class ResultDescription(BaseModel):
     parameters: JsonObject
     output_names: tuple[str, ...]
     outputs: dict[str, ResultOutput]
+    location_inputs: InputBindings = Field(default_factory=InputBindings)
+    input_computations: tuple[ComputationSelection, ...] = ()
 
     @field_validator("output_names")
     @classmethod
@@ -96,20 +103,9 @@ class ResultDescriptions:
         Returns:
             A distinct opaque reference after a successful commit.
         """
-        self.store.load_registrations()
-        reference = report.result_ref
-        self._check_pair(description, report)
-        with self.store.transaction() as connection:
-            self._assemble(connection, description)
-            connection.execute(
-                self.store.layout.final_results.insert(),
-                {
-                    "result_ref": reference,
-                    "execution_id": report.execution_id,
-                    "report": report.model_dump_json(),
-                    "description": description.model_dump_json(),
-                },
-            )
+        reference, _ = _ResultPublication(self.store).publish_metadata(
+            description, report
+        )
         return reference
 
     @staticmethod
@@ -276,6 +272,74 @@ class ResultDescriptions:
             raise DamagedDataError(msg)
         return row
 
+    def _inputs(
+        self,
+        connection: sa.Connection,
+        description: ResultDescription,
+        inputs: _InputTraversal,
+    ) -> InputBindings:
+        bindings = [description.location_inputs.selected()]
+        for selection in description.input_computations:
+            header = self.store.header(connection, selection.value_key, required=True)
+            counts = header.output_rows
+            groups = selection.groups
+            invalid_groups = groups is not None and (
+                header.output_scope != "location"
+                or counts is None
+                or any(
+                    not isinstance(count, dict) or not set(groups) <= count.keys()
+                    for count in counts.values()
+                )
+            )
+            if header.node_id != description.metric_name or invalid_groups:
+                msg = "Input computation belongs to another metric"
+                raise DamagedDataError(msg)
+            bindings.append(
+                inputs.borrow_bindings(connection, selection.value_key).selected(
+                    selection.groups
+                )
+            )
+        names = tuple(
+            dict.fromkeys(name for binding in bindings for name in binding.names)
+        )
+        references = {
+            name: tuple(
+                dict.fromkeys(
+                    key
+                    for binding in bindings
+                    for key in binding.selections.get(name, ())
+                )
+            )
+            for name in names
+        }
+        result = InputBindings(names=names, selections=references)
+        result.validate_inventory()
+        return result
+
+    def input_bindings(self, reference: str) -> InputBindings:
+        """Load the declared input inventory without outputs or the report body.
+
+        Returns:
+            Complete captured input references.
+        """
+        with (
+            self.store.engine.connect() as connection,
+            _input_traversal(self.store, connection) as inputs,
+        ):
+            return self.input_bindings_connection(connection, reference, inputs)
+
+    def input_bindings_connection(
+        self, connection: sa.Connection, reference: str, inputs: _InputTraversal
+    ) -> InputBindings:
+        """Assemble inputs within an existing private metadata traversal.
+
+        Returns:
+            An independently owned merged inventory.
+        """
+        row = self._description_record(connection, reference)
+        description = ResultDescription.model_validate_json(row["description"])
+        return self._inputs(connection, description, inputs)
+
     def describe(self, reference: str) -> PublicResultDescription:
         """Return complete retained metadata without reading reports or value rows."""
         with self.store.engine.connect() as connection:
@@ -288,7 +352,10 @@ class ResultDescriptions:
                     self._header(
                         connection, description, output, registration, selection
                     )
-            return self.metadata(description, reference, row["execution_id"])
+            with _input_traversal(self.store, connection) as inputs:
+                return self._metadata(
+                    connection, inputs, description, reference, row["execution_id"]
+                )
 
     def metadata(
         self, description: ResultDescription, reference: str, execution_id: str
@@ -298,6 +365,22 @@ class ResultDescriptions:
         Returns:
             A complete description without private selections or local paths.
         """
+        with (
+            self.store.engine.connect() as connection,
+            _input_traversal(self.store, connection) as inputs,
+        ):
+            return self._metadata(
+                connection, inputs, description, reference, execution_id
+            )
+
+    def _metadata(
+        self,
+        connection: sa.Connection,
+        retained: _InputTraversal,
+        description: ResultDescription,
+        reference: str,
+        execution_id: str,
+    ) -> PublicResultDescription:
         outputs = {}
         for name, output in description.outputs.items():
             registration = self._registration(description, name, output)
@@ -308,10 +391,14 @@ class ResultDescriptions:
                 ).model_copy(deep=True),
                 owner_scope=deepcopy(output.owner_scope),
             )
+        inputs = retained.descriptions(
+            connection, self._inputs(connection, description, retained)
+        )
         return PublicResultDescription(
             metric_name=description.metric_name,
             parameters=deepcopy(description.parameters),
             outputs=outputs,
+            location_inputs=inputs,
             result_ref=reference,
             execution_id=execution_id,
         )
@@ -448,3 +535,35 @@ class ResultDescriptions:
                 continue
             outputs[name] = self._selection(connection, description, name).frame()
         return outputs
+
+
+class _ResultPublication(ResultDescriptions):
+    """Private final-result transaction returning owned publication metadata."""
+
+    def publish_metadata(
+        self, description: ResultDescription, report: ExecutionReport
+    ) -> tuple[str, PublicResultDescription]:
+        """Validate once and release the reference and projection after commit.
+
+        Returns:
+            The committed reference and independently owned public description.
+        """
+        self.store.load_registrations()
+        reference = report.result_ref
+        self._check_pair(description, report)
+        with self.store.transaction() as connection:
+            self._assemble(connection, description)
+            with _input_traversal(self.store, connection) as inputs:
+                projection = self._metadata(
+                    connection, inputs, description, reference, report.execution_id
+                )
+            connection.execute(
+                self.store.layout.final_results.insert(),
+                {
+                    "result_ref": reference,
+                    "execution_id": report.execution_id,
+                    "report": report.model_dump_json(),
+                    "description": description.model_dump_json(),
+                },
+            )
+        return reference, projection

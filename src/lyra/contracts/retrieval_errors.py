@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import ConfigDict, TypeAdapter, ValidationError
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from lyra.contracts import errors
 from lyra.contracts.strict import StrictBaseModel
@@ -55,6 +55,18 @@ class ResultErrorPayload(StrictBaseModel):
     message: str
     result_ref: JsonValue
     output_name: str | None
+    input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class LocationInputUnavailableErrorPayload(StrictBaseModel):
+    """An input whose published availability is not materialized."""
+
+    model_config = ConfigDict(strict=True)
+
+    code: Literal["location_input_unavailable"]
+    message: str
+    result_ref: JsonValue
+    input_name: str
 
 
 class ReportErrorPayload(StrictBaseModel):
@@ -75,7 +87,8 @@ class PaginationErrorPayload(StrictBaseModel):
     code: Literal["invalid_pagination"]
     message: str
     result_ref: JsonValue
-    output_name: str
+    output_name: str | None
+    input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     parameter: Literal["cursor", "limit"]
 
 
@@ -87,7 +100,8 @@ class RowTooLargeErrorPayload(StrictBaseModel):
     code: Literal["row_too_large"]
     message: str
     result_ref: JsonValue
-    output_name: str
+    output_name: str | None
+    input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     download_url: str
 
 
@@ -96,6 +110,7 @@ RetrievalErrorPayload = (
     | ReportErrorPayload
     | PaginationErrorPayload
     | RowTooLargeErrorPayload
+    | LocationInputUnavailableErrorPayload
 )
 _PAYLOAD = TypeAdapter(RetrievalErrorPayload)
 
@@ -109,6 +124,15 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
     Raises:
         TypeError: If the exception has no registered transport mapping.
     """
+    if isinstance(error, errors.LocationInputUnavailableError):
+        return LocationInputUnavailableErrorPayload.model_validate(
+            {
+                "code": "location_input_unavailable",
+                "message": "The location input was not materialized for this result.",
+                "result_ref": error.result_ref,
+                "input_name": error.input_name,
+            }
+        )
     if isinstance(error, errors.RowTooLargeError):
         return RowTooLargeErrorPayload.model_validate(
             {
@@ -116,6 +140,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
                 "message": "The next row exceeds the JSON page size limit.",
                 "result_ref": error.result_ref,
                 "output_name": error.output_name,
+                "input_name": error.input_name,
                 "download_url": error.download_url,
             }
         )
@@ -126,6 +151,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
                 "message": "Invalid pagination for this output.",
                 "result_ref": error.result_ref,
                 "output_name": error.output_name,
+                "input_name": error.input_name,
                 "parameter": error.parameter,
             }
         )
@@ -137,6 +163,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
                     "message": message,
                     "result_ref": error.result_ref,
                     "output_name": error.output_name,
+                    "input_name": error.input_name,
                 }
             )
     for code, (error_type, _, message) in _REPORT_ERRORS.items():
@@ -154,6 +181,8 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
 
 def error_status(payload: RetrievalErrorPayload) -> int:
     """Return the HTTP status associated with a validated domain payload."""
+    if isinstance(payload, LocationInputUnavailableErrorPayload):
+        return 409
     if isinstance(payload, PaginationErrorPayload | RowTooLargeErrorPayload):
         return 422
     if isinstance(payload, ResultErrorPayload):
@@ -173,14 +202,30 @@ def decode_error(payload: object, *, status: int) -> errors.ResultAccessError | 
         return None
     if error_status(parsed) != status:
         return None
+    return _decode_validated_error(parsed)
+
+
+def _decode_validated_error(parsed: RetrievalErrorPayload) -> errors.ResultAccessError:
+    if isinstance(parsed, LocationInputUnavailableErrorPayload):
+        return errors.LocationInputUnavailableError(
+            parsed.result_ref, parsed.input_name
+        )
     if isinstance(parsed, RowTooLargeErrorPayload):
         return errors.RowTooLargeError(
-            parsed.result_ref, parsed.output_name, parsed.download_url
+            parsed.result_ref,
+            parsed.output_name,
+            parsed.download_url,
+            input_name=parsed.input_name,
         )
     if isinstance(parsed, PaginationErrorPayload):
         return errors.InvalidPaginationError(
-            parsed.result_ref, parsed.output_name, parsed.parameter
+            parsed.result_ref,
+            parsed.output_name,
+            parsed.parameter,
+            input_name=parsed.input_name,
         )
     if isinstance(parsed, ResultErrorPayload):
-        return _RESULT_ERRORS[parsed.code][0](parsed.result_ref, parsed.output_name)
+        return _RESULT_ERRORS[parsed.code][0](
+            parsed.result_ref, parsed.output_name, input_name=parsed.input_name
+        )
     return _REPORT_ERRORS[parsed.code][0](parsed.execution_id)

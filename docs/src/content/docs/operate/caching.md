@@ -34,6 +34,14 @@ To read data after job expiry, use [read-only `ResultStore` lookup](../../use/re
 
 Retention applies while the store’s schema remains compatible with your Lyra version. Closed alpha doesn’t promise migrations or readers for incompatible stores; you can explicitly reset a development store if needed.
 
+Metric publication commits all newly computed partitions from one successful
+invocation together, including every named output, completion record, and retained
+input binding. If publication fails, none of that invocation's new metric values
+remain. Previously committed partitions and successful dependencies remain reusable.
+Each partition keeps its own computation identity, so overlapping requests can
+reuse individual partitions. Captured inputs can remain stored after a failure;
+they do not mark the failed metric as complete.
+
 ## Update revisions when results change
 
 Update the relevant declaration whenever code or source data changes the output. An [origin](../../plugins/location-providers/#declare-a-provider) identifies an external dataset and its revision. Coordinate these revisions with your plugin authors before [updating the deployment](../updates/):
@@ -43,3 +51,25 @@ Update the relevant declaration whenever code or source data changes the output.
 - Change a provider’s code revision or ID when its records or collection membership change
 
 Changing declared identities changes which stored values a computation can reuse; earlier values remain in the file. Inspect [execution observations](../../use/results/#inspect-execution-provenance) to see whether a handler ran. A node with `cache="off"` executes when invoked, even if its value is retained.
+
+## Budget for retained geographic inputs
+
+Successful results retain the provider records, operation pairs and shared selection
+metadata needed for available named location inputs. Small metric outputs can refer
+to large inputs. Provider values are stored once per qualified identity; shared
+memberships are referenced across partitions, and correspondence tables store pairs
+without copied target geometries. Reads join those pairs to retained target records.
+Generated Arrow streams are not stored artifacts.
+
+These savings do not bound growth. Dense pair sets can exceed either provider's row
+count, and changed revisions or selections add distinct retained data. Initial
+serialization, indexes and write contention add costs. Native input reads require
+memory proportional to the requested selection; descriptions avoid geometry reads,
+and HTTP/MCP rows use bounded SQL-selected pages. See the
+[benchmark guide](https://github.com/RodolfoFigueroa/lyra/blob/main/benchmarks/USAGE.md)
+for measurement scope.
+
+Retention does not authorize execution reuse. Providers with caching disabled still
+acquire records when execution needs them; downstream metric hits can skip acquisition.
+Input inspection uses retained values without acquisition fallback. Save result
+references for [input access after job expiry](../../use/results/#read-retained-location-inputs).

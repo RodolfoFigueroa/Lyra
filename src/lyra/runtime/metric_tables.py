@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from shapely.errors import GEOSException
 from sqlalchemy import exc
 
-from lyra.data.relational import rows_from_validated
+from lyra.data.relational import Cell, rows_from_validated
+from lyra.runtime.location_inputs import InputBindings, LocationInputs
 from lyra.runtime.output_selection import OutputSelection, prepare_computation
 from lyra.runtime.sqlite_schema import Registration
 from lyra.runtime.sqlite_store import DamagedDataError, Header, MissingValueError
@@ -31,69 +32,87 @@ class MetricTables:
 
     def publish(
         self,
-        header: Header,
+        selections: tuple[tuple[Header, tuple[str, ...]], ...],
         outputs: NativeOutputs,
         descriptions: Mapping[str, StorageDescription],
-        partitions: tuple[str, ...] = (),
+        *,
+        location_inputs: Mapping[str, InputBindings],
     ) -> None:
-        """Retain every declared table together, preserving duplicate rows.
+        """Publish one invocation atomically, keeping independently reusable keys.
 
         Raises:
-            ValueError: If names or scope do not match the declared contract.
+            DamagedDataError: If retained bindings differ from the invocation.
         """
-        if not descriptions or outputs.keys() != descriptions.keys():
-            msg = "Expected exactly the declared outputs"
-            raise ValueError(msg)
+        if not selections:
+            return
+        publications = _prepare_publications(
+            selections, outputs, descriptions, location_inputs
+        )
+        first = selections[0][0]
         registrations = tuple(
             Registration.from_description(
-                header.node_id, name, description, output_scope=header.output_scope
+                first.node_id, name, description, output_scope=first.output_scope
             )
             for name, description in descriptions.items()
         )
         self.store.initialize(registrations)
-        batches = {
-            name: rows_from_validated(outputs[name], description)
-            for name, description in descriptions.items()
-        }
-        partitions = tuple(sorted(set(partitions)))
-        counts: dict[str, int | dict[str, int]] = {}
-        for name, rows in batches.items():
-            if header.output_scope == "unpartitioned":
-                counts[name] = len(rows)
-                continue
-            owner = descriptions[name].columns.index("location_id")
-            frequencies = Counter(row[owner] for row in rows)
-            if frequencies.keys() - set(partitions):
-                msg = "Metric owner was not supplied through the primary input"
-                raise ValueError(msg)
-            counts[name] = {group: frequencies[group] for group in partitions}
-        publication = header.model_copy(update={"output_rows": counts})
-        with self.store.publication(publication, partitions) as connection:
-            if connection is None:
-                self.lookup(header, required=True)
-                return
-            for registration in registrations:
-                name = registration.output_name
-                data = self.store.layout.tables[registration.key]
-                rows = batches[name]
-                if rows:
+        with self.store.transaction() as connection:
+            pending = []
+            for publication in publications:
+                header = publication.header.model_copy(update={"output_rows": None})
+                if self._lookup_connection(connection, header) is None:
+                    pending.append(publication)
+                elif (
+                    LocationInputs(self.store).bindings(connection, header.value_key)
+                    != publication.bindings
+                ):
+                    msg = "Retained metric input bindings differ"
+                    raise DamagedDataError(msg)
+            LocationInputs(self.store).validate_bindings(
+                connection, tuple(p.bindings for p in pending)
+            )
+            for publication in pending:
+                header = publication.header
+                connection.execute(self.store.layout.results.insert(), header.record())
+                if publication.partitions:
                     connection.execute(
-                        data.table.insert(),
+                        self.store.layout.partitions.insert(),
                         [
-                            {
-                                data.value_column: header.value_key,
-                                **(
-                                    {data.row_column: index}
-                                    if header.output_scope == "unpartitioned"
-                                    else {}
-                                ),
-                                **dict(
-                                    zip(descriptions[name].columns, row, strict=True)
-                                ),
-                            }
-                            for index, row in enumerate(rows)
+                            {"value_key": header.value_key, "location_id": group}
+                            for group in publication.partitions
                         ],
                     )
+                connection.execute(
+                    self.store.layout.metric_inputs.insert(),
+                    {
+                        "value_key": header.value_key,
+                        "bindings": publication.bindings.model_dump_json(),
+                    },
+                )
+                for registration in registrations:
+                    name = registration.output_name
+                    data = self.store.layout.tables[registration.key]
+                    rows = publication.rows[name]
+                    if rows:
+                        connection.execute(
+                            data.table.insert(),
+                            [
+                                {
+                                    data.value_column: header.value_key,
+                                    **(
+                                        {data.row_column: index}
+                                        if header.output_scope == "unpartitioned"
+                                        else {}
+                                    ),
+                                    **dict(
+                                        zip(
+                                            descriptions[name].columns, row, strict=True
+                                        )
+                                    ),
+                                }
+                                for index, row in enumerate(rows)
+                            ],
+                        )
 
     def lookup(
         self,
@@ -107,32 +126,45 @@ class MetricTables:
 
         Returns:
             Named tables, or None for an optional absent computation.
-
-        Raises:
-            DamagedDataError: If required metadata or rows are damaged.
         """
         self.store.load_registrations()
         with self.store.engine.connect() as connection:
-            try:
-                saved = self.store.header(
-                    connection, header.value_key, required=required
-                )
-            except MissingValueError:
-                return None
-            if saved.model_copy(update={"output_rows": None}) != header:
-                msg = "Metric header differs from required computation"
-                raise DamagedDataError(msg)
-            try:
-                return self.read_connection(connection, saved, output_name, partitions)
-            except (
-                exc.DatabaseError,
-                ValueError,
-                KeyError,
-                TypeError,
-                GEOSException,
-            ) as error:
-                msg = "Damaged metric output data"
-                raise DamagedDataError(msg) from error
+            return self._lookup_connection(
+                connection,
+                header,
+                output_name,
+                required=required,
+                partitions=partitions,
+            )
+
+    def _lookup_connection(
+        self,
+        connection: sa.Connection,
+        header: Header,
+        output_name: str | None = None,
+        *,
+        required: bool = False,
+        partitions: tuple[str, ...] | None = None,
+    ) -> NativeOutputs | None:
+        try:
+            saved = self.store.header(connection, header.value_key, required=required)
+        except MissingValueError:
+            return None
+        if saved.model_copy(update={"output_rows": None}) != header:
+            msg = "Metric header differs from required computation"
+            raise DamagedDataError(msg)
+        LocationInputs(self.store).bindings(connection, header.value_key)
+        try:
+            return self.read_connection(connection, saved, output_name, partitions)
+        except (
+            exc.DatabaseError,
+            ValueError,
+            KeyError,
+            TypeError,
+            GEOSException,
+        ) as error:
+            msg = "Damaged metric output data"
+            raise DamagedDataError(msg) from error
 
     def read_connection(
         self,
@@ -182,3 +214,97 @@ class MetricTables:
             for name, registration in registrations.items()
             if output_name is None or name == output_name
         }
+
+
+@dataclass
+class _MetricPublication:
+    header: Header
+    partitions: tuple[str, ...]
+    rows: dict[str, list[tuple[Cell, ...]]]
+    bindings: InputBindings
+
+
+def _publication_inventory(
+    selections: tuple[tuple[Header, tuple[str, ...]], ...],
+    outputs: NativeOutputs,
+    descriptions: Mapping[str, StorageDescription],
+    location_inputs: Mapping[str, InputBindings],
+) -> tuple[list[_MetricPublication], dict[str, _MetricPublication]]:
+    first = selections[0][0]
+    keys = [header.value_key for header, _ in selections]
+    if not descriptions or outputs.keys() != descriptions.keys():
+        msg = "Expected exactly the declared outputs"
+        raise ValueError(msg)
+    if len(set(keys)) != len(keys) or set(keys) != set(location_inputs):
+        msg = "Incomplete or duplicate metric publication inventory"
+        raise ValueError(msg)
+    publications = []
+    owners = {}
+    for header, groups in selections:
+        partitions = tuple(sorted(set(groups)))
+        if (header.node_id, header.output_scope, header.owner_scope) != (
+            first.node_id,
+            first.output_scope,
+            first.owner_scope,
+        ) or header.target_scope is not None:
+            msg = "Metric publication scopes differ"
+            raise ValueError(msg)
+        if header.output_scope == "unpartitioned" and (
+            partitions or len(selections) != 1
+        ):
+            msg = (
+                "Unpartitioned publication requires one computation without partitions"
+            )
+            raise ValueError(msg)
+        if set(partitions) & owners.keys():
+            msg = "Metric publication partitions overlap"
+            raise ValueError(msg)
+        bindings = location_inputs[header.value_key]
+        if set(bindings.groups) - set(partitions):
+            msg = "Input bindings reference undeclared metric partitions"
+            raise ValueError(msg)
+        publication = _MetricPublication(
+            header, partitions, {name: [] for name in outputs}, bindings
+        )
+        publications.append(publication)
+        owners.update(dict.fromkeys(partitions, publication))
+    return publications, owners
+
+
+def _prepare_publications(
+    selections: tuple[tuple[Header, tuple[str, ...]], ...],
+    outputs: NativeOutputs,
+    descriptions: Mapping[str, StorageDescription],
+    location_inputs: Mapping[str, InputBindings],
+) -> list[_MetricPublication]:
+    publications, owners = _publication_inventory(
+        selections, outputs, descriptions, location_inputs
+    )
+    first = selections[0][0]
+    for name, frame in outputs.items():
+        rows = rows_from_validated(frame, descriptions[name])
+        if first.output_scope == "unpartitioned":
+            publications[0].rows[name] = rows
+        else:
+            owner = descriptions[name].columns.index("location_id")
+            for row in rows:
+                group = str(row[owner])
+                if group not in owners:
+                    msg = "Metric owner was not supplied through the primary input"
+                    raise ValueError(msg)
+                owners[group].rows[name].append(row)
+    for publication in publications:
+        counts = {}
+        for name, rows in publication.rows.items():
+            if first.output_scope == "unpartitioned":
+                counts[name] = len(rows)
+            else:
+                frequencies = dict.fromkeys(publication.partitions, 0)
+                owner = descriptions[name].columns.index("location_id")
+                for row in rows:
+                    frequencies[str(row[owner])] += 1
+                counts[name] = frequencies
+        publication.header = publication.header.model_copy(
+            update={"output_rows": counts}
+        )
+    return publications

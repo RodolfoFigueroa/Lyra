@@ -186,6 +186,55 @@ Integer cells are decimal strings. Geometry cells use well-known text (WKT) in t
 
 See [row iteration and oversized-row recovery](../results/#read-paginated-rows) for an executable loop. If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Use the exception’s authenticated Arrow download URL to retrieve the complete output.
 
+## Read retained location inputs
+
+Read a result’s [location inputs](../spatial-inputs/) to inspect the records used in its calculation. Each available input contains the complete selection, including reused records. Choose its name from `description.location_inputs`; inspecting the description doesn’t load input tables.
+
+For the street maintenance example, install `lyra[client,data]` to read `streets` as a GeoDataFrame. This code reads the input and saves an Arrow IPC copy:
+
+```python {3-4}
+with LyraClient("lyra.example.com", agent_api_key="your_agent_key_here") as client:
+    description = client.results.describe(result_ref)
+    streets = client.results.location_input(result_ref, "streets")
+    client.results.download_location_input(result_ref, "streets", "streets.arrow")
+
+print(streets.geometry)
+```
+
+You can edit the returned GeoDataFrame without changing retained records or later reads, even after closing the client. Its active geometry retains the declared CRS, and nullable columns preserve their types. Known empty inputs return empty frames with their declared schema.
+
+Direct inputs contain unique provider records. Operation-derived inputs contain source-to-target correspondences: `source_location_id`/`location_id` pairs with the target’s attributes and geometry. A target appears once for each source that selects it. Read the source and target provider scopes from `description.location_inputs[input_name]`.
+
+### Inspect input rows
+
+Use `location_input_rows()` to inspect a page with the same [JSON cell encodings as output pages](#iterate-retained-rows). Pass each `next_cursor` unchanged to the same result and input until it is `None`:
+
+```python {2,7-9}
+with LyraClient("lyra.example.com", agent_api_key="your_agent_key_here") as client:
+    page = client.results.location_input_rows(result_ref, "streets")
+    while True:
+        print(page.rows)
+        if page.next_cursor is None:
+            break
+        page = client.results.location_input_rows(
+            result_ref, "streets", cursor=page.next_cursor
+        )
+```
+
+Known empty inputs return an empty page. If a row cannot fit in JSON, use `RowTooLargeError.download_url` to download the complete input as Arrow IPC.
+
+### Download an input
+
+Use `download_location_input(result_ref, input_name, destination)` to save an input without loading a GeoDataFrame. Install `lyra[client]` and pass a string or `Path` destination. The method returns `None`.
+
+Create the destination’s parent directory before downloading. The client replaces an existing file only after the download completes successfully. Failure or cancellation preserves your original file and removes the temporary file; filesystem errors propagate to your code.
+
+Use the same arguments with `await` on `AsyncLyraClient`. Both clients return complete descriptions, automatically downloading metadata when it exceeds the inspection limit.
+
+### Handle unavailable inputs
+
+Check an input’s `availability` in its description before reading it. The value `not_materialized` means execution skipped the input without retaining its complete selection. Reading that input raises `LocationInputUnavailableError` with `result_ref` and `input_name`; it doesn’t acquire data. Other lookup and pagination errors identify the input through `input_name` and set `output_name=None`.
+
 ## Retrieve execution reports
 
 Save `execution_id` from a successful job response to [retrieve its report](../results/#read-an-execution-report), including after job expiry. Choose the method for the response you need:

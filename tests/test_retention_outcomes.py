@@ -18,16 +18,16 @@ from lyra.data.relational import StorageDescription
 from lyra.data.results import NativeOutputs
 from lyra.runtime.execution import ExecutionOutcome, GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.location_inputs import InputBindings, LocationInputs
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.preparation import prepare_execution
-from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk import Dependency, LocationDependency, PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
 from lyra.server import job_store
 from tests.metric_execution_helpers import schema
 from tests.provider_execution_helpers import provider_execution_definitions
-from tests.sqlite_helpers import Database, database
+from tests.sqlite_helpers import Database, database, fail_insert
 
 __all__ = ["database"]
 pytestmark = pytest.mark.usefixtures("database")
@@ -123,33 +123,46 @@ def test_retention_after_failure(
 
     def fail_publish(
         self: MetricTables,
-        header: Header,
+        selections: tuple[tuple[Header, tuple[str, ...]], ...],
         outputs: NativeOutputs,
         descriptions: Mapping[str, StorageDescription],
-        partitions: tuple[str, ...] = (),
+        *,
+        location_inputs: Mapping[str, InputBindings],
     ) -> None:
-        if header.node_id == "consumer":
+        if selections[0][0].node_id == "consumer":
             # Fail the transaction itself, after dependency publication committed.
             database.fail_commit = True
-        return publish(self, header, outputs, descriptions, partitions)
+        return publish(
+            self, selections, outputs, descriptions, location_inputs=location_inputs
+        )
 
     with monkeypatch.context() as patch:
         if fault_name == "publication":
             patch.setattr(MetricTables, "publish", fail_publish)
         if fault_name == "finalization":
-            patch.setattr(
-                ResultDescriptions,
-                "publish",
-                Mock(side_effect=RuntimeError("finalization")),
-            )
+            fail_insert(database, patch, "final_results", RuntimeError("finalization"))
         with pytest.raises(GraphExecutionError):
             run(executor)
     assert executor.provenance is not None
     assert not executor.provenance.execution.succeeded
     assert events.count("setup") == events.count("close") == 1
-    assert {r["node_id"] for r in database.rows["stored_results"]} == (
-        {"source", "consumer"} if fault_name == "finalization" else {"source"}
-    )
+    assert {
+        r["node_id"]
+        for r in database.rows["stored_results"]
+        if r["node_id"] != "target"
+    } == ({"source", "consumer"} if fault_name == "finalization" else {"source"})
+    # Intermediate cached computations retain bindings before becoming a root.
+    assert executor.store is not None
+    retained = LocationInputs(executor.store)
+    with executor.store.engine.connect() as connection:
+        for row in database.rows["stored_results"]:
+            if row["node_id"] == "source":
+                bindings = retained.bindings(connection, row["value_key"])
+                assert bindings.names == ("places",)
+                restored = retained.frame(
+                    connection, bindings.selected().selections["places"]
+                )
+                assert set(restored.location_id) == {"a", "b"}
     fault.clear()
     database.fail_commit = False
     events.clear()
@@ -184,7 +197,11 @@ def test_policy_round_trip_retains_complete_and_partition_values(
         executor = graph(tmp_path, events, [], policy)
         result = run(executor, "source")
         assert bool([e for e in events if isinstance(e, tuple)]) == executes
-        current = {r["value_key"] for r in database.rows["stored_results"]}
+        current = {
+            r["value_key"]
+            for r in database.rows["stored_results"]
+            if r["node_id"] != "target"
+        }
         assert keys <= current
         keys = current
         computations = dict(result.completions[0].computations)
@@ -249,3 +266,39 @@ def test_expired_job_does_not_expire_values(
     assert events == []
     assert result.result_ref != first.result_ref
     assert set(result.outputs["data"].location_id) == {"a", "b"}
+
+
+@pytest.mark.parametrize("policy", ["full", "per_location"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_intermediate_inputs_reused_as_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: CachePolicy,
+    *,
+    failed: bool,
+) -> None:
+    events: list = []
+    producer = graph(tmp_path, events, ["consumer"] if failed else [], policy)
+    if failed:
+        with pytest.raises(GraphExecutionError):
+            run(producer)
+    else:
+        run(producer)
+    events.clear()
+    executor = graph(tmp_path, events, [], policy)
+    with monkeypatch.context() as patch:
+        patch.setattr(LocationInputs, "rows", Mock(side_effect=AssertionError))
+        result = run(executor, "source")
+    assert events == []
+    assert set(result.outputs["data"].location_id) == {"a", "b"}
+    assert executor.store is not None
+    inputs = LocationInputs(executor.store)
+    with executor.store.engine.connect() as connection:
+        for completion in result.completions:
+            for _, key in completion.computations:
+                bindings = inputs.bindings(connection, key)
+                saved = inputs.frame(
+                    connection, bindings.selected().selections["places"]
+                )
+                assert set(saved.location_id) <= {"a", "b"}
+                assert not saved.empty

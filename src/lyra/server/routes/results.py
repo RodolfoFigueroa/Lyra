@@ -104,3 +104,50 @@ async def result_rows(
     except ResultAccessError as error:
         return retrieval_error_response(error)
     return http_json_response(page)
+
+
+@router.get(
+    "/results/{result_ref}/location-inputs/{input_name}/download",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"application/vnd.apache.arrow.stream": {}}}},
+)
+async def download_location_input(
+    result_ref: str, input_name: str, results: ResultServiceDependency
+) -> TableResponse:
+    """Return a retained location input as a generated Arrow stream."""
+    return TableResponse(results.stream_location_input(result_ref, input_name))
+
+
+@router.get(
+    "/results/{result_ref}/location-inputs/{input_name}/rows",
+    response_model=ResultRowPage,
+)
+async def location_input_rows(
+    result_ref: str,
+    input_name: str,
+    results: ResultServiceDependency,
+    config: ConfigDependency,
+    query: Annotated[RowQuery, Query()],
+) -> JSONResponse:
+    """Return bounded retained input rows with shared domain errors.
+
+    Raises:
+        InvalidPaginationError: Converted to the shared domain response.
+    """
+    try:
+        try:
+            parsed_limit = int(query.limit)
+        except ValueError as error:
+            raise InvalidPaginationError(
+                result_ref, None, "limit", input_name=input_name
+            ) from error
+        page = await results.location_input_rows(
+            result_ref,
+            input_name,
+            parsed_limit,
+            query.cursor,
+            context=RowPageContext(config.api.public_base_url, http_response_budget()),
+        )
+    except ResultAccessError as error:
+        return retrieval_error_response(error)
+    return http_json_response(page)

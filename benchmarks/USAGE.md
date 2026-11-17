@@ -46,7 +46,13 @@ uv run asv run -E existing --dry-run --durations all
 
 Both commands measure your current environment without saving results. The duration report includes fixture setup, which prepares each benchmark’s inputs and state.
 
-Budget about one minute for the focused profile. Local baseline `d6576a8` took 7.5 minutes for the full suite and 4.1 minutes for the storage profile. These durations include discovery and fixture setup. Dependency installation takes additional time, and runtime varies by machine.
+Budget about one minute for the focused profile. The full calibrated suite at
+`e3d696f` took 52.63 minutes locally, including discovery and fixture preparation,
+on an AMD Ryzen 9 9950X with Python 3.11.15 and numerical-library threads set to
+one. The earlier suite at `cdf5b38` took 116.05 minutes on the same machine.
+Dependency installation and report publication take additional time, and runtime
+varies by machine. The measured run leaves 67.37 minutes against CI's unchanged
+120-minute job limit; hosted-runner headroom still needs confirmation in CI.
 
 To measure point-location construction, add `--bench 'core.LocationsSuite.*construct'`. Use other `--bench` selectors to investigate individual subsystems.
 
@@ -235,3 +241,132 @@ uv run asv run -E existing --dry-run --durations all \
 These dry runs measure your current checkout without saving results. Follow [Save and compare measurements](#save-and-compare-measurements) to retain samples from a clean checkout. If you export samples from an uncommitted checkout separately, include a source snapshot and environment metadata. Identify them as working-tree measurements rather than measurements of the parent commit.
 
 The partial, hybrid, assembly, and grouped-read memory cases start new measurement histories. Existing grouped-read timings retain their version 2 inputs. Compare the existing cache suites only when their inputs, prepared states, and timing boundaries remain unchanged.
+
+## Measure retained location inputs
+
+The permanent retained-input suite contains 94 cases: 46 timings, 18 process
+memory peaks, and 30 database-file size measurements. Direct fixtures share
+independent references. Dense fixtures map each source to the same 100 targets,
+with full and per-location operation policies and zero independent references.
+Combined fixtures exercise both dense policies with 100 sources and 10,000
+independent references. All providers are deterministic and in process.
+
+| Measurement | Fixtures | Cases |
+| --- | --- | ---: |
+| Cached execution and description | 100/1,000 sources; direct 100/10,000 references and both dense policies | 16 |
+| Cold execution | All four 1,000-source fixtures | 4 |
+| 90%-warm execution | Direct 100/10,000 and both dense 100-source fixtures; direct 1,000/100 | 4 |
+| SQL candidates and encoded 100-row pages | Direct 1,000/10,000 and both dense 1,000-source fixtures | 6 |
+| Complete native and Arrow retrieval | The same three retrieval fixtures | 6 |
+| Provider revision and reference selection invalidation | Direct 100/10,000 and both dense 100-source fixtures; revision changes or one reference is added | 6 |
+| Combined cached and mixed execution | Both policies, 100 sources, 10,000 references | 4 |
+| Peak memory | Three largest retrieval fixtures: cached, description, native, stream; three small representative fixtures: cold, mixed | 18 |
+| Total file bytes and growth | Direct 10,000 references and both dense policies; 100 sources: cold, cached, mixed; 1,000 sources: cold, cached | 30 |
+
+A mixed request starts with 90% of sources already published. Per-location
+operations compute missing partitions; the full policy can invalidate all
+partitions. Cold means an empty application store, with normal SQLite durability
+and operating-system caches.
+
+ASV prepares three cache groups in separate processes: small canonical fixtures,
+large canonical fixtures, and combined fixtures. Each group builds all completed seeds once per run. The small group builds
+90%-warm seeds only for direct/10,000 references and both dense policies; the
+large group builds only the direct/100-reference mixed seed. The combined group
+builds both mixed seeds. Timing, memory, and storage adapters share the group's
+hook. Selecting a group prepares all its fixtures and storage outcomes, even when
+only one dependent benchmark is selected. Small cases never prepare large seeds.
+Cold timing and cold-memory cases have no seed hook.
+
+Every measured sample receives a disposable copy of a closed seed. Completed
+seeds retain their single-publication history; mixed seeds retain their separate
+90%-warm history. Seeds are never reused across runs or revisions. Copying,
+correctness checks, and cleanup are outside timing. Execution measures the whole
+runner call; reads include store opening and closing. SQL candidates consume rows;
+encoded pages additionally construct and serialize the production HTTP response
+without network transport. Arrow streaming consumes and discards every chunk.
+
+Timing uses two independent rounds, one operation per sample, no warmup, and
+one to five samples per round with a two-second budget for additional sampling.
+A slow operation is allowed to finish beyond that budget. Fast operations receive
+more samples automatically as implementations improve. Memory and size metrics
+run once. Other benchmark modules retain their own sampling settings.
+
+Memory is whole-process peak RSS, including imports and lightweight sample setup;
+it excludes seed creation and post-measurement validation. It is not incremental
+allocation. Cold memory includes the actual cold execution. Use the opt-in
+`build_scripts.profile_retained_inputs` harness for CPU, SQL, and Python-allocation
+diagnostics separately from timing.
+
+Storage preparation records both before/after file sizes from one publication per
+fixture and state. Both tracking metrics read those same scalar results; they do
+not rerun publication. Sizes include SQLite indexes and free pages after writer
+connections close. Cold sizes come from the original completed seeds.
+
+```sh
+uv run asv run -E existing --dry-run --durations all \
+  --bench '^(retained_inputs|retained_input_scaling)\.'
+```
+
+`RETAINED_INPUT_BENCH` selects both modules. `RETAINED_INPUT_SCALING_BENCH` selects
+the 39 scaling cases. Select `retained_input_scaling.SmallInputSuite` for a small
+sampling check. The fast selector is unchanged. Use `--quick --dry-run` only for
+execution checks, and normal runs with `--record-samples` from a clean checkpoint
+for saved comparisons. Run without concurrent tests or benchmarks and retain
+setup durations, source revision, environment, and thread settings.
+
+Unchanged scaling cases retain their version 1 inputs and measurement boundaries.
+Small mixed cases use parameter names with their actual 100-source size.
+Complementary cases have distinct identities; compare only matching workloads and
+versions. Historical results remain available, but changed fixture histories and
+memory boundaries do not establish application speedups. Bump versions when
+inputs or measurement boundaries change, including through fixture helpers.
+
+CI continues running the full suite on every push to `main`, with a 120-minute
+timeout. Use a completed full-run duration to assess that budget; timing only one
+module does not establish the full-suite runtime. No wall-clock or size threshold
+is enforced by pytest.
+
+Large cold publication, cached execution, retrieval, and read-memory coverage
+remain intact. Representative small fixtures cover invalidation and most partial
+reuse; the large direct/100-reference case covers reuse across 1,000 partitions.
+Large mixed storage measurements are omitted, avoiding unused mixed seeds.
+`IdentitySuite` prepares its 10- and 1,000-node graphs once through an ASV setup
+cache and selects them outside timing; compilation remains the measured operation.
+
+The calibrated baseline at `cdf5b38cdb3d1dec13831dfe8f3166502014c4bb`
+completed all 396 cases across 88 benchmark functions, including all 100
+retained-input cases. The 46 retained timings recorded between three and 15 raw
+samples each; 35 timings needed only three samples. Each of the three shared
+cache groups ran once: small preparation took 1.37 minutes, large preparation
+16.18 minutes, and combined preparation 1.72 minutes. These costs are included in
+the full-run duration. Raw results, definitions, logs, source snapshots, and
+environment metadata are archived locally under
+`.asv/baselines/cdf5b38cdb3d1dec13831dfe8f3166502014c4bb/`.
+
+The reduced suite at `e3d696f7d3a88fd9fedccf71d1767a27c8ec9f63` completed
+all 390 cases across 90 benchmark functions in 52.63 minutes on the same machine.
+All 94 retained measurements were present and finite. The 46 retained timings
+recorded two to ten raw samples each; 34 timings needed only two samples. All
+three retained cache groups and the identity cache ran once.
+
+| Run cost, minutes | Baseline `cdf5b38` | Reduced suite `e3d696f` |
+| --- | ---: | ---: |
+| Retained measurements, including per-sample setup and cleanup | 76.31 | 22.68 |
+| Small shared seed preparation | 1.37 | 1.29 |
+| Large shared seed preparation | 16.18 | 7.85 |
+| Combined shared seed preparation | 1.72 | 1.68 |
+| Identity measurements, including per-sample setup | 1.61 | 0.05 |
+| Shared identity graph preparation | — | 0.47 |
+| Other measurements, including per-sample setup | 18.83 | 18.58 |
+| Total elapsed, including discovery and orchestration | 116.05 | 52.63 |
+
+The 63.42-minute reduction (54.65%) measures suite cost: smaller representative
+workloads, fewer timing rounds, and less repeated preparation. It does not
+establish an application performance improvement. Compare application timings
+only for matching identities, versions, fixture sizes, prepared states, and
+measurement boundaries; account for the changed sample counts when assessing
+variation. Other workload definitions and sampling settings remain unchanged.
+
+Source snapshots, environment metadata, commands, smoke and full logs, definitions,
+raw samples, setup durations, and the completeness audit are archived locally at
+`.asv/baselines/e3d696f7d3a88fd9fedccf71d1767a27c8ec9f63/`.

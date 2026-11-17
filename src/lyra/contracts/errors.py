@@ -135,14 +135,22 @@ class ResultAccessError(LookupError):
 
 
 class _ResultLookupError(ResultAccessError):
-    """A result lookup failed with its reference and output context."""
+    """A result lookup failed with its reference and optional table context."""
 
-    def __init__(self, result_ref: object, output_name: str | None = None) -> None:
-        """Capture the requested reference and optional output name."""
+    def __init__(
+        self,
+        result_ref: object,
+        output_name: str | None = None,
+        *,
+        input_name: str | None = None,
+    ) -> None:
+        """Capture the requested reference and optional output or input name."""
         self.result_ref = result_ref
         self.output_name = output_name
+        self.input_name = input_name
         super().__init__(
-            f"{type(self).__name__}: {result_ref!r}, output={output_name!r}"
+            f"{type(self).__name__}: {result_ref!r}, "
+            f"output={output_name!r}, input={input_name!r}"
         )
 
 
@@ -151,7 +159,7 @@ class InvalidResultReferenceError(_ResultLookupError):
 
 
 class ResultNotFoundError(_ResultLookupError):
-    """The reference or named output is not retained."""
+    """The reference or named table is not retained."""
 
 
 class ResultIntegrityError(_ResultLookupError):
@@ -159,26 +167,45 @@ class ResultIntegrityError(_ResultLookupError):
 
 
 class InvalidPaginationError(_ResultLookupError):
-    """The cursor or limit is invalid for the requested retained output."""
+    """The cursor or limit is invalid for the requested retained table."""
 
     def __init__(
         self,
         result_ref: object,
-        output_name: str,
+        output_name: str | None,
         parameter: Literal["cursor", "limit"],
+        *,
+        input_name: str | None = None,
     ) -> None:
         """Capture the requested output and invalid pagination parameter."""
         self.parameter = parameter
-        super().__init__(result_ref, output_name)
+        super().__init__(result_ref, output_name, input_name=input_name)
 
 
 class RowTooLargeError(_ResultLookupError):
     """The next complete row exceeds the JSON response budget."""
 
-    def __init__(self, result_ref: object, output_name: str, download_url: str) -> None:
+    def __init__(
+        self,
+        result_ref: object,
+        output_name: str | None,
+        download_url: str,
+        *,
+        input_name: str | None = None,
+    ) -> None:
         """Capture the output and authenticated complete-table fallback."""
         self.download_url = download_url
-        super().__init__(result_ref, output_name)
+        super().__init__(result_ref, output_name, input_name=input_name)
+
+
+class LocationInputUnavailableError(ResultAccessError):
+    """The declared location input was not materialized for this result."""
+
+    def __init__(self, result_ref: object, input_name: str) -> None:
+        """Capture the result and its unavailable root location-input name."""
+        self.result_ref = result_ref
+        self.input_name = input_name
+        super().__init__(f"{type(self).__name__}: {result_ref!r}, input={input_name!r}")
 
 
 class _ReportLookupError(ResultAccessError):

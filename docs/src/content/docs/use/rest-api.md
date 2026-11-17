@@ -176,3 +176,45 @@ Lyra generates the download from saved rows without rerunning the metric. If the
 Each error includes `result_ref` and the requested `output_name`. If generation fails after streaming starts, the download stops; discard the partial file.
 
 Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.
+
+## Read retained location inputs
+
+Use your saved `result_ref` to retrieve the location inputs associated with a completed result. Choose `input_name` from `location_inputs` in the [result description](../results/#read-a-retained-description). Only the requested metric’s declared location inputs appear there; ordinary metric dependencies don’t.
+
+Inspect each input’s schema and `availability` before reading its rows. Its [provider scope](../../concepts/caching/#reuse-tables-across-executions) identifies the dataset and revisions. Correspondences map immediate source records to target records, so their descriptions also identify the source scope.
+
+Descriptions include empty and `not_materialized` inputs without loading their rows. If the description exceeds the inspection limit, Lyra omits it entirely and returns `omitted=["description"]`. Follow the preview’s authenticated `download_url` to retrieve every output and input description.
+
+Send your agent Bearer credential to either GET endpoint, percent-encoding each path segment:
+
+| Read | Endpoint |
+| --- | --- |
+| JSON page | `/results/{result_ref}/location-inputs/{input_name}/rows` |
+| Arrow stream | `/results/{result_ref}/location-inputs/{input_name}/download` |
+
+Successful requests return `200`. For pages, set a positive integer `limit` to change the default of 100 rows. Pass `next_cursor` unchanged as `cursor` with the same result and input until it returns `null`. Continue after short pages when a cursor remains; output-table cursors aren’t valid for input rows.
+
+Lyra returns complete rows within the response size limit. Interpret cells using these encodings:
+
+- **Integers**: decimal strings
+- **Geometry**: well-known text (WKT) in the saved CRS
+- **Missing cells**: `null`
+
+Downloads use `application/vnd.apache.arrow.stream`, preserving the declared schema and CRS even for empty selections. Open the stream with [PyArrow or GeoPandas](#download-a-retained-table). You can retrieve these inputs after job expiry or plugin registration changes while the retained store remains available.
+
+Direct inputs contain unique provider records. Correspondences contain each immediate source/target pair, including repeated targets under different sources. Input rows have no metric `row_key`.
+
+If a request fails, inspect `detail.code`:
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `422` | `invalid_result_reference` | Malformed reference |
+| `404` | `result_not_found` | Missing result or undeclared location input |
+| `409` | `location_input_unavailable` | Lyra didn’t materialize this input for the result |
+| `500` | `result_integrity_error` | Required retained data or relationships are missing or damaged |
+| `422` | `invalid_pagination` | Invalid limit or cursor; see `parameter` |
+| `422` | `row_too_large` | Next row cannot fit; use the Arrow `download_url` |
+
+Each error identifies `result_ref` and `input_name`. Errors also include `output_name=null`, except `location_input_unavailable`, which omits that field. Retrying an unavailable input doesn’t acquire data or change its availability.
+
+For `row_too_large`, fetch `download_url` with your agent Bearer credential to retrieve the complete Arrow stream. The failed page request leaves the cursor at the oversized row. If generation fails after streaming starts, discard the partial download.

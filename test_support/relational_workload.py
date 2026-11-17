@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk.storage_schema import prepare_native
@@ -19,9 +20,21 @@ def write_outputs(
     }
     with SQLiteStore(path / "values.sqlite") as store:
         MetricTables(store).publish(
-            Header(value_key=key, node_id="fixture", output_scope="unpartitioned"),
+            (
+                (
+                    Header(
+                        value_key=key, node_id="fixture", output_scope="unpartitioned"
+                    ),
+                    (),
+                ),
+            ),
             {name: pair[0] for name, pair in prepared.items()},
             {name: pair[1] for name, pair in prepared.items()},
+            location_inputs={
+                Header(
+                    value_key=key, node_id="fixture", output_scope="unpartitioned"
+                ).value_key: InputBindings()
+            },
         )
 
 

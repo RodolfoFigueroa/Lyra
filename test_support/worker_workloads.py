@@ -16,6 +16,7 @@ from lyra.contracts.outputs import OutputMetadata
 from lyra.data.inspection import summarize_outputs
 from lyra.data.results import serialize_outputs
 from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
@@ -138,9 +139,23 @@ def publish_fixture(
             work.plugin.implementation("root").schemas["root"], metadata=metadata
         )
         MetricTables(store).publish(
-            Header(value_key="fixture", node_id="root", output_scope="unpartitioned"),
+            (
+                (
+                    Header(
+                        value_key="fixture",
+                        node_id="root",
+                        output_scope="unpartitioned",
+                    ),
+                    (),
+                ),
+            ),
             {"root": frame(rows)},
             {"root": description},
+            location_inputs={
+                Header(
+                    value_key="fixture", node_id="root", output_scope="unpartitioned"
+                ).value_key: InputBindings()
+            },
         )
         registration = next(iter(store.layout.descriptions.values()))
         return publish_result(

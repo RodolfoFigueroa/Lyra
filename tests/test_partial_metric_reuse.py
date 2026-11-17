@@ -124,7 +124,7 @@ def test_partial_reuse(
         (third, {"b", "c"}),
         (zero, set()),
     ):
-        _assert_result(result, owners - empty_owners)
+        _assert_result(result, owners - empty_owners, owners)
     broken = True
     with pytest.raises(GraphExecutionError):
         run(["b", "d"])
@@ -149,7 +149,7 @@ def _assert_work(
     )
 
 
-def _assert_result(result: RunResult, owners: set[str]) -> None:
+def _assert_result(result: RunResult, owners: set[str], inputs: set[str]) -> None:
     for name in ("a", "b"):
         frame = result.tables[name]
         assert set(zip(frame.location_id, frame.row_key, strict=True)) == {
@@ -159,7 +159,28 @@ def _assert_result(result: RunResult, owners: set[str]) -> None:
         assert owner_scope is not None
         assert owner_scope.provider_id == "target"
     result.metadata.store_path.touch()
+    _assert_inputs(result, inputs)
     with ResultStore.open(result.metadata.store_path) as store:
         restored = store.read_result(result.metadata.result_ref)
     for name in ("a", "b"):
         assert_logical_equal(result.tables[name], restored.tables[name])
+
+
+def _assert_inputs(result: RunResult, owners: set[str]) -> None:
+    if not owners:
+        return
+    with ResultStore.open(result.metadata.store_path) as store:
+        places = store.read_location_input(result.metadata.result_ref, "places")
+        reference = store.read_location_input(result.metadata.result_ref, "reference")
+        assert set(places.location_id) == owners
+        assert set(reference.location_id) == {"a", "b", "c"}
+        assert len(reference) == 3
+        places.loc[:, "location_id"] = "changed"
+        assert (
+            set(
+                store.read_location_input(
+                    result.metadata.result_ref, "places"
+                ).location_id
+            )
+            == owners
+        )

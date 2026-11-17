@@ -173,6 +173,23 @@ class FakeMCPBackend:
         self.observed.append(result_ref)
         raise ResultNotFoundError(result_ref, output_name)
 
+    async def location_input_rows(
+        self,
+        result_ref: str,
+        input_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        del limit, cursor, context
+        self.observed.append(result_ref)
+        raise ResultNotFoundError(result_ref, input_name=input_name)
+
+    async def validate_location_input(self, result_ref: str, input_name: str) -> None:
+        self.observed.append(result_ref)
+        raise ResultNotFoundError(result_ref, input_name=input_name)
+
     async def validate_table(self, result_ref: str, output_name: str) -> None:
         self.observed.append(result_ref)
         raise ResultNotFoundError(result_ref, output_name)
@@ -452,6 +469,8 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
         "lyra_get_metric_dependencies",
         "lyra_download_result",
         "lyra_download_table",
+        "lyra_download_location_input",
+        "lyra_get_location_input_rows",
         "lyra_get_result_rows",
         "lyra_describe_result",
         "lyra_inspect_report",

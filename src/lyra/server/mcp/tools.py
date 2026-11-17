@@ -105,6 +105,22 @@ class LyraMCPBackend(Protocol):
         """Validate a retained output without materializing table values."""
         ...
 
+    async def location_input_rows(
+        self,
+        result_ref: str,
+        input_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        """Return input rows within the active transport envelope budget."""
+        ...
+
+    async def validate_location_input(self, result_ref: str, input_name: str) -> None:
+        """Validate retained input lookup and availability before issuing a link."""
+        ...
+
 
 @dataclass
 class ToolCallError(Exception):
@@ -167,6 +183,26 @@ class InProcessLyraBackend(LyraMCPBackend):
     async def validate_table(self, result_ref: str, output_name: str) -> None:
         await asyncio.to_thread(
             self.runtime().results.validate_table, result_ref, output_name
+        )
+
+    @override
+    async def location_input_rows(
+        self,
+        result_ref: str,
+        input_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        return await self.runtime().results.location_input_rows(
+            result_ref, input_name, limit, cursor, context=context
+        )
+
+    @override
+    async def validate_location_input(self, result_ref: str, input_name: str) -> None:
+        await asyncio.to_thread(
+            self.runtime().results.validate_location_input, result_ref, input_name
         )
 
     @override

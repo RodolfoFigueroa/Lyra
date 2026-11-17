@@ -184,6 +184,86 @@ class ResultService:
         except FileNotFoundError as error:
             raise ResultNotFoundError(result_ref, output_name) from error
 
+    def read_location_input_rows(
+        self,
+        result_ref: str,
+        input_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        """Read an input page with the transport's complete encoded-response budget.
+
+        Returns:
+            Complete encoded rows and the continuation after the last returned row.
+
+        Raises:
+            ResultNotFoundError: If the configured store does not exist yet.
+        """
+        validate_result_reference(result_ref, input_name=input_name)
+        try:
+            with ResultStore.open(self.result_store_path) as store:
+                return RowPageBuilder(
+                    store, context.public_api_base_url, context.budget
+                ).build_location_input(result_ref, input_name, limit, cursor)
+        except FileNotFoundError as error:
+            raise ResultNotFoundError(result_ref, input_name=input_name) from error
+
+    async def location_input_rows(
+        self,
+        result_ref: str,
+        input_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        """Select and encode an input page without blocking the event loop.
+
+        Returns:
+            Complete encoded rows and an optional continuation cursor.
+        """
+        return await asyncio.to_thread(
+            self.read_location_input_rows,
+            result_ref,
+            input_name,
+            limit,
+            cursor,
+            context=context,
+        )
+
+    def validate_location_input(self, result_ref: str, input_name: str) -> None:
+        """Validate input lookup and availability before issuing a download link.
+
+        Raises:
+            ResultNotFoundError: If the configured store does not exist yet.
+        """
+        validate_result_reference(result_ref, input_name=input_name)
+        try:
+            with ResultStore.open(self.result_store_path) as store:
+                store.validate_location_input(result_ref, input_name)
+        except FileNotFoundError as error:
+            raise ResultNotFoundError(result_ref, input_name=input_name) from error
+
+    def stream_location_input(
+        self, result_ref: str, input_name: str
+    ) -> Generator[bytes]:
+        """Yield generated input Arrow bytes, closing the store on every exit.
+
+        Raises:
+            ResultNotFoundError: If the configured store does not exist yet.
+        """
+        validate_result_reference(result_ref, input_name=input_name)
+        try:
+            with (
+                ResultStore.open(self.result_store_path) as store,
+                closing(store.stream_location_input(result_ref, input_name)) as stream,
+            ):
+                yield from stream
+        except FileNotFoundError as error:
+            raise ResultNotFoundError(result_ref, input_name=input_name) from error
+
     def read_description(self, result_ref: str) -> ResultDescription:
         """Return complete retained metadata independently of jobs and plugins.
 
@@ -193,7 +273,7 @@ class ResultService:
         validate_result_reference(result_ref)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                return store.describe(result_ref)
+                return store.describe_result(result_ref)
         except FileNotFoundError as error:
             raise ResultNotFoundError(result_ref) from error
 

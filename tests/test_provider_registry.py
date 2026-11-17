@@ -100,6 +100,10 @@ def test_capture_without_construction_credentials_or_mutable_containers(
     monkeypatch.setattr(declared, "description", "Changed")
     assert captured.scope == ProviderScope(provider_id="tracts", origins=[CENSUS])
     assert captured.description == "Tracts"
+    assert captured.scope.description == "Tracts"
+    scope = captured.declaration.contract.provider_scope
+    assert scope is not None
+    assert scope.description == "Tracts"
     validated = captured.schema.validate(frame())
     assert validated[frame().columns].equals(frame())
     forbidden.assert_not_called()

@@ -400,7 +400,8 @@
         "Retained description preview",
         "Retained report preview",
         "Retained Arrow download",
-        "Retained row pages"
+        "Retained row pages",
+        "Retained location-input request, download fields, and unavailable-input payload"
       ],
       "openQuestions": []
     },
@@ -539,7 +540,8 @@
         "Download a retained table and open it with PyArrow or GeoPandas",
         "Handle unavailable job results",
         "Read retained row pages and recover oversized rows",
-        "Inspect calculation relationships"
+        "Inspect calculation relationships",
+        "Read retained location inputs, download Arrow streams, and handle unavailable inputs"
       ],
       "openQuestions": []
     },
@@ -556,6 +558,7 @@
         "Read retained metadata",
         "Reconnect with durable identifiers and save native tables",
         "Iterate retained rows and recover oversized rows",
+        "Read, page through, and save retained location inputs",
         "Retrieve execution reports",
         "Preview and retrieve results",
         "Use the asynchronous client",
@@ -576,7 +579,8 @@
         "Construct the input",
         "Submit and observe",
         "Retrieve a completed result",
-        "Download a retained table, read its Arrow stream, and handle lookup failures"
+        "Download a retained table, read its Arrow stream, and handle lookup failures",
+        "Read retained location inputs, download Arrow streams, and handle unavailable inputs"
       ],
       "openQuestions": []
     },

@@ -139,7 +139,7 @@ The runner shares resources between location lookups and calculations during a r
 
 ## Reuse results across runs
 
-Lyra automatically saves required final outputs for every successful managed run. It publishes the final description and complete report together in one transaction, so neither becomes available on its own. The default store is `.lyra/results.sqlite3` under the working directory. To choose another file:
+Lyra automatically saves required final outputs and the records, operation pairs, and selection references needed for available root location inputs for every successful managed run. It publishes the final description and complete report together in one transaction, so neither becomes available on its own. The default store is `.lyra/results.sqlite3` under the working directory. To choose another file:
 
 ```python {6}
 from pathlib import Path
@@ -193,3 +193,5 @@ Import `ExecutionPersistenceError` from `lyra.contracts.errors` to handle storag
 Publication failure fails the run even if calculation finished. Complete cache values saved earlier can remain reusable. Lyra retains complete successful reports only; calculation failures keep their existing exception behavior.
 
 Local execution returns results directly to your code. Your application decides whether to retry a failed run.
+
+Read `result.metadata.location_inputs` for captured input descriptions. Use `ResultStore.describe_result()` for metadata without tables or reports, and `read_location_input(result_ref, input_name)` for an explicit native read. [Retained location inputs](../results/#read-retained-location-inputs) describes complete selections across cache hits, known empty inputs, and unavailable skipped work. These rules also apply to `run_development()`. Required input persistence failures prevent successful publication.

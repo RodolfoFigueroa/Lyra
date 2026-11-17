@@ -17,7 +17,7 @@ from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from tests.local_persistence_helpers import definition
-from tests.sqlite_helpers import Database, database
+from tests.sqlite_helpers import Database, database, fail_insert
 
 __all__ = ["database"]
 
@@ -123,11 +123,14 @@ def test_required_publication_failure_closes_store(
         "description": ResultDescriptions,
     }[failure]
     cause = RuntimeError("publication failure")
-    monkeypatch.setattr(
-        writer,
-        "initialize" if failure == "setup" else "publish",
-        Mock(side_effect=cause),
-    )
+    if failure == "description":
+        fail_insert(database, monkeypatch, "final_results", cause)
+    else:
+        monkeypatch.setattr(
+            writer,
+            "initialize" if failure == "setup" else "publish",
+            Mock(side_effect=cause),
+        )
     run = runner.run_development if private else runner.run
     with pytest.raises(ExecutionPersistenceError) as caught:
         run("root")

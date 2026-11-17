@@ -9,6 +9,7 @@ import json
 from typing import Annotated
 
 from pydantic import ConfigDict, Field, field_serializer
+from typing_extensions import override
 
 from lyra.contracts.origins import Origin
 from lyra.contracts.revision_tokens import ImplementationRevision
@@ -21,7 +22,9 @@ class ProviderScope(StrictBaseModel):
 
     Origins are copied into an unordered immutable collection, deduplicated by
     external identity. Their descriptions remain available as metadata; equivalent
-    descriptions need not be unique. None is a stable omitted code revision.
+    descriptions need not be unique. Provider and origin descriptions are retained
+    metadata and do not affect equality, hashing, or execution identity.
+    None is a stable omitted code revision.
     """
 
     model_config = ConfigDict(strict=True, frozen=True)
@@ -29,6 +32,23 @@ class ProviderScope(StrictBaseModel):
     provider_id: Annotated[str, Field(min_length=1)]
     code_revision: ImplementationRevision | None = None
     origins: Annotated[frozenset[Origin], Field(strict=False)] = frozenset()
+    description: str | None = None
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        """Return whether provider identities match, independent of descriptions."""
+        if not isinstance(other, ProviderScope):
+            return NotImplemented
+        return (
+            self.provider_id,
+            self.code_revision,
+            self.origins,
+        ) == (other.provider_id, other.code_revision, other.origins)
+
+    @override
+    def __hash__(self) -> int:
+        """Return a hash of the same identity fields used for equality."""
+        return hash((self.provider_id, self.code_revision, self.origins))
 
     @field_serializer("origins")
     @staticmethod

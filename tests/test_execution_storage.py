@@ -83,7 +83,12 @@ def test_owned_tables_and_captured_completion(
     store = SQLiteStore(tmp_path / "values.sqlite")
     with store.engine.connect() as connection:
         saved_header = store.header(
-            connection, database.rows["stored_results"][0]["value_key"]
+            connection,
+            next(
+                row["value_key"]
+                for row in database.rows["stored_results"]
+                if row["node_id"] == "findings"
+            ),
         )
     assert saved_header.owner_scope == result.metadata.outputs["a"].owner_scope
     assert {row["location_id"] for row in database.rows["stored_partitions"]} == {
@@ -398,13 +403,31 @@ def test_scoped_computation_publication(
     )
     assert len({result.metadata.result_ref for result in results}) == 6
     # Retention must store each computation once, with no assembled value copy.
-    assert len(database.rows["stored_results"]) == 3
-    assert len(database.rows["stored_partitions"]) == (
-        3 if policy == "per_location" else 4
+    assert (
+        len(
+            [
+                row
+                for row in database.rows["stored_results"]
+                if row["node_id"] != "target"
+            ]
+        )
+        == 3
     )
+    metric_keys = {
+        row["value_key"]
+        for row in database.rows["stored_results"]
+        if row["node_id"] == "scoped"
+    }
+    assert len(
+        [
+            row
+            for row in database.rows["stored_partitions"]
+            if row["value_key"] in metric_keys
+        ]
+    ) == (3 if policy == "per_location" else 4)
     assert sum(
         len(rows) for name, rows in database.rows.items() if name.startswith("data_")
-    ) == (2 if empty_partition else 3 if policy == "per_location" else 4)
+    ) == 3 + (2 if empty_partition else 3 if policy == "per_location" else 4)
     del local
     path.touch()  # Existence only; all storage operations use the transaction fake.
     with ResultStore.open(path) as reader:
@@ -501,4 +524,13 @@ def test_scoped_shared_context_and_parameters(
             )
             assert result.tables["a"].value.tolist() == [expected]
     assert len(calls) == 3
-    assert len(database.rows["stored_results"]) == 3
+    assert (
+        len(
+            [
+                row
+                for row in database.rows["stored_results"]
+                if row["node_id"] != "target"
+            ]
+        )
+        == 3
+    )

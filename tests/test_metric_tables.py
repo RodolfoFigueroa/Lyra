@@ -12,6 +12,7 @@ from sqlalchemy.sql.dml import Insert
 
 from lyra.contracts.origins import Origin
 from lyra.contracts.provider_scope import ProviderScope
+from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.sqlite_store import (
     DamagedDataError,
@@ -87,7 +88,12 @@ def test_native_roundtrip(
     layout = describe(schema)
     owned, layout = prepare_native(frame, schema)
     tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
-    tables.publish(header(), {"a": owned, "b": owned}, {"a": layout, "b": layout})
+    tables.publish(
+        ((header(), ()),),
+        {"a": owned, "b": owned},
+        {"a": layout, "b": layout},
+        location_inputs={header().value_key: InputBindings()},
+    )
     expected = owned.copy(deep=True)
     owned["i"] = 99
     restored = tables.lookup(header(), required=True)
@@ -95,7 +101,12 @@ def test_native_roundtrip(
     for value in restored.values():
         pd.testing.assert_frame_equal(value, expected)
     restored["a"]["i"] = 44
-    tables.publish(header(), {"a": owned, "b": owned}, {"a": layout, "b": layout})
+    tables.publish(
+        ((header(), ()),),
+        {"a": owned, "b": owned},
+        {"a": layout, "b": layout},
+        location_inputs={header().value_key: InputBindings()},
+    )
     reopened = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
     saved = reopened.lookup(header(), "a", required=True)
     assert saved is not None
@@ -160,7 +171,10 @@ def test_atomic_outputs(
     database.connection.execute.side_effect = execute
     with pytest.raises(RuntimeError, match="failure"):
         tables.publish(
-            h, {"a": value, "b": value}, {"a": layout, "b": layout}, partitions
+            ((h, partitions),),
+            {"a": value, "b": value},
+            {"a": layout, "b": layout},
+            location_inputs={h.value_key: InputBindings()},
         )
     assert not database.rows.get("stored_partitions")
     assert len(writes) == 2
@@ -170,7 +184,12 @@ def test_atomic_outputs(
     assert tables.lookup(h) is None
     database.fail_commit = False
     database.connection.execute.side_effect = original
-    tables.publish(h, {"a": value, "b": value}, {"a": layout, "b": layout}, partitions)
+    tables.publish(
+        ((h, partitions),),
+        {"a": value, "b": value},
+        {"a": layout, "b": layout},
+        location_inputs={h.value_key: InputBindings()},
+    )
     restored = tables.lookup(h, required=True)
     assert restored is not None
     for name in ("a", "b"):
@@ -190,7 +209,10 @@ def test_exact_output_names(
     tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
     with pytest.raises(ValueError, match="exactly"):
         tables.publish(
-            header(), {name: pd.DataFrame() for name in names}, {"a": layout}
+            ((header(), ()),),
+            {name: pd.DataFrame() for name in names},
+            {"a": layout},
+            location_inputs={header().value_key: InputBindings()},
         )
     assert not database.rows
 
@@ -203,7 +225,12 @@ def test_damaged_required_data(database: Database, tmp_path: Path, damage: str) 
     )
     layout = describe(schema)
     tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
-    tables.publish(header(), {"a": pd.DataFrame({"v": [1]})}, {"a": layout})
+    tables.publish(
+        ((header(), ()),),
+        {"a": pd.DataFrame({"v": [1]})},
+        {"a": layout},
+        location_inputs={header().value_key: InputBindings()},
+    )
     table = next(iter(tables.store.layout.tables.values())).table.name
     if damage == "rows":
         database.rows[table].clear()
@@ -253,16 +280,16 @@ def test_scoped_groups(
     ]
     for h in headers:
         tables.publish(
-            h,
+            ((h, ("a", "b", "empty")),),
             {"one": frame, "two": frame},
             {"one": layout, "two": layout},
-            ("a", "b", "empty"),
+            location_inputs={h.value_key: InputBindings()},
         )
         tables.publish(
-            h,
+            ((h, ("a", "b", "empty")),),
             {"one": frame, "two": frame},
             {"one": layout, "two": layout},
-            ("a", "b", "empty"),
+            location_inputs={h.value_key: InputBindings()},
         )
         selected = tables.lookup(h, partitions=("a", "empty"), required=True)
         assert selected is not None
@@ -285,10 +312,14 @@ def test_scoped_groups(
     if not empty:
         with pytest.raises(ValueError, match="primary"):
             tables.publish(
-                headers[0].model_copy(update={"value_key": "bad"}),
+                ((headers[0].model_copy(update={"value_key": "bad"}), ("a",)),),
                 {"one": frame, "two": frame},
                 {"one": layout, "two": layout},
-                ("a",),
+                location_inputs={
+                    headers[0]
+                    .model_copy(update={"value_key": "bad"})
+                    .value_key: InputBindings()
+                },
             )
     database.rows["stored_partitions"].pop(0)
     with pytest.raises(DamagedDataError):

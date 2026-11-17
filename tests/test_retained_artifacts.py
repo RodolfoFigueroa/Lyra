@@ -7,10 +7,10 @@ from unittest.mock import Mock
 
 import pytest
 from rq.job import JobStatus
+from sqlalchemy.sql.dml import Insert
 
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server import job_store, worker
@@ -75,8 +75,16 @@ def test_required_publication_failure_fails_job_and_closes_store(
     install_definitions(tmp_path, monkeypatch, {"plugin": definition([], cache="off")})
     native = native_job(monkeypatch)
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
-    writer = MetricTables if failure == "value" else ResultDescriptions
-    monkeypatch.setattr(writer, "publish", Mock(side_effect=OSError("full")))
+    execute = database.execute
+    table = "stored_results" if failure == "value" else "final_results"
+
+    def inject(statement: object, parameters: object = None) -> object:
+        if isinstance(statement, Insert) and statement.table.name == table:
+            msg = "full"
+            raise OSError(msg)
+        return execute(statement, parameters)
+
+    database.connection.execute.side_effect = inject
     with pytest.raises(GraphExecutionError, match="full"):
         worker.run_metric_task(envelope.model_dump(mode="json"))
     assert native.meta["failure"]["error"]["type"] == "worker"

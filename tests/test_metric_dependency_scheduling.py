@@ -11,6 +11,7 @@ from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.metric_scope import CachePolicy
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.sqlite_store import Header, SQLiteStore
@@ -207,14 +208,26 @@ def seed_consumer(
     assert executor.store is not None
     # Seed A under the original binding, leaving the other groups missing.
     MetricTables(executor.store).publish(
-        Header(
-            value_key=keys["a"],
-            node_id="comparison",
-            output_scope="location",
-            owner_scope=bound.locations["main"].provider.provider_scope,
+        (
+            (
+                Header(
+                    value_key=keys["a"],
+                    node_id="comparison",
+                    output_scope="location",
+                    owner_scope=bound.locations["main"].provider.provider_scope,
+                ),
+                ("a",),
+            ),
         ),
         {"data": rows({"a"}, value)},
         executor.plugins["metrics"].output_storage("comparison"),
-        ("a",),
+        location_inputs={
+            Header(
+                value_key=keys["a"],
+                node_id="comparison",
+                output_scope="location",
+                owner_scope=bound.locations["main"].provider.provider_scope,
+            ).value_key: InputBindings()
+        },
     )
     return keys
