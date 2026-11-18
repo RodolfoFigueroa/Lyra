@@ -2,11 +2,13 @@
 
 Reviewed on 2026-11-18 at commit `0cc196d`. Lyra was in closed alpha with no existing clients or deployments. The review traced callers through the SDK, local runner, worker, storage, clients, tests, and benchmarks. It included an in-memory Arrow comparison. The test suite and benchmarks were not run, so this ledger makes no measured performance claims.
 
-All entries are **open**. Each heading has a stable identifier. When resolving an entry, record the decision and commit or PR under that heading. Source links point into the working tree. The review commit preserves the evidence after files move or disappear.
+All entries are **open for implementation**. The recommendations in M19–M26 are **accepted**. Each heading has a stable identifier. When resolving an entry, record the implementing commit or PR under that heading. Source links point into the working tree at the line numbers from the corresponding review.
 
 **Suggested order.** Remove the unreachable executor branch and prototype planner first (M01–M02). Move graph tests onto the production compiler (M04) before simplifying provider identity (M05). Of the changes that relax a guarantee, start with producer validation and Arrow conversion (M07–M08).
 
 Among the workflow changes below, GeoParquet export (M17) is the smallest independent cleanup. Metric cache scheduling (M14) has the highest priority before adding another cache policy.
+
+Start the third group with generated job IDs (M19) and on-demand result previews (M20). Both can ship independently of the durable run ID change (M25). Remove per-metric queue routing (M26) alongside the worker catalog cleanup (M23).
 
 ## Dead and stale code
 
@@ -97,6 +99,46 @@ The local result store and the sync and async clients each have two export metho
 ### M18 · Use one catalog pagination path for HTTP and MCP
 
 HTTP passes an offset and limit to discovery. For each page, MCP requests the full public metric list, slices it, and encodes the next offset and catalog fingerprint in a versioned cursor. Give discovery one operation that returns the requested page and total count, and use it from both interfaces. The MCP tool could also expose a plain offset and retire its cursor codec. That would drop automatic rejection when the catalog changes between pages, so a caller could skip or repeat a metric. Sharing page selection is possible with either cursor policy. [HTTP listing](src/lyra/server/routes/metrics.py#L14) · [Discovery pagination](src/lyra/runtime/planning/discovery.py#L70) · [MCP listing](src/lyra/server/mcp/tools.py#L299) · [Cursor codec](src/lyra/server/mcp/tools.py#L432)
+
+## Accepted changes to jobs, results, and worker startup
+
+Reviewed at commit `ef46012`. M19–M22 include isolated checks using the installed queue library, an in-memory store, or the HTTP page encoder. M23–M25 are based on the production callers and storage schema.
+
+### M19 · Use the job ID format Lyra generates
+
+Submission generates a 32-character lowercase hexadecimal UUID. The HTTP router nevertheless reconstructs raw paths and proxy prefixes to support IDs containing slashes, dot segments, and whitespace. The installed RQ validator rejected all 11 unusual IDs in the routing test matrix. Restrict the job ID contract to the generated format and use ordinary FastAPI path routing. Keep coverage for valid IDs, missing jobs, and authorization. This narrows the accepted HTTP and client inputs. [ID generation](src/lyra/server/job_submission.py#L120) · [Custom router](src/lyra/server/routes/job_ids.py#L11) · [Queue lookup](src/lyra/server/job_store.py#L184) · [Test matrix](tests/test_http_job_boundaries.py#L271)
+
+### M20 · Compute result previews only for inspection
+
+In an isolated call, the MCP download tool read the full retained result and computed its table summaries to return a URL. The HTTP full-result endpoint also goes through that preview step before serializing the tables. Use the job metadata lookup for the download handoff and compute previews in the inspection path. Preserve the pending and failed job responses. If a stored table is damaged, the handoff can succeed and the download itself will report the failure. [MCP download handoff](src/lyra/server/mcp/tools.py#L386) · [Job metadata lookup](src/lyra/server/job_store.py#L204) · [Preview computation](src/lyra/server/results.py#L301) · [HTTP full result](src/lyra/server/routes/jobs.py#L151)
+
+### M21 · Reuse the published report and avoid rebuilding output tables at publication
+
+A two-output `LocalRunner` check reconstructed both 17-row DataFrames inside the write transaction and discarded them. It also built the execution report twice for the same result reference. At publication, verify output names, scope, and recorded row counts through the existing selection checks. Return the report used for the committed write to the local caller. Some malformed cells would first be detected when their values are read. [Publication transaction](src/lyra/runtime/result_descriptions.py#L575) · [Frame reconstruction](src/lyra/runtime/result_descriptions.py#L543) · [Selection checks](src/lyra/runtime/output_selection.py#L149) · [Report creation](src/lyra/runtime/execution.py#L1331) · [Local return](src/lyra/runtime/local.py#L298)
+
+### M22 · Measure the finished row page against the byte limit
+
+For a 100-row HTTP page that fit the byte limit, the builder performed 101 size checks. Serializing every growing prefix and then the final page sent 5,150 row entries through the encoder. Use a conservative byte estimate while collecting rows, measure the finished response with the transport encoder, and shorten it if necessary. Pages may contain fewer rows. Preserve the hard byte limit, the cursor after the last returned row, and the download link when one row exceeds the limit. [Page builder](src/lyra/server/result_rows.py#L71) · [HTTP sizing](src/lyra/server/response_budget.py#L61) · [MCP sizing](src/lyra/server/mcp/serialization.py#L28) · [Pagination coverage](tests/test_result_row_pages.py#L82)
+
+### M23 · Load the worker catalog through the application loader
+
+Worker startup repeats plugin loading and catalog compilation. It walks the dependency graph, discards the result, and gives each selected metric the same full implementation map. With one queue per deployment (M26), use `Catalog.load` at worker startup and resolve the requested metric and its dependencies from that catalog. Remove the pool filter and the comparison with the job’s originating queue. Keep the checks that the worker can execute the accepted computation against its live catalog. [Application loader](src/lyra/server/registry.py#L63) · [Worker loader](src/lyra/server/worker.py#L170) · [Execution checks](src/lyra/server/worker.py#L435)
+
+### M24 · Retire the SQLite publication helper used by tests and benchmarks
+
+Only tests and a benchmark call `SQLiteStore.publication()`. It implements conditional insertion and partition bookkeeping, while the metric, provider, and operation writers publish through their own transactions. Move rollback and repeat-publication assertions to those production writers, point the benchmark at a production writer, and remove the unused helper. This keeps the benchmark representative as the writers evolve. [Helper](src/lyra/runtime/sqlite_store.py#L312) · [Foundation test](tests/test_sqlite_foundation.py#L160) · [Benchmark](benchmarks/sqlite_foundation.py#L53) · [Metric writer](src/lyra/runtime/metric_tables.py#L59) · [Provider writer](src/lyra/runtime/provider_records.py#L62) · [Operation writer](src/lyra/runtime/operation_pairs.py#L174)
+
+### M25 · Use one durable run ID for the report and outputs
+
+Lyra allocates an execution ID when an attempt starts and a result reference when it publishes. SQLite stores the report and output description together and enforces a one-to-one relationship between the two identifiers. Use the run ID issued at the start to address either resource after publication. Failed attempts can carry the same kind of ID for diagnostics, and the expiring queue job keeps its own ID. This changes the public API and storage schema. Supporting several independently addressable result sets for one execution would require another identifier. [Execution ID allocation](src/lyra/runtime/report_collection.py#L90) · [Result reference allocation](src/lyra/runtime/execution.py#L1331) · [Storage constraint](src/lyra/runtime/sqlite_schema.py#L215) · [Successful job response](src/lyra/contracts/jobs.py#L309)
+
+### M26 · Use one shared RQ queue per deployment
+
+Lyra picks a queue from the requested metric and submits one job for its whole graph. A dependency assigned to another queue still runs on the worker that picked up the job. The example deployment assigns every metric to `interactive`, with four workers, and reserves two more for `batch`. Those two cannot pick up waiting interactive jobs. [Submission](src/lyra/server/job_submission.py#L125) · [Graph execution test](tests/test_worker_graph_integration.py#L135) · [Example configuration](examples/lyra-deployment/lyra.toml#L44)
+
+Send all jobs to one shared RQ queue and keep worker concurrency configurable. Replace per-metric overrides, queue allowlists, and named pool settings with a single worker configuration. Remove queue assignments from the catalog and its fingerprint, and use one worker service in the example deployment. Update the admin API, CLI, and operator docs directly for the closed alpha. Report queue depth, worker heartbeats, and jobs by status without requiring a queue selector. [Routing configuration](src/lyra/contracts/config.py#L324) · [Catalog fingerprint](src/lyra/server/registry.py#L48) · [Worker concurrency](src/lyra/server/worker_launcher.py#L83) · [Compose services](examples/lyra-deployment/compose.yml#L29) · [Admin queue inspection](src/lyra/server/routes/admin.py#L249)
+
+Sharing capacity means a short job can wait when long jobs occupy every worker. Revisit separate pools if a measured wait-time requirement or a workload that needs dedicated hardware justifies reserving workers.
 
 ## Migration check
 
