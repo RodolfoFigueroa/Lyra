@@ -115,7 +115,9 @@ async def download_location_input(
     result_ref: str, input_name: str, results: ResultServiceDependency
 ) -> TableResponse:
     """Return a retained location input as a generated Arrow stream."""
-    return TableResponse(results.stream_location_input(result_ref, input_name))
+    return TableResponse(
+        results.stream_location_input(result_ref, input_name), verify=True
+    )
 
 
 @router.get(

@@ -191,8 +191,6 @@ def inspect_outputs(observation: JobObservation) -> dict[str, ResultOutputInspec
             name: output.table_schema
             for name, output in observation.retained_result.metadata.outputs.items()
         }
-    elif observation.provenance is not None:
-        declarations = observation.provenance.accepted.plan.output_metadata
     else:
         return {}
     outputs = {}

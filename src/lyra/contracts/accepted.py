@@ -28,7 +28,7 @@ from lyra.contracts.locations import (
 )
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.contracts.revisions import BuildRevision, RevisionPlan
+from lyra.contracts.revisions import BuildRevision, RevisionBinding, RevisionPlan
 from lyra.contracts.value_identity import check_json_value
 
 _REVISION_PLAN_ADAPTER = TypeAdapter(RevisionPlan)
@@ -96,7 +96,7 @@ class PreparedInput:
 
 
 class PreparedExecution(BaseModel):
-    """The sole validated acceptance contract for storage and execution."""
+    """A live catalog's resolved bindings and declarations for execution."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -140,6 +140,15 @@ class PreparedExecution(BaseModel):
         for bindings in result.values():
             bindings.sort(key=lambda item: json.dumps(item, sort_keys=True))
         return result
+
+    def required_scopes(self) -> dict[str, RevisionBinding]:
+        """Return the selected provider identities including intervention targets."""
+        scopes = {item.contract.collection: item for item in self.revisions.bindings}
+        for name, provider in self.intervention_targets.items():
+            scopes[name] = RevisionBinding(
+                provider.contract.reference, provider.contract.data_revision
+            )
+        return scopes
 
     @property
     def output_metadata(self) -> dict[str, OutputMetadata]:
@@ -247,3 +256,54 @@ def _validate_dependency_routes(
         if not route.operations and route.source != route.target:
             message = "Native dependency binding requires identical contracts"
             raise ValueError(message)
+
+
+class WorkerRequest(BaseModel):
+    """Normalized values accepted for execution by the matching worker build."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    request: SubmittedRequest
+    parameters: dict[str, JsonValue]
+    parameter_uses: dict[str, dict[str, JsonValue]]
+    build_revision: BuildRevision | None
+    provider_scopes: dict[str, RevisionBinding]
+    has_parameters: bool
+
+    @classmethod
+    def from_plan(cls, plan: PreparedExecution) -> Self:
+        """Capture request values and all required provider identities.
+
+        Returns:
+            A detached request for the worker.
+        """
+        return cls(
+            request=plan.request,
+            parameters=plan.parameters,
+            parameter_uses=plan.parameter_uses,
+            build_revision=plan.build_revision,
+            provider_scopes=plan.required_scopes(),
+            has_parameters=plan.has_parameters,
+        ).model_copy(deep=True)
+
+    @property
+    def metric(self) -> str:
+        """The public metric selected by the caller."""
+        return self.request.metric
+
+    @model_validator(mode="after")
+    def check_parameters(self) -> Self:
+        """Require consistent effective parameter values.
+
+        Returns:
+            The validated request.
+
+        Raises:
+            ValueError: If the root values differ.
+        """
+        if (
+            self.parameter_uses.get("root") != self.parameters
+            or self.parameters != self.request.parameters
+        ):
+            msg = "Effective root parameters disagree with acceptance"
+            raise ValueError(msg)
+        return self

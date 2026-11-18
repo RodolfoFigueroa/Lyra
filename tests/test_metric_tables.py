@@ -324,3 +324,26 @@ def test_scoped_groups(
     database.rows["stored_partitions"].pop(0)
     with pytest.raises(DamagedDataError):
         tables.lookup(headers[0])
+
+
+@pytest.mark.usefixtures("database")
+def test_logical_names_survive_sqlite_identifier_collisions(tmp_path: Path) -> None:
+    names = ["Height", "height", "VALUE_KEY", "row_INDEX", "_height"]
+    columns = {
+        name: pa.Column("Int64", description=name, metadata={"unit": None})
+        for name in names
+    }
+    frame = pd.DataFrame(
+        {name: pd.array([i], dtype="Int64") for i, name in enumerate(names)}
+    )
+    validated, layout = prepare_native(frame, pa.DataFrameSchema(columns, strict=True))
+    path = tmp_path / "columns.sqlite"
+    MetricTables(SQLiteStore(path)).publish(
+        ((header(), ()),),
+        {"rows": validated},
+        {"rows": layout},
+        location_inputs={header().value_key: InputBindings()},
+    )
+    result = MetricTables(SQLiteStore(path)).lookup(header(), required=True)
+    assert result is not None
+    pd.testing.assert_frame_equal(result["rows"], frame)

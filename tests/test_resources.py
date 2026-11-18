@@ -206,7 +206,9 @@ def test_unused_resources_and_distinct_bindings(tmp_path: Path) -> None:
         {"a": FileIO, "b": FileIO, "unused": FileIO}, {"a": settings, "b": settings}
     )
     with scope.activate():
+        assert FileIO.events == []
         first = scope.get("a")
+        assert FileIO.events == ["setup"]
         assert scope.get("a") is first
         assert scope.get("b") is not first
     assert FileIO.events == ["setup", "setup", "close", "close"]

@@ -12,6 +12,7 @@ from typing_extensions import override
 from lyra.contracts.jobs import JobEnvelope
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import (
@@ -95,7 +96,12 @@ def test_geometry_survives_local_execution_and_queue(
         job_id="geometry", metric="inspect", inputs=caller, catalog=runner.catalog
     )
     restored = JobEnvelope.model_validate_json(envelope.model_dump_json())
-    queued = restored.accepted.plan
+    accepted = restored.accepted.plan
+    queued = prepare_execution(
+        runner.catalog,
+        accepted.request.submission_payload(),
+        normalized_uses=accepted.parameter_uses,
+    )
 
     executor = GraphExecutor(
         runner.catalog,

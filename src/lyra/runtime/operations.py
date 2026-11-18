@@ -7,7 +7,7 @@ from types import MappingProxyType
 import pandas as pd
 
 from lyra.contracts.locations import LocationContractReference, LocationSelection
-from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.outputs import OutputMetadata, forwarding_schema
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.locations import LocationResolver
@@ -136,28 +136,11 @@ def forward_correspondences(
         "source_location_id",
         pd.Series([source for source, _ in pairs], dtype=object),
     )
-    description = target_description.model_copy(deep=True)
-    # Arbitrary producer checks apply to authoritative records, before expansion.
-    description.checks = []
-    description.unique = ["source_location_id", "location_id"]
-    for column in description.columns:
-        column.unique = False
-        column.checks = []
-    description.columns.insert(
-        0,
-        ColumnMetadata(
-            name="source_location_id",
-            dtype="str",
-            unit=None,
-            description="Immediate source location ID",
-            nullable=False,
-        ),
-    )
     return NativeLocationInput(
         frame,
         result.targets.contract,
         source_scope=result.source_scope,
         added_ids=result.targets.added_ids,
-        description=description,
+        description=forwarding_schema(target_description),
         source=result.source,
     )

@@ -187,7 +187,9 @@ class ProviderRecords:
         )
         rows = list(
             connection.execute(
-                sa.select(data.table).where(data.table.c[data.value_column].in_(found))
+                sa.select(*data.logical_columns).where(
+                    data.table.c[data.value_column].in_(found)
+                )
             ).mappings()
         )
         if Counter(row["value_key"] for row in partitions) != Counter(

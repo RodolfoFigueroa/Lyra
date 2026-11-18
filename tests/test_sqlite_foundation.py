@@ -278,3 +278,28 @@ def test_failed_registration_does_not_poison_retry(
 
 
 __all__ = ["database"]
+
+
+def test_case_colliding_logical_names_have_distinct_sqlite_columns() -> None:
+    names = ["VALUE_KEY", "Row_Index", "Height", "height", "_height"]
+    declaration = pa.DataFrameSchema(
+        {
+            name: pa.Column("Int64", description=name, metadata={"unit": None})
+            for name in names
+        },
+        strict=True,
+    )
+    registration = Registration.from_description(
+        "metric", "output", describe(declaration), output_scope="unpartitioned"
+    )
+    data = Layout().register(registration)
+    columns = list(data.table.columns)
+    assert len({column.name.lower() for column in columns}) == len(columns)
+    assert [c.key for c in data.logical_columns] == [
+        data.value_column,
+        *names,
+        data.row_column,
+    ]
+    ddl = str(CreateTable(data.table).compile(dialect=sqlite.dialect()))
+    assert '"VALUE_KEY" INTEGER' in ddl
+    assert '"Row_Index" INTEGER' in ddl

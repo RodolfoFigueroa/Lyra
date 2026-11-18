@@ -385,7 +385,7 @@ The successful download contains the same full JSON object as `GET /jobs/{job_id
 | `result_ref` | Durable reference for the retained final result |
 | `outputs` | Output names mapped to record arrays or GeoJSON FeatureCollections |
 | `output_metadata` | The declarations that describe those outputs |
-| `provenance` | The accepted plan and transient execution observations |
+| `provenance` | The accepted request and transient execution observations |
 
 Empty ordinary outputs are empty arrays. Empty spatial outputs have an empty `features` array. Missing cells become null. Temporal and categorical concepts use the strings or numbers declared by the plugin.
 

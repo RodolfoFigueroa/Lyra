@@ -289,7 +289,7 @@ class InputRows:
         data = self.store.layout.tables[registration.key]
         rows = _read(
             self.connection,
-            sa.select(data.table)
+            sa.select(*data.logical_columns)
             .where(data.table.c[data.value_column].in_(expected))
             .limit(len(expected) + 1),
         )

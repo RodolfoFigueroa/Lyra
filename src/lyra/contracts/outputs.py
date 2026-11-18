@@ -77,3 +77,29 @@ class LocationOutputMetadata(StrictBaseModel):
 
     id_column: str
     output: OutputMetadata
+
+
+def forwarding_schema(target_description: OutputMetadata) -> OutputMetadata:
+    """Describe target records expanded by immediate source and target pair.
+
+    Returns:
+        A detached schema with composite pair identity.
+    """
+    description = target_description.model_copy(deep=True)
+    # Arbitrary producer checks apply to authoritative records, before expansion.
+    description.checks = []
+    description.unique = ["source_location_id", "location_id"]
+    for column in description.columns:
+        column.unique = False
+        column.checks = []
+    description.columns.insert(
+        0,
+        ColumnMetadata(
+            name="source_location_id",
+            dtype="str",
+            unit=None,
+            description="Immediate source location ID",
+            nullable=False,
+        ),
+    )
+    return description

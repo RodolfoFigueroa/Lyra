@@ -224,7 +224,4 @@ def test_rest_result_descriptor_preserves_unit(
         wire["outputs"]["result"]["metadata"]["declaration"]["columns"][0]["unit"]
         == expected
     )
-    assert (
-        provenance.accepted.plan.output_metadata["result"].columns[0].unit == expected
-    )
     TerminalResultOutput.model_validate(wire)

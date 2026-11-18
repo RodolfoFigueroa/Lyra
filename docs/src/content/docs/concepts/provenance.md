@@ -159,6 +159,6 @@ Call `runner.inspect()` to diagnose the latest local attempt. It returns an inde
 
 These diagnostic labels differ from `ExecutionReport` outcomes. Inspection is `None` before a run or after preparation fails. Failures after execution starts can leave observations collected before the error; a new attempt replaces the runner’s diagnostic state.
 
-Remote results and inspections include job-scoped `provenance` describing the accepted plan and available observations. `provenance.execution` can be `null` before execution starts or include partial observations after a failure. Access to these diagnostics depends on [job retention](../lifecycle/#job-access-has-a-retention-period).
+Remote results and inspections include job-scoped `provenance` describing the accepted request and available observations. `provenance.execution` can be `null` before execution starts or include partial observations after a failure. Access to these diagnostics depends on [job retention](../lifecycle/#job-access-has-a-retention-period).
 
 Keep `result.report` to inspect a particular successful local execution. To read a report in another process or after job expiry, use [report lookup](../../use/results/#reopen-a-local-result) with the saved execution ID. Returned reports are ordinary Pydantic models: nested edits cannot change saved state, while field access makes no new copies.

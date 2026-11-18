@@ -12,7 +12,7 @@ import pandera.pandas as pa
 import pytest
 from pydantic import Field, ValidationError
 
-from lyra.contracts.accepted import ExecutionRequest, PreparedExecution
+from lyra.contracts.accepted import ExecutionRequest, PreparedExecution, WorkerRequest
 from lyra.contracts.jobs import AcceptedJob, JobCreateRequest, JobEnvelope
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
@@ -72,7 +72,7 @@ def test_nested_views_and_constructor_inputs_are_owned() -> None:
     raw = {"metric": "root", "parameters": {"options": {"values": [2]}}}
     plan = prepare_execution(catalog, raw)
     accepted = AcceptedJob(
-        plan=plan,
+        plan=WorkerRequest.from_plan(plan),
         plugin=catalog.manifests["fixture"].plugin,
         catalog_fingerprint="test",
         created_at=datetime.now(UTC),
@@ -188,7 +188,9 @@ def test_worker_handoff_rejects_request_cache_revision(revision: str | None) -> 
     envelope = JobEnvelope(
         job_id="job",
         accepted=AcceptedJob(
-            plan=prepare_execution(catalog, {"metric": "root"}),
+            plan=WorkerRequest.from_plan(
+                prepare_execution(catalog, {"metric": "root"})
+            ),
             plugin=catalog.manifests["fixture"].plugin,
             catalog_fingerprint="test",
             created_at=datetime.now(UTC),

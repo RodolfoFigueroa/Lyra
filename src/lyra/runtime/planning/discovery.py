@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 from lyra.contracts import discovery
 from lyra.contracts.dependencies import describe_dependency
 from lyra.contracts.metrics import normalize_metric_search_tokens
+from lyra.contracts.outputs import forwarding_schema
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.graph import parameter_contract
 
@@ -100,18 +101,24 @@ class Discovery:
         """Return a detached public metric description."""
         summary = self._summaries[name]
         node = cast("MetricManifest", self.catalog.graph.nodes[name].node)
+        bindings = {
+            key: value.contract.model_copy(deep=True)
+            for key, value in node.location_inputs.items()
+        }
+        for key, value in node.location_inputs.items():
+            if value.dependency is not None and value.dependency.operation is not None:
+                structure = bindings[key].family.structure
+                structure.output = forwarding_schema(structure.output)
         return discovery.MetricInspection(
             metric=summary.model_copy(deep=True),
             node=name,
             native_inputs={
-                key: value.contract.family.model_copy(deep=True)
-                for key, value in node.location_inputs.items()
+                key: value.family.model_copy(deep=True)
+                for key, value in bindings.items()
             },
             parameters=deepcopy(parameter_contract(node)),
             outputs=deepcopy(node.outputs),
-            bindings=deepcopy(
-                {key: value.contract for key, value in node.location_inputs.items()}
-            ),
+            bindings=bindings,
             accepted_selections={
                 key: [
                     self._contracts[binding.source].model_copy(deep=True)

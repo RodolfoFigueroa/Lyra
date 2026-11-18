@@ -12,9 +12,7 @@ from lyra.contracts.accepted import (
 from lyra.contracts.errors import MetricInputError
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.runtime.planning._execution_plan import (
-    validate_execution_plan,
-)
+from lyra.runtime.planning._execution_plan import validate_execution_plan
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.parameters import prepare_parameter_uses
 from lyra.runtime.planning.provider_preparation import validate_provider_selections
@@ -96,12 +94,15 @@ def _prepare(
             message = f"Input {name!r}: unsupported source provider"
             raise ValueError(message)
         inputs.append(PreparedInput(name, tuple(selection.ids), binding))
-    validate_execution_plan(
-        catalog.graph,
-        node_name,
-        {item.name: item.binding.operations for item in inputs},
-        catalog.dependency_routes,
-    )
+    if normalized_uses is None:
+        # Reject incompatible caller selections at submission. The worker's
+        # executor validates the selected graph when it binds the accepted uses.
+        validate_execution_plan(
+            catalog.graph,
+            node_name,
+            {item.name: item.binding.operations for item in inputs},
+            catalog.dependency_routes,
+        )
     effective = prepare_parameter_uses(
         catalog,
         node_name,

@@ -134,9 +134,10 @@ def test_inline_handoff(
     wire = json.loads(envelope.model_dump_json())
     plan = JobEnvelope.model_validate(wire).accepted.plan
     assert plan.request.submission_payload()["interventions"] == [expected]
-    assert_target_binding(
-        plan, prepare_execution(runtime.catalog.compiled, {"metric": "root"})
-    )
+    bound = plan.provider_scopes["trees"].contract.provider_scope
+    assert bound
+    assert bound.code_revision == Trees.code_revision
+    assert bound.origins == frozenset(Trees.origins)
     native = native_job(monkeypatch)
     native.id = envelope.job_id
     saved = worker.run_metric_task(wire)
@@ -149,19 +150,6 @@ def test_inline_handoff(
     assert pd.isna(restored["count"].iloc[0])
     assert restored["count"].iloc[-1] == 2**63 - 1
     assert restored.geometry.iloc[0] == Point(1.2345678901234567, 2)
-
-
-def assert_target_binding(plan: PreparedExecution, ordinary: PreparedExecution) -> None:
-    target = plan.intervention_targets["trees"]
-    assert target.resource == "survey_resource"
-    scope = target.contract.provider_scope
-    assert scope is not None
-    assert scope.code_revision == Trees.code_revision
-    assert scope.origins == frozenset(Trees.origins)
-    first = plan.request.interventions[0]
-    assert first.addition_schema == target.contract.family.structure.output
-    assert plan.computation_identity == ordinary.computation_identity
-    assert plan.revisions == ordinary.revisions
 
 
 def test_local_and_private_development_capture_native_values() -> None:
@@ -272,7 +260,7 @@ def test_worker_rejects_incompatible_unused_targets_before_execution(
     native_job(monkeypatch).id = envelope.job_id
     with pytest.raises(
         (worker.BoundPlanError, GraphExecutionError),
-        match=r"pinned declaration|implementation|existing_ids|usable",
+        match=r"provider scopes|pinned declaration|implementation|existing_ids|usable",
     ):
         worker.run_metric_task(payload)
     acquire.assert_not_called()

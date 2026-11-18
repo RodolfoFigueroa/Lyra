@@ -1931,10 +1931,6 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
     assert list(payload["outputs"]) == (
         ["result"] if payload["status"] == "succeeded" else []
     )
-    assert (
-        provenance.accepted.plan.output_metadata["result"]
-        == metric.outputs[metric.name]
-    )
 
 
 def test_mcp_parameterless_metric_preserves_input() -> None:
@@ -2270,7 +2266,7 @@ def test_mounted_submission_matches_rest(
             "inputs", {}
         )
         assert plan.request.parameters == plan.parameters
-        assert plan.node == "report"
+        assert plan.metric == "report"
         if scenario in {"defaults", "nested"}:
             assert plan.parameters == {
                 "value": 7,
@@ -2301,7 +2297,7 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
             execution_id="b" * 32,
             job_id="job-1",
             outputs={"result": []},
-            output_metadata=provenance.accepted.plan.output_metadata,
+            output_metadata={"result": OutputMetadata(columns=[])},
             provenance=provenance,
         )
         if status == "succeeded"
@@ -2754,7 +2750,9 @@ def test_official_client_mounted_job_workflow(
                 "outputs": {"report": []},
                 "output_metadata": {
                     name: metadata.model_dump(mode="json")
-                    for name, metadata in envelope.accepted.plan.output_metadata.items()
+                    for name, metadata in runtime.catalog.discovery.inspect(
+                        "report"
+                    ).outputs.items()
                 },
                 "provenance": {"accepted": envelope.accepted.model_dump(mode="json")},
             }

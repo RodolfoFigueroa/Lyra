@@ -20,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from lyra.contracts.accepted import PreparedExecution
+from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.interventions import InterventionSpec
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
@@ -53,7 +53,7 @@ ResultKind = Literal["table", "failed"]
 
 
 class AcceptedJob(BaseModel):
-    """One accepted plan and its submission context."""
+    """Normalized execution request and its submission context."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -63,7 +63,7 @@ class AcceptedJob(BaseModel):
         """Return independent values captured at construction."""
         return deepcopy(value)
 
-    plan: PreparedExecution
+    plan: WorkerRequest
     catalog_fingerprint: str = Field(min_length=1)
     plugin: PluginInfo
     created_at: datetime
@@ -178,12 +178,6 @@ class TableJobResult(StrictBaseModel):
         """
         if self.outputs.keys() != self.output_metadata.keys():
             msg = "output_metadata must describe exactly the named outputs"
-            raise ValueError(msg)
-        if (
-            self.provenance
-            and self.provenance.accepted.plan.output_metadata != self.output_metadata
-        ):
-            msg = "output_metadata must match accepted outputs"
             raise ValueError(msg)
         for value in self.outputs.values():
             if isinstance(value, dict) and (

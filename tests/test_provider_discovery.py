@@ -124,6 +124,14 @@ def test_live_inspection_scope_routes_and_isolation(
         "counties": ["counties", "tracts"],
         "combined": ["combined"],
     }
+    actual = detail.native_inputs["derived"].structure.output
+    assert actual == detail.bindings["derived"].family.structure.output
+    assert actual.columns[0].name == "source_location_id"
+    assert actual.unique == ["source_location_id", "location_id"]
+    assert "source_location_id" not in {
+        c.name
+        for c in detail.providers["counties"].contract.family.structure.output.columns
+    }
     assert detail.computed_inputs["derived"]["operation"] == "aggregate"
     sdk = definition.describe("measure").manifest
     assert set(sdk.request_schema["properties"]) == {"tracts", "counties", "combined"}

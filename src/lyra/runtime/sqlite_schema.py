@@ -1,6 +1,7 @@
 """Offline relational definitions and retained logical schema registrations."""
 
 from dataclasses import dataclass
+from string import ascii_lowercase, ascii_uppercase
 from typing import Literal
 
 import pyarrow as pa
@@ -110,6 +111,25 @@ class Registration(BaseModel):
             units=tuple(c.unit for c in self.columns),
         )
 
+    def forwarded(self) -> "Registration":
+        """Return the logical layout of expanded target records.
+
+        Raises:
+            ValueError: If the provider is missing its public schema.
+        """
+        if self.table_schema is None:
+            msg = "Missing provider table schema"
+            raise ValueError(msg)
+        source = StoredColumn(
+            name="source_location_id", dtype="string", nullable=False, unit=None
+        )
+        return self.model_copy(
+            update={
+                "columns": (source, *self.columns),
+                "table_schema": outputs.forwarding_schema(self.table_schema),
+            }
+        )
+
     def structural_columns(self) -> list[str]:
         """Return structural keys after validating their declared types.
 
@@ -146,6 +166,37 @@ class DataTable:
     table: sa.Table
     value_column: str
     row_column: str
+
+    @property
+    def logical_columns(self) -> tuple[sa.ColumnElement, ...]:
+        """Project physical columns under their original case-sensitive names."""
+        return tuple(c if c.name == c.key else c.label(c.key) for c in self.table.c)
+
+
+def _column_names(names: list[str]) -> tuple[dict[str, str], str, str]:
+    """Allocate unique SQLite identifiers while retaining logical column keys.
+
+    Returns:
+        Physical names and the private value and row identifiers.
+    """
+    fold = str.maketrans(ascii_uppercase, ascii_lowercase)
+    reserved = {name.translate(fold) for name in names}
+
+    def private_name(candidate: str) -> str:
+        while candidate.translate(fold) in reserved:
+            candidate = "_" + candidate
+        reserved.add(candidate.translate(fold))
+        return candidate
+
+    value_column = private_name("value_key")
+    row_column = private_name("row_index")
+    physical = {}
+    used = set()
+    for name in names:
+        folded = name.translate(fold)
+        physical[name] = private_name(name) if folded in used else name
+        used.add(folded)
+    return physical, value_column, row_column
 
 
 class Layout:
@@ -237,12 +288,7 @@ class Layout:
             return self.tables[key]
         names = [column.name for column in registration.columns]
         structural = registration.structural_columns()
-        value_column = "value_key"
-        while value_column in names:
-            value_column = "_" + value_column
-        row_column = "row_index"
-        while row_column in {*names, value_column}:
-            row_column = "_" + row_column
+        physical, value_column, row_column = _column_names(names)
         types = {
             "string": sa.Text,
             "Int64": sa.Integer,
@@ -253,8 +299,9 @@ class Layout:
         columns = [sa.Column(value_column, sa.Text, primary_key=True)]
         columns.extend(
             sa.Column(
-                column.name,
+                physical[column.name],
                 types[column.dtype],
+                key=column.name,
                 nullable=column.nullable,
                 primary_key=column.name in structural,
             )

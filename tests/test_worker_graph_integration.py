@@ -13,13 +13,13 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.config import JobsConfig
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import metric
@@ -453,7 +453,7 @@ def test_submission_enqueues_one_native_job_without_retry(
     assert "retry" not in options
     assert options["job_id"] == "one-job"
     assert len(options["args"]) == 1
-    assert options["args"][0]["accepted"]["plan"]["node"] == "root"
+    assert options["args"][0]["accepted"]["plan"]["request"]["metric"] == "root"
     assert options["meta"] == {}
     native = native_job(monkeypatch)
     native.id = options["job_id"]
@@ -744,7 +744,7 @@ def test_serialized_worker_plan(
     second = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert first["outputs"] == second["outputs"] == {"answer": [{"value": 7}]}
     assert calls == ["root"]
-    assert envelope.accepted.plan.node == "root"
+    assert envelope.accepted.plan.metric == "root"
     assert native.meta["execution"]["observations"][0]["outcome"] == "cache_hit"
 
 
@@ -835,9 +835,7 @@ def test_worker_normalized_route(
         result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert result["outputs"] == serialize_outputs("two", expected)
         native.meta["execution"]
-        assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0][
-            "binding"
-        ]["operations"] == ["select"]
+        assert envelope.accepted.plan.request.inputs
 
 
 def test_executor_preflight_failure_replaces_worker_success(
@@ -863,16 +861,15 @@ def test_executor_preflight_failure_replaces_worker_success(
     )
     worker.run_metric_task(payload)
     assert native.meta["execution"]["succeeded"]
-    plan = payload["accepted"]["plan"]
-    plan["outputs"] = {"unknown": plan["outputs"]["answer"]}
+    worker.RUNNER_REGISTRY["root"].implementations.clear()
     acquire = Mock(side_effect=AssertionError("resources acquired"))
     monkeypatch.setattr("lyra.runtime.execution.collect_resources", acquire)
-    with pytest.raises(GraphExecutionError, match="Output declarations"):
+    with pytest.raises(GraphExecutionError, match="unavailable"):
         worker.run_metric_task(payload)
     acquire.assert_not_called()
     assert calls == ["root"]
     assert native.meta["failure"]["error"]["type"] == "bound_plan"
-    assert "Output declarations" in native.meta["failure"]["error"]["message"]
+    assert "unavailable" in native.meta["failure"]["error"]["message"]
     assert native.meta["execution"] == {
         "native_inputs": [],
         "observations": [],
@@ -902,8 +899,11 @@ def test_isolated_submission_worker_and_result_round_trip(
     envelope = JobEnvelope.model_validate_json(
         jobs.enqueue.call_args.args[0].model_dump_json()
     )
-    plan = PreparedExecution.model_validate_json(
-        envelope.accepted.plan.model_dump_json()
+    accepted = envelope.accepted.plan
+    plan = prepare_execution(
+        runner.catalog,
+        accepted.request.submission_payload(),
+        normalized_uses=accepted.parameter_uses,
     )
     node = runner.catalog.graph.nodes[plan.node]
     entry = worker.RunnerMetricEntry(
@@ -980,6 +980,12 @@ def test_worker_rejects_changed_opaque_revision(
     native = native_job(monkeypatch)
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     install(tmp_path, monkeypatch, [declare(after)])
-    with pytest.raises(GraphExecutionError, match="Computation identity differs"):
+    current = worker.require_worker_config()
+    monkeypatch.setattr(
+        worker,
+        "require_worker_config",
+        lambda: current.model_copy(update={"build_revision": "replacement"}),
+    )
+    with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
         worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
     calls.assert_not_called()

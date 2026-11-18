@@ -1,10 +1,13 @@
 """Input Arrow fidelity, bounded reads, preflight and resource ownership."""
 
 import asyncio
+import json
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from tempfile import TemporaryFile
+from typing import BinaryIO
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -12,6 +15,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 import sqlalchemy as sa
+from starlette.requests import ClientDisconnect
 from starlette.types import Message
 
 from lyra.contracts.errors import (
@@ -20,6 +24,7 @@ from lyra.contracts.errors import (
     RowTooLargeError,
 )
 from lyra.runtime.result_store import ResultStore
+from lyra.server import table_response
 from lyra.server.response_budget import http_response_budget
 from lyra.server.result_rows import RowPageBuilder, RowPageContext
 from lyra.server.results import ResultService
@@ -185,7 +190,7 @@ def test_stream_cleanup(
 def test_input_response_cancellation_joins_reader(
     retained_input: RetainedInput, database: Database, stage: str
 ) -> None:
-    response = TableResponse(retained_input.stream())
+    response = TableResponse(retained_input.stream(), verify=True)
     release = threading.Event()
     database.connection.reset_mock()
     database.engine.reset_mock()
@@ -265,3 +270,100 @@ def test_shared_service_pages_and_missing_store(
         assert caught.value.result_ref == retained.reference
         assert caught.value.input_name == "places"
         assert caught.value.output_name is None
+
+
+@pytest.mark.parametrize(
+    ("damaged", "corruption"), [(0, "missing"), (-1, "missing"), (-1, "wkb")]
+)
+@pytest.mark.parametrize("retained_input", ["large"], indirect=True)
+def test_damaged_record_returns_integrity_error_before_arrow(
+    retained_input: RetainedInput,
+    database: Database,
+    damaged: int,
+    corruption: str,
+) -> None:
+    retained = retained_input
+    data = retained.store.layout.tables[retained.selection.registration.key]
+    if corruption == "missing":
+        database.rows[data.table.name].pop(damaged)
+    else:
+        database.rows[data.table.name][damaged]["geometry"] = b"damaged"
+    events = []
+
+    async def send(message: Message) -> None:
+        events.append(message)
+        await asyncio.sleep(0)
+
+    async def receive() -> Message:
+        await asyncio.Event().wait()
+        return {"type": "http.disconnect"}
+
+    asyncio.run(
+        TableResponse(retained.stream(), verify=True)(
+            {"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send
+        )
+    )
+    assert events[0]["status"] == 500
+    body = json.loads(events[1]["body"])["detail"]
+    assert body["code"] == "result_integrity_error"
+    assert body["input_name"] == "places"
+
+
+@pytest.mark.parametrize("phase", ["preparation", "transmission"])
+def test_verified_download_disconnect_closes_temporary_file(
+    monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    files = []
+    closed = threading.Event()
+    disconnect = threading.Event()
+
+    @contextmanager
+    def temporary_file() -> Generator[BinaryIO]:
+        with TemporaryFile() as staged:
+            files.append(staged)
+            yield staged
+
+    def chunks() -> Generator[bytes]:
+        try:
+            yield b"schema"
+            if phase == "preparation":
+                assert disconnect.wait(timeout=5)
+            yield b"batch"
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(table_response, "TemporaryFile", temporary_file)
+    messages = []
+
+    async def receive() -> Message:
+        if phase == "transmission":
+            await asyncio.Event().wait()
+        await asyncio.sleep(0)
+        disconnect.set()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        await asyncio.sleep(0)
+        messages.append(message["type"])
+        if message["type"] == "http.response.body":
+            message_text = "disconnected"
+            raise OSError(message_text)
+
+    async def run() -> None:
+        response = TableResponse(chunks(), verify=True)
+        with (
+            pytest.raises(ClientDisconnect)
+            if phase == "transmission"
+            else nullcontext()
+        ):
+            await response(
+                {"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send
+            )
+
+    asyncio.run(run())
+    assert closed.is_set()
+    assert all(file.closed for file in files)
+    if phase == "preparation":
+        assert messages == []
+    else:
+        assert "http.response.start" in messages

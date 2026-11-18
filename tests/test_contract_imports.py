@@ -200,7 +200,7 @@ def test_accepted_wire_round_trip_without_execution_dependencies() -> None:
 from copy import deepcopy
 from datetime import UTC, datetime
 from pydantic import TypeAdapter, ValidationError
-from lyra.contracts.accepted import PreparedExecution
+from lyra.contracts.accepted import PreparedExecution, WorkerRequest
 from lyra.contracts.jobs import AcceptedJob, JobCreateRequest, JobEnvelope, JobProgress
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations, InvocationObservation
@@ -213,13 +213,13 @@ from lyra.contracts.observability import LivenessResponse
 plan = PreparedExecution.model_validate_json(PAYLOAD)
 assert PreparedExecution.model_validate_json(plan.model_dump_json()) == plan
 job = JobEnvelope(job_id="job", accepted=AcceptedJob(
-    plan=plan, catalog_fingerprint="catalog",
+    plan=WorkerRequest.from_plan(plan), catalog_fingerprint="catalog",
     plugin=PluginInfo(name="fixture", version="1"), created_at=datetime.now(UTC),
 ))
 restored = JobEnvelope.model_validate_json(job.model_dump_json())
 assert restored == job
 snapshot = restored.model_dump(mode="json")
-view = restored.accepted.plan.outputs
+view = restored.accepted.plan.parameter_uses
 view.clear()
 assert job.model_dump(mode="json") == snapshot
 for mutate in ("revision", "parameters"):

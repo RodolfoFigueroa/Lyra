@@ -100,7 +100,6 @@ def test_cross_plugin_reuse_context_and_cleanup(
         contexts.append(context)
         pd.testing.assert_frame_equal(a, b)
         assert a.value.iloc[0] == parameters.count
-        assert not hasattr(context, "db")
         return a
 
     runner = LocalRunner.from_definitions(

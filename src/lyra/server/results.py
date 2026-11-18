@@ -322,15 +322,11 @@ class ResultService:
             message = "Retained execution differs from job result"
             raise InvalidJobResultError(message)
         provenance = observation.provenance
-        if provenance is not None and (
-            result.metadata.metric_name != provenance.accepted.plan.metric
-            or {
-                name: output.table_schema
-                for name, output in result.metadata.outputs.items()
-            }
-            != provenance.accepted.plan.output_metadata
+        if (
+            provenance is not None
+            and result.metadata.metric_name != provenance.accepted.plan.metric
         ):
-            message = "Retained result differs from accepted outputs"
+            message = "Retained result differs from accepted metric"
             raise InvalidJobResultError(message)
         return replace(observation, retained_result=result, inspection=inspection)
 

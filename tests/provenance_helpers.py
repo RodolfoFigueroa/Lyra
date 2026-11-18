@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from pydantic import Field, JsonValue, create_model
 
+from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.jobs import AcceptedJob, JobRunProvenance
 from lyra.contracts.plugins import MetricManifest, PluginManifest
 from lyra.runtime.planning.preparation import prepare_execution
@@ -40,7 +41,7 @@ def result_provenance(data: dict) -> JobRunProvenance:
     )
     return JobRunProvenance(
         accepted=AcceptedJob(
-            plan=plan,
+            plan=WorkerRequest.from_plan(plan),
             catalog_fingerprint=data.get("catalog_fingerprint", "fixture"),
             plugin=manifest.plugin,
             created_at=data.get("created_at", datetime(2026, 1, 1, tzinfo=UTC)),

@@ -244,9 +244,10 @@ class ResultStore:
             yield InputRows.prepare(self._store, connection, selections)
 
     def validate_location_input(self, result_ref: str, input_name: str) -> None:
-        """Validate lookup, availability and pair completion for a download link."""
-        with self._select_location_input(result_ref, input_name):
-            pass
+        """Verify that every selected batch can be encoded for download."""
+        with closing(self.stream_location_input(result_ref, input_name)) as chunks:
+            for _ in chunks:
+                pass
 
     @contextmanager
     def location_input_page_candidates(

@@ -1,6 +1,8 @@
 """Isolated retained-result fixtures using current native artifact boundaries."""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
@@ -49,6 +51,16 @@ def result_observation(
         if isinstance(result, TableJobResult)
         else None,
         inspection=inspection,
+        retained_result=Mock(
+            metadata=SimpleNamespace(
+                outputs={
+                    k: SimpleNamespace(table_schema=v)
+                    for k, v in result.output_metadata.items()
+                }
+            )
+        )
+        if isinstance(result, TableJobResult)
+        else None,
         provenance=provenance,
         lifetime=lifetime or ResultLifetime(),
     )

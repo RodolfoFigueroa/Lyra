@@ -210,6 +210,8 @@ def selected_value(column: sa.ColumnElement, row: dict) -> object:
         return None
     if isinstance(column, Label):
         expression = column.element
+        if isinstance(expression, sa.Column):
+            return row[expression.key]
         assert isinstance(expression, BinaryExpression)
         assert expression.operator is is_not
         assert isinstance(expression.right, Null)

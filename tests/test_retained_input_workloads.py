@@ -1,5 +1,6 @@
 """Benchmark workloads preserve storage sharing and complete mixed selections."""
 
+import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -7,7 +8,6 @@ import pytest
 
 from lyra.contracts.metric_scope import CachePolicy
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.location_inputs import InputSelection
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.sqlite_schema import Registration
 from test_support.retained_input_workloads import retained_inputs, retained_workload
@@ -49,12 +49,19 @@ def test_shared_membership_and_dense_pairs(
         if name != "final_results"
     } == {name: count for name, count in before.items() if name != "final_results"}
     selections = [
-        InputSelection.model_validate_json(row["description"])
-        for row in database.rows["input_selections"]
+        json.loads(row["description"]) for row in database.rows["input_selections"]
     ]
-    shared = [selection for selection in selections if "r0" in selection.records]
+    # Distinct memberships share the registered schema across partitions.
+    provider_keys = {
+        row["registration_key"] for row in database.rows["storage_registrations"]
+    }
+    for selection in selections:
+        assert selection["registration_key"] in provider_keys
+        assert "registration" not in selection
+        assert "table_schema" not in selection["description"]
+    shared = [selection for selection in selections if "r0" in selection["records"]]
     assert len(shared) == 1
-    assert len(shared[0].records) == 20
+    assert len(shared[0]["records"]) == 20
     registrations = [
         Registration.model_validate_json(row["description"])
         for row in database.rows["storage_registrations"]

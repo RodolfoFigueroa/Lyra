@@ -4,11 +4,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope, TableJobResult
 from lyra.data.results import serialize_outputs
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.preparation import prepare_execution
-from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.results import RunResult
 from lyra.server import worker
@@ -42,7 +42,7 @@ def accepted_envelope(
     return JobEnvelope(
         job_id=job_id,
         accepted=AcceptedJob(
-            plan=plan,
+            plan=WorkerRequest.from_plan(plan),
             catalog_fingerprint="test-catalog",
             plugin=catalog.manifests[entry.distribution].plugin,
             created_at=datetime.now(UTC),
@@ -65,15 +65,19 @@ def run_and_read(task: Callable[..., dict], payload: dict, *args: object) -> dic
     reference = task(payload, *args)
     assert set(reference) == {"result_ref", "execution_id"}
     envelope = JobEnvelope.model_validate(payload)
-    with worker.SQLiteStore(worker.require_worker_config().result_store_path) as store:
-        _, outputs = ResultDescriptions(store).read(reference["result_ref"])
+    retained = read_retained(reference["result_ref"])
     return TableJobResult.model_validate(
         {
             "job_id": envelope.job_id,
             "execution_id": reference["execution_id"],
             "result_ref": reference["result_ref"],
-            "outputs": serialize_outputs(envelope.accepted.plan.node, outputs),
-            "output_metadata": envelope.accepted.plan.output_metadata,
+            "outputs": serialize_outputs(
+                envelope.accepted.plan.metric, retained.tables
+            ),
+            "output_metadata": {
+                name: output.table_schema
+                for name, output in retained.metadata.outputs.items()
+            },
         }
     ).model_dump(mode="json", exclude={"provenance"})
 

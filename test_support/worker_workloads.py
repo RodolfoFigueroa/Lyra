@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
 
+from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.jobs import (
     AcceptedJob,
     JobEnvelope,
@@ -83,7 +84,7 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     plan = prepare_execution(entry.catalog, {"metric": "root"})
     provenance = JobRunProvenance(
         accepted=AcceptedJob(
-            plan=plan,
+            plan=WorkerRequest.from_plan(plan),
             catalog_fingerprint="fixture",
             plugin=plugin.manifest.plugin,
             created_at=datetime(2026, 1, 1, tzinfo=UTC),

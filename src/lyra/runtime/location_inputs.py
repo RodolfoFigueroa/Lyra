@@ -1,5 +1,6 @@
 """Shared immutable selections of retained provider records and operation groups."""
 
+import json
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, cast
 
@@ -167,7 +168,12 @@ class LocationInputs:
             The private reconstruction reference.
         """
         selection = InputSelection.model_validate_json(selection.model_dump_json())
-        self.store.initialize()
+        if (
+            selection.description.kind == "provider"
+            and selection.registration.key not in self.store.layout.descriptions
+        ):
+            self.store.initialize((selection.registration,))
+
         with self.store.transaction() as connection:
             frame_from_rows(
                 self.rows(connection, selection),
@@ -186,7 +192,18 @@ class LocationInputs:
                     table.insert(),
                     {
                         "selection_key": selection.key,
-                        "description": selection.model_dump_json(),
+                        "description": json.dumps(
+                            {
+                                **selection.model_dump(
+                                    mode="json",
+                                    exclude={
+                                        "registration": True,
+                                        "description": {"table_schema"},
+                                    },
+                                ),
+                                "registration_key": selection.registration.key,
+                            }
+                        ),
                     },
                 )
         return selection.key
@@ -216,11 +233,32 @@ class LocationInputs:
         )
         if row is None:
             raise DamagedDataError(key)
-        selection = InputSelection.model_validate_json(row["description"])
+        payload = json.loads(row["description"])
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("description"), dict
+        ):
+            msg = "Invalid retained input selection"
+            raise DamagedDataError(msg)
+        registration_key = payload.pop("registration_key")
+        registration = self._registration(
+            connection,
+            registration_key,
+            derived=payload["description"]["kind"] == "correspondence",
+        )
+        payload["description"]["table_schema"] = registration.table_schema
+        selection = InputSelection.model_validate(
+            {**payload, "registration": registration}
+        )
         if selection.key != key:
             msg = "Retained input selection address differs"
             raise DamagedDataError(msg)
         return selection
+
+    def _registration(
+        self, connection: sa.Connection, key: str, *, derived: bool
+    ) -> Registration:
+        base = self.store.read_registration(connection, key)
+        return base.forwarded() if derived else base
 
     def descriptions(
         self, connection: sa.Connection, bindings: InputBindings
@@ -352,10 +390,12 @@ class _InputTraversal(LocationInputs):
     def __init__(self, store: "SQLiteStore", connection: sa.Connection) -> None:
         super().__init__(store)
         self._connection: sa.Connection | None = connection
+        self._registrations: dict[tuple[str, bool], Registration] = {}
         self._selections: dict[str, InputSelection] = {}
         self._complete_bindings: dict[str, InputBindings] = {}
 
     def clear(self) -> None:
+        self._registrations.clear()
         self._selections.clear()
         self._complete_bindings.clear()
         self._connection = None
@@ -366,6 +406,16 @@ class _InputTraversal(LocationInputs):
                 "Retained metadata traversal is closed or belongs to another connection"
             )
             raise RuntimeError(msg)
+
+    def _registration(
+        self, connection: sa.Connection, key: str, *, derived: bool
+    ) -> Registration:
+        address = (key, derived)
+        if address not in self._registrations:
+            self._registrations[address] = super()._registration(
+                connection, key, derived=derived
+            )
+        return self._registrations[address]
 
     def borrow_selection(self, connection: sa.Connection, key: str) -> InputSelection:
         self._check_connection(connection)

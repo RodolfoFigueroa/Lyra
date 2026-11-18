@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from redis.exceptions import RedisError
 
+from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.job_paths import job_path
 from lyra.contracts.jobs import (
     AcceptedJob,
@@ -82,7 +83,7 @@ def _build_submission_record(
     return JobEnvelope(
         job_id=options["job_id"],
         accepted=AcceptedJob(
-            plan=plan,
+            plan=WorkerRequest.from_plan(plan),
             catalog_fingerprint=catalog.discovery.fingerprint,
             plugin=catalog.compiled.manifests[entry.distribution].plugin,
             created_at=datetime.now(UTC),

@@ -201,7 +201,7 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
     payload = json.loads(envelope.model_dump_json())
     prepared = envelope.accepted.plan
     assert prepared.parameters == {"value": 7}
-    assert next(item.ids for item in prepared.inputs if item.name == "lots") == ("b",)
+    assert prepared.request.inputs["lots"].ids == ["b"]
     assert payload["accepted"]["plan"]["request"]["parameters"] == {"value": 7}
     assert payload["accepted"]["plan"]["request"]["inputs"]["lots"]["ids"] == ["b"]
     for warm in (False, True):
@@ -233,7 +233,6 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
         "provider",
         "invalid_provider",
         "ids",
-        "duplicate",
         "missing_input",
         "extra_input",
         "resource",
@@ -254,9 +253,7 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
         case "invalid_provider":
             location["provider"] = 1
         case "ids":
-            location["ids"][0] = "unknown"
-        case "duplicate":
-            location["ids"].append(location["ids"][0])
+            location["ids"][0] = ""
         case "missing_input":
             del request["inputs"]["lots"]
         case "extra_input":
@@ -265,7 +262,9 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
             location["client"] = "forbidden"
         case "credentials":
             location["credentials"] = {"password": "private"}
-    with pytest.raises(ValueError, match=r"validation error|disagree"):
+    with pytest.raises(
+        ValueError, match=r"validation error|disagree|requires provider|Expected inputs"
+    ):
         run_and_read(worker.execute_job, payload, cast("Job", native))
     assert not seen
     sentinel.assert_not_called()

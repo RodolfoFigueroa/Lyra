@@ -55,7 +55,7 @@ def test_accepted_routes_execute_with_frozen_defaults(
     envelope = JobEnvelope.model_validate_json(
         runtime.jobs.enqueue.call_args.args[0].model_dump_json()
     )
-    assert envelope.accepted.plan.dependency_routes
+    assert envelope.accepted.plan.provider_scopes
     serialized = envelope.model_dump(mode="json")
     payload["parameters"]["weights"].append(-1)
     accepting = False

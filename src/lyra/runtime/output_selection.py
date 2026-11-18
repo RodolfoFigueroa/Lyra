@@ -82,7 +82,9 @@ class ComputationRows:
         Returns:
             A SQL query that never deduplicates visible row values.
         """
-        query = self.select(*self.data.table.c).order_by(*self.keys).limit(limit)
+        query = (
+            self.select(*self.data.logical_columns).order_by(*self.keys).limit(limit)
+        )
         if after is not None:
             query = query.where(
                 sa.or_(

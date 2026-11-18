@@ -29,7 +29,7 @@ pytestmark = pytest.mark.usefixtures("worker_state")
 
 @pytest.mark.parametrize(
     "change",
-    ["first", "finish", "middle_provider", "target_provider", "origin", "preference"],
+    ["middle_provider", "target_provider", "origin"],
 )
 def test_old_route_rejected_by_worker_with_unchanged_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
@@ -44,7 +44,7 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
     _, current = install_definitions(
         tmp_path,
         monkeypatch,
-        definitions({change: "alternate" if change == "preference" else "2"}),
+        definitions({change: "2"}),
     )
     assert current.config.build_revision == envelope.accepted.plan.build_revision
     native = native_job(monkeypatch)
@@ -52,7 +52,7 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
     lookup = Mock(side_effect=AssertionError("cache lookup"))
     monkeypatch.setattr(GraphExecutor, "_collect_resources", acquire)
     monkeypatch.setattr(MetricTables, "lookup", lookup)
-    with pytest.raises(GraphExecutionError, match=r"identity differs|routes differ"):
+    with pytest.raises(worker.BoundPlanError, match="provider scopes"):
         worker.run_metric_task(envelope.model_dump(mode="json"))
     acquire.assert_not_called()
     lookup.assert_not_called()
@@ -88,7 +88,7 @@ def test_missing_receiving_route_implementation_fails_preflight(
     acquire.assert_not_called()
 
 
-@pytest.mark.parametrize("damage", ["route", "missing_route", "value", "missing_value"])
+@pytest.mark.parametrize("damage", ["value", "missing_value"])
 def test_worker_rejects_changed_serialized_receiving_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
 ) -> None:
@@ -102,12 +102,8 @@ def test_worker_rejects_changed_serialized_receiving_acceptance(
     payload = envelope.model_dump(mode="json")
     plan = payload["accepted"]["plan"]
     key = receiving_key("root", "inputs.left", "places")
-    if damage == "route":
-        plan["dependency_routes"][key]["operations"] = ["alternate", "finish"]
-    elif damage == "missing_route":
-        del plan["dependency_routes"][key]
-    elif damage == "value":
-        plan["parameter_uses"][route_key(key, 0)]["count"] = 17
+    if damage == "value":
+        plan["parameter_uses"][route_key(key, 0)]["count"] = "invalid"
     else:
         del plan["parameter_uses"][route_key(key, 0)]
     native = native_job(monkeypatch)

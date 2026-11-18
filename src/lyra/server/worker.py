@@ -12,7 +12,7 @@ from redis.exceptions import RedisError
 from rq import get_current_job
 from rq.job import Job
 
-from lyra.contracts.accepted import PreparedExecution
+from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.config import JobsConfig, LyraConfig
 from lyra.contracts.errors import (
     LocationAcquisitionError,
@@ -422,7 +422,7 @@ class BoundPlanError(ValueError):
     """The worker cannot honor an accepted computation binding."""
 
 
-def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
+def _execute_bound_job(plan: WorkerRequest, native: Job) -> JsonObject:
     """Prepare normalized values against the compatible live worker catalog.
 
     Returns:
@@ -432,7 +432,7 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
         BoundPlanError: If this installation cannot honor the accepted computation.
         RuntimeError: If execution did not publish a terminal result description.
     """
-    entry = RUNNER_REGISTRY.get(plan.node)
+    entry = RUNNER_REGISTRY.get(plan.metric)
     if entry is None or entry.queue != native.origin:
         message = "Accepted metric is unavailable in this worker pool"
         raise BoundPlanError(message)
@@ -444,12 +444,12 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
         )
     except ValueError as exc:
         raise BoundPlanError(str(exc)) from exc
-    plan = plan.model_copy(
-        update={
-            "parameters": live.parameters,
-            "parameter_uses": live.parameter_uses,
-        }
-    )
+    if live.request.interventions != plan.request.interventions:
+        msg = "Intervention differs from its pinned declaration"
+        raise BoundPlanError(msg)
+    if live.required_scopes() != plan.provider_scopes:
+        msg = "Required provider scopes differ from acceptance"
+        raise BoundPlanError(msg)
     report = ReportCollection()
     progress = WorkerProgress(native.id, require_worker_config().jobs)
     with SQLiteStore(require_worker_config().result_store_path) as store:
@@ -462,7 +462,7 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
             retain_result=True,
         )
         try:
-            outcome = executor.execute(plan, report=report)
+            outcome = executor.execute(live, report=report)
             if outcome.result_ref is None:
                 message = "Executor did not retain the terminal result"
                 raise RuntimeError(message)

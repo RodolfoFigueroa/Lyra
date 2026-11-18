@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, ClassVar, cast
 import sqlalchemy as sa
 
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.location_inputs import InputSelection
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server.response_budget import http_json_response, http_response_budget
@@ -351,14 +350,14 @@ class Sample:
             store.engine.connect() as connection,
         ):
             selections = [
-                InputSelection.model_validate_json(row["description"])
+                json.loads(row["description"])
                 for row in connection.execute(
                     sa.select(store.layout.input_selections)
                 ).mappings()
             ]
-        shared = [selection for selection in selections if "r0" in selection.records]
+        shared = [selection for selection in selections if "r0" in selection["records"]]
         assert len(shared) == 1
-        assert set(shared[0].records) == {
+        assert set(shared[0]["records"]) == {
             f"r{i}" for i in range(self.case.fixture.references)
         }
 

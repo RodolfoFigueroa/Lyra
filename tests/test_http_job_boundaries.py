@@ -25,7 +25,12 @@ from lyra.server import job_store
 from lyra.server.job_submission import job_links
 from lyra.server.main import create_app
 from lyra.server.mcp.models import GetJobResultInput, JobIdInput
-from lyra.server.mcp.tools import InProcessLyraBackend, download_result, get_job_result
+from lyra.server.mcp.tools import (
+    InProcessLyraBackend,
+    ToolCallError,
+    download_result,
+    get_job_result,
+)
 from tests.config_helpers import api_credentials, load_test_config
 from tests.retained_job_helpers import retain
 from tests.runtime_helpers import make_runtime
@@ -197,8 +202,8 @@ async def test_lookup_outcomes(
 async def test_encoded_identifier_is_preserved(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, path: str, job_id: str
 ) -> None:
-    fetch = Mock(side_effect=NoSuchJobError)
-    monkeypatch.setattr(job_store.Job, "fetch", fetch)
+    fetch = Mock(return_value=None)
+    monkeypatch.setattr(app.state.runtime.jobs, "_fetch", fetch)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -294,10 +299,10 @@ async def test_opaque_identifier_lookup(
     job.args[0]["job_id"] = job_id
     fetch = Mock(return_value=job)
     if outcome == "missing":
-        fetch.side_effect = NoSuchJobError
+        fetch.return_value = None
     elif outcome == "damaged":
         job.args = ()
-    monkeypatch.setattr(job_store.Job, "fetch", fetch)
+    monkeypatch.setattr(app.state.runtime.jobs, "_fetch", fetch)
     auth = headers(app, path)
     if outcome == "unauthorized":
         auth = {"Authorization": "Bearer wrong"}
@@ -339,6 +344,7 @@ async def test_job_routing_prefixes(
 ) -> None:
     job_id = "plain" if mode == "no_raw_path" else "a/result/download"
     job = stored(app, monkeypatch)
+    monkeypatch.setattr(app.state.runtime.jobs, "_fetch", Mock(return_value=job))
     job.id = job_id
     job.args[0]["job_id"] = job_id
     target = app
@@ -376,6 +382,7 @@ async def test_download_links_reach_retained_job(
     job_id: str,
 ) -> None:
     job = stored(app, monkeypatch)
+    monkeypatch.setattr(app.state.runtime.jobs, "_fetch", Mock(return_value=job))
     job.id = job_id
     job.args[0]["job_id"] = job_id
     backend = InProcessLyraBackend(lambda: app.state.runtime)
@@ -416,6 +423,7 @@ async def test_python_clients_reach_encoded_job(
     asynchronous: bool,
 ) -> None:
     job = stored(app, monkeypatch)
+    monkeypatch.setattr(app.state.runtime.jobs, "_fetch", Mock(return_value=job))
     job.id = job_id
     job.args[0]["job_id"] = job_id
     native_sync, native_async = httpx.Client, httpx.AsyncClient
@@ -462,3 +470,24 @@ async def test_python_clients_reach_encoded_job(
                 assert (await client.results.inspect(job_id)).job_id == job_id
         else:
             await asyncio.to_thread(read_sync)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("job_id", ["a:b", "a/b", " "])
+async def test_native_lookup_preserves_absence_across_transports(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, job_id: str
+) -> None:
+    native = stored(app, monkeypatch)
+    native.id = "a"
+    native.args[0]["job_id"] = "a"
+    backend = InProcessLyraBackend(lambda: app.state.runtime)
+    with pytest.raises(ToolCallError) as error:
+        await get_job_result(GetJobResultInput(job_id=job_id), backend)
+    assert error.value.code == "result_not_found"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get(
+            "/" + endpoints.job_path(job_id), headers=headers(app, PATHS[0])
+        )
+        assert response.status_code == 404

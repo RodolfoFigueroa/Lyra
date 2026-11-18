@@ -7,7 +7,7 @@ import pandas as pd
 import pandera.pandas as pa
 from pydantic import Field, JsonValue
 
-from lyra.contracts.accepted import SubmittedRequest
+from lyra.contracts.accepted import SubmittedRequest, WorkerRequest
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope, JobRunProvenance
 from lyra.contracts.locations import LocationSelection
 from lyra.contracts.plugins import PluginInfo
@@ -142,7 +142,7 @@ def test_job_construction_captures_accepted_metadata() -> None:
     raw = {"metric": "root", "parameters": {"nested": {"tags": ["accepted"]}}}
     plan = prepare_execution(catalog, raw)
     accepted = AcceptedJob(
-        plan=plan,
+        plan=WorkerRequest.from_plan(plan),
         plugin=PluginInfo(name="test", version="1"),
         catalog_fingerprint="catalog",
         created_at=datetime.now(UTC),
@@ -153,12 +153,9 @@ def test_job_construction_captures_accepted_metadata() -> None:
     raw["parameters"].clear()
     plan.parameters.clear()
     accepted.plan.request.parameters.clear()
-    provenance.accepted.plan.outputs.clear()
+    provenance.accepted.plan.parameter_uses.clear()
     assert envelope.model_dump() == expected
     assert envelope.accepted.plan.parameters["nested"] == {"tags": ["accepted"]}
-    outputs = envelope.accepted.plan.output_metadata
-    outputs.clear()
-    assert envelope.accepted.plan.output_metadata
 
 
 def test_accepted_request_owns_nested_constructor_inputs() -> None:

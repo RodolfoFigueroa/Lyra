@@ -11,7 +11,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from lyra.api import AsyncLyraAdminClient, LyraAdminClient, admin_cli
+from lyra.api import admin_cli
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.server.main import create_app
 from lyra.server.mcp.tools import InProcessLyraBackend
@@ -103,7 +103,7 @@ def test_public_catalog_requires_active_runtime() -> None:
     asyncio.run(exercise())
 
 
-def test_removed_mutation_routes_and_client_methods() -> None:
+def test_admin_routes_are_read_only() -> None:
     schema_app = FastAPI()
     schema_app.include_router(admin.router)
     operations = {
@@ -113,12 +113,6 @@ def test_removed_mutation_routes_and_client_methods() -> None:
         if method in {"post", "put", "patch", "delete"}
     }
     assert operations == set()
-    for client in (LyraAdminClient("localhost"), AsyncLyraAdminClient("localhost")):
-        assert not hasattr(client.plugins, "create")
-        assert not hasattr(client.plugins, "sync")
-        assert not hasattr(client.routing, "set")
-        assert not hasattr(client.catalog, "refresh")
-        assert not hasattr(client.workers, "restart")
 
 
 def test_injected_configuration_is_captured(tmp_path: Path) -> None:

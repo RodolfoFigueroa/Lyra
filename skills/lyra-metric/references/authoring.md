@@ -129,7 +129,9 @@ class Parameters(MetricParameters):
     parameter_1: int = Field(
         description="Multiplier applied to each zone's base value."
     )
-    parameter_2: float = Field(description="Offset to add after multiplying the base value.")
+    parameter_2: float = Field(
+        description="Offset to add after multiplying the base value."
+    )
     parameter_3: list[str] = Field(
         description="Category labels included in the calculation."
     )

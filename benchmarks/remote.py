@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
+from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.config import JobsConfig, LyraConfig
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope
 from lyra.server import worker
@@ -47,7 +48,7 @@ class BoundWorkerSuite:
         self.envelope = JobEnvelope(
             job_id=self.native.id,
             accepted=AcceptedJob(
-                plan=self.work.prepared.model_copy(
+                plan=WorkerRequest.from_plan(self.work.prepared).model_copy(
                     update={"build_revision": "benchmark-build"}
                 ),
                 catalog_fingerprint="benchmark",

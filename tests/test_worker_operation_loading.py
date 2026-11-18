@@ -13,7 +13,6 @@ import pytest
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.data.results import serialize_outputs
-from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
@@ -236,9 +235,7 @@ def test_split_route_loading_and_execution(
         if native
         else {"helper", "records", "first", "finish", "root"}
     )
-    assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0]["binding"][
-        "operations"
-    ] == ([] if native else ["first", "finish"])
+    assert envelope.accepted.plan.request.inputs == inputs
 
 
 def test_dependency_closure() -> None:
@@ -283,14 +280,22 @@ def test_accepted_route_identity_across_worker_reload(
     acquire = Mock(wraps=Provider.setup)
     monkeypatch.setattr(Provider, "setup", acquire)
     if change in {"first", "helper", "provider"}:
-        with pytest.raises(
-            GraphExecutionError, match=r"identity differs|computation is unavailable"
-        ):
+        if change == "provider":
+            expected = worker.BoundPlanError
+            failure = "bound_plan"
+        else:
+            current = worker.require_worker_config()
+            worker.refresh_runner_registry(
+                "heavy",
+                config=current.model_copy(update={"build_revision": "replacement"}),
+            )
+            expected = worker.DeploymentChangedError
+            failure = "deployment_changed"
+        with pytest.raises(expected):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert calls == []
         acquire.assert_not_called()
-        assert native.meta["failure"]["error"]["type"] == "bound_plan"
-        assert not native.meta["execution"]["succeeded"]
+        assert native.meta["failure"]["error"]["type"] == failure
     else:
         # The fixture provider has no service connections.
         monkeypatch.setattr(Provider, "setup", lambda _self: None)

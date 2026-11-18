@@ -230,3 +230,11 @@ def test_corrupt_serialized_success_is_integrity_failure(
     with pytest.raises(InvalidJobResultError) as caught:
         getattr(service.jobs, entry)("job")
     assert caught.value.__cause__ is cause
+
+
+@pytest.mark.parametrize("job_id", ["a/b", " ", "a:b", "雪"])
+def test_unrepresentable_rq_job_is_absent_without_alias_lookup(job_id: str) -> None:
+    connection = Mock(spec=[])
+    store = JobStore(connection, JobsConfig())
+    assert store.read_job(job_id) is None
+    assert store.read_status(job_id) is None

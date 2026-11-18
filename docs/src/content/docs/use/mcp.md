@@ -95,7 +95,7 @@ Call `lyra_download_result` with only `job_id`. Read the download instructions f
 
 The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. The inspection’s `download` field is a relative path to the complete result. Use `lyra_download_result` for an absolute URL and authentication instructions.
 
-Use the result’s `metric` field to identify the requested calculation. Inspect the downloaded result’s [provenance](../results/#inspect-execution-provenance) to compare the accepted plan with execution observations, including cache reuse.
+Use the result’s `metric` field to identify the requested calculation. Inspect the downloaded result’s [provenance](../results/#inspect-execution-provenance) to compare the accepted request with execution observations, including cache reuse.
 
 Inspection summarizes each submitted ID selection as an object with a field count. Download the full result to read the provider and record IDs. Unknown metadata is null, and spatial preview coordinates use WGS84.
 

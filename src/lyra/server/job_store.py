@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import TypeAdapter, ValidationError
 from rq import Queue
 from rq.exceptions import DeserializationError, NoSuchJobError
-from rq.job import Job, JobStatus
+from rq.job import Job, JobStatus, validate_job_id
 from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 from rq.serializers import JSONSerializer
 
@@ -183,6 +183,10 @@ class JobStore:
 
     def _fetch(self, job_id: str) -> Job | None:
         job_id = _JOB_ID.validate_python(job_id)
+        try:
+            validate_job_id(job_id)
+        except ValueError:
+            return None
         try:
             job = Job.fetch(
                 job_id, connection=self.connection, serializer=JSONSerializer

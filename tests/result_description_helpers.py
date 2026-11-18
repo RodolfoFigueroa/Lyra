@@ -4,7 +4,7 @@ import geopandas as gpd
 import pandas as pd
 
 from lyra.contracts.origins import Origin
-from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata, forwarding_schema
 from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.results import LocationInputDescription
 from lyra.runtime.location_inputs import InputBindings, InputSelection, LocationInputs
@@ -57,13 +57,7 @@ def location_descriptions() -> dict[str, LocationInputDescription]:
         provider_scope=scope,
         availability="available",
     )
-    forwarding = table_schema.model_copy(deep=True)
-    forwarding.columns.insert(
-        0,
-        ColumnMetadata(
-            name="source_location_id", dtype="str", unit=None, description="Source"
-        ),
-    )
+    forwarding = forwarding_schema(table_schema)
     return {
         "blocks": direct,
         "known_empty": direct.model_copy(deep=True),
@@ -149,12 +143,13 @@ def retain_descriptions(store: SQLiteStore) -> InputBindings:
     """Retain empty and unavailable selections with captured metadata."""
     refs = {}
     for name, desc in location_descriptions().items():
+        base_schema = location_descriptions()["blocks"].table_schema
         registration = Registration(
             node_id=desc.provider_scope.provider_id,
             output_name="records",
             kind="provider",
             output_scope="location",
-            table_schema=desc.table_schema,
+            table_schema=base_schema,
             geometry="geometry",
             crs="EPSG:32614",
             columns=tuple(
@@ -169,9 +164,12 @@ def retain_descriptions(store: SQLiteStore) -> InputBindings:
                     description=c.description,
                     unit=c.unit,
                 )
-                for c in desc.table_schema.columns
+                for c in base_schema.columns
             ),
         )
+        store.initialize((registration,))
+        if desc.kind == "correspondence":
+            registration = registration.forwarded()
         refs[name] = (
             LocationInputs(store).publish(
                 InputSelection(description=desc, registration=registration)

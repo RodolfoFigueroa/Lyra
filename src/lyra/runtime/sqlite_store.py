@@ -221,6 +221,15 @@ class SQLiteStore:
             msg = "Missing required schema registration"
             raise DamagedDataError(msg)
 
+    def read_registration(self, connection: sa.Connection, key: str) -> Registration:
+        """Read a required provider schema in the current transaction.
+
+        Returns:
+            The retained logical registration.
+        """
+        self._load_registrations(connection, (key,))
+        return self.layout.descriptions[key]
+
     def load_registrations(
         self, keys: tuple[str, ...] | None = None
     ) -> tuple[Registration, ...]:

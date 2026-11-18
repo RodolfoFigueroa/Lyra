@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pyarrow as pa
+import shapely
 from pyproj import CRS
 
 from lyra.contracts.provider_scope import EffectiveScope
@@ -105,12 +106,16 @@ def table_batch(
         index=pd.RangeIndex(len(rows)),
     )
     scalars = to_arrow(frame, description.properties)
-    arrays = [
-        pa.array([row[i] for row in rows], type=pa.binary())
-        if field.name == description.geometry
-        else scalars[field.name].combine_chunks()
-        for i, field in enumerate(schema)
-    ]
+    arrays = []
+    for i, field in enumerate(schema):
+        if field.name == description.geometry:
+            cells = pa.array([row[i] for row in rows], type=pa.binary())
+            # Arrow binary accepts arbitrary bytes. Check the declared WKB encoding
+            # before delivering the original bytes and their GeoArrow metadata.
+            shapely.from_wkb(cells.to_numpy(zero_copy_only=False))
+            arrays.append(cells)
+        else:
+            arrays.append(scalars[field.name].combine_chunks())
     if not arrays:
         return scalars.to_batches()[0].replace_schema_metadata(schema.metadata)
     return pa.RecordBatch.from_arrays(arrays, schema=schema)

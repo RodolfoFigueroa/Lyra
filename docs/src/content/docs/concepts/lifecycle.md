@@ -35,7 +35,7 @@ If the build revisions differ, the worker fails the job with `deployment_changed
 
 After validation, the worker resolves your selected IDs inside a [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials), which manages data clients. The worker fails the job if it cannot honor an accepted binding.
 
-[Provenance](../provenance/) records your selections and effective parameters, including defaults and nulls. It separates the accepted plan from observations of resolved inputs and calculations that ran or reused cached results. Your plugin must honor the captured identities; Lyra can’t detect source changes that its declarations omit.
+[Provenance](../provenance/) records your selections and effective parameters, including defaults and nulls. It separates the accepted request from observations of resolved inputs and calculations that ran or reused cached results. Your plugin must honor the captured identities; Lyra can’t detect source changes that its declarations omit.
 
 Every submission creates a new job. There is no automatic deduplication or submission retry. After a transport timeout, you may not know whether the server accepted your job.
 

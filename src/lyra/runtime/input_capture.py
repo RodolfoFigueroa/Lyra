@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from lyra.contracts.outputs import ColumnMetadata
+from lyra.contracts.outputs import forwarding_schema
 from lyra.contracts.provider_scope import RecordReferences
 from lyra.contracts.results import LocationInputDescription
 from lyra.runtime.location_inputs import (
@@ -12,7 +12,6 @@ from lyra.runtime.location_inputs import (
     OperationSelection,
 )
 from lyra.runtime.provider_records import ProviderRecords, provider_registration
-from lyra.runtime.sqlite_schema import StoredColumn
 from lyra.runtime.sqlite_store import DamagedDataError
 
 if TYPE_CHECKING:
@@ -69,6 +68,8 @@ def capture_inputs(
         )
 
         if value.source_scope is not None:
+            if registration.key not in store.layout.descriptions:
+                store.initialize((registration,))
             if value.description is None:
                 msg = "Missing forwarding description"
                 raise DamagedDataError(msg)
@@ -79,20 +80,7 @@ def capture_inputs(
                 table_schema=value.description,
                 availability="available",
             )
-            registration = registration.model_copy(
-                update={
-                    "table_schema": value.description,
-                    "columns": (
-                        StoredColumn(
-                            name="source_location_id",
-                            dtype="string",
-                            nullable=False,
-                            unit=None,
-                        ),
-                        *registration.columns,
-                    ),
-                }
-            )
+            registration = registration.forwarded()
         selection = InputSelection(description=description, registration=registration)
 
         bound = invocation.bound_use
@@ -261,34 +249,10 @@ def capture_skipped_inputs(
             source = next(iter(value.upstream.locations.values()))
         derived = source is not None
         if derived:
-            schema.checks = []
-            schema.unique = ["source_location_id", "location_id"]
-            for column in schema.columns:
-                column.unique = False
-                column.checks = []
-            schema.columns.insert(
-                0,
-                ColumnMetadata(
-                    name="source_location_id",
-                    dtype="str",
-                    unit=None,
-                    description="Immediate source location ID",
-                ),
-            )
-            registration = registration.model_copy(
-                update={
-                    "table_schema": schema,
-                    "columns": (
-                        StoredColumn(
-                            name="source_location_id",
-                            dtype="string",
-                            nullable=False,
-                            unit=None,
-                        ),
-                        *registration.columns,
-                    ),
-                }
-            )
+            if registration.key not in store.layout.descriptions:
+                store.initialize((registration,))
+            registration = registration.forwarded()
+            schema = forwarding_schema(schema)
         operations = []
         if value.computations:
             with store.engine.connect() as connection:

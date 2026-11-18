@@ -3,7 +3,7 @@
 from dataclasses import replace
 from unittest.mock import Mock
 
-from lyra.contracts.outputs import ColumnMetadata
+from lyra.contracts.outputs import forwarding_schema
 from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.results import LocationInputDescription
 from lyra.runtime.location_inputs import (
@@ -57,16 +57,7 @@ def retained(store: SQLiteStore) -> tuple[InputSelection, InputSelection]:
         ((header, ("A", "B", "C", "empty")),),
         {"A": ("a", "b"), "B": ("a",), "C": ("b",)},
     )
-    metadata = provider.schema.metadata.model_copy(deep=True)
-    metadata.columns.insert(
-        0,
-        ColumnMetadata(
-            name="source_location_id",
-            dtype="str",
-            description="Immediate source",
-            unit=None,
-        ),
-    )
+    metadata = forwarding_schema(provider.schema.metadata)
     correspondence = InputSelection(
         description=LocationInputDescription(
             kind="correspondence",
