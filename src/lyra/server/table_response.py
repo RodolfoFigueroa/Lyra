@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
-from contextlib import ExitStack
 from tempfile import TemporaryFile
 from typing import BinaryIO
 
@@ -18,21 +17,16 @@ from lyra.server.routes.retrieval_errors import retrieval_error_response
 class TableResponse(StreamingResponse):
     """Own a synchronous Arrow reader through completion or client disconnect."""
 
-    def __init__(self, stream: Generator[bytes], *, verify: bool = False) -> None:
+    def __init__(self, stream: Generator[bytes]) -> None:
         """Accept an unstarted reader; acquire resources only while serving."""
-        self.verify = verify
         self.stream = stream
-        self.first: bytes | None = None
         self.iterator = self.chunks()
         super().__init__(
             self.iterator, media_type="application/vnd.apache.arrow.stream"
         )
 
     async def chunks(self) -> AsyncGenerator[bytes]:
-        """Yield preflight bytes followed by offloaded, bounded row batches."""
-        if self.first is not None:
-            yield self.first
-            self.first = None
+        """Yield the staged download in bounded chunks."""
         while (chunk := await self.advance()) is not None:
             yield chunk
 
@@ -63,13 +57,10 @@ class TableResponse(StreamingResponse):
     @override
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
-            with ExitStack() as files:
+            with TemporaryFile() as staged:
                 try:
-                    if self.verify:
-                        staged = files.enter_context(TemporaryFile())
-                        if not await self.stage(staged, receive):
-                            return
-                    self.first = await self.advance()
+                    if not await self.stage(staged, receive):
+                        return
                 except ResultAccessError as error:
                     await retrieval_error_response(error)(scope, receive, send)
                 else:
@@ -103,7 +94,8 @@ class TableResponse(StreamingResponse):
                 while await self.advance(staged) is not None:
                     pass
                 completed = True
-            except ResultAccessError as error:
+            except Exception as error:  # ruff: ignore[blind-except]
+                # Propagate the reader error after joining the disconnect watcher.
                 failure = error
             finally:
                 group.cancel_scope.cancel()

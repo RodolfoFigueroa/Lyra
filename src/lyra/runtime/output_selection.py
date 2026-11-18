@@ -128,9 +128,8 @@ class ComputationRows:
             }
         )
         if isinstance(counts, dict):
-            query = query.add_columns(self.data.table.c.location_id).group_by(
-                self.data.table.c.location_id
-            )
+            owner = self.data.table.c.location_id
+            query = query.add_columns(owner.label(owner.key)).group_by(owner)
         observed = {}
         for row in _read(connection, query):
             group = row["location_id"] if isinstance(counts, dict) else None
@@ -246,7 +245,7 @@ class OutputSelection:
                     break
                 addresses = tuple(
                     RowAddress(
-                        index, tuple(row[column.name] for column in computation.keys)
+                        index, tuple(row[column.key] for column in computation.keys)
                     )
                     for row in rows
                 )

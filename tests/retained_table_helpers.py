@@ -28,27 +28,27 @@ from tests.metric_execution_helpers import schema
 
 
 def retained_service(
-    path: Path, schema: pa.DataFrameSchema, frame: pd.DataFrame
+    path: Path,
+    schema: pa.DataFrameSchema,
+    frame: pd.DataFrame,
+    *,
+    owner: ProviderScope | None = None,
 ) -> tuple[ResultService, str]:
     """Publish through isolated relational boundaries for remote retrieval."""
     writer = SQLiteStore(path)
     layout = describe(schema, metadata=compile_output(schema)[1])
+    header = Header(
+        value_key="value",
+        node_id="native",
+        output_scope="location" if owner is not None else "unpartitioned",
+        owner_scope=owner,
+    )
+    partitions = tuple(frame.location_id.unique()) if owner is not None else ()
     MetricTables(writer).publish(
-        (
-            (
-                Header(
-                    value_key="value", node_id="native", output_scope="unpartitioned"
-                ),
-                (),
-            ),
-        ),
+        ((header, partitions),),
         {"rows": frame},
         {"rows": layout},
-        location_inputs={
-            Header(
-                value_key="value", node_id="native", output_scope="unpartitioned"
-            ).value_key: InputBindings()
-        },
+        location_inputs={header.value_key: InputBindings()},
     )
     registration = next(iter(writer.layout.descriptions.values()))
     key = publish_result(
@@ -60,7 +60,7 @@ def retained_service(
             outputs={
                 "rows": ResultOutput(
                     registration_key=registration.key,
-                    owner_scope=None,
+                    owner_scope=owner,
                     computations=(ComputationSelection(value_key="value"),),
                 )
             },

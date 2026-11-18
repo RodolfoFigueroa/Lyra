@@ -107,10 +107,12 @@ def select_rows(statement: sa.Select, tables: dict[str, list[dict]]) -> list[dic
     if statement.whereclause is not None:
         rows = [row for row in rows if evaluate(statement.whereclause, row)]
     compiled = statement.compile()
-    order = compiled.order_by_clause(statement).removeprefix(" ORDER BY ")
+    # Evaluate column expressions against the logical keys in the fake rows.
+    order = statement._order_by_clauses  # ruff: ignore[private-member-access]
     if order:
-        columns = [name.rsplit(".", 1)[-1].strip('"') for name in order.split(", ")]
-        rows = sorted(rows, key=lambda row: tuple(row[column] for column in columns))
+        rows = sorted(
+            rows, key=lambda row: tuple(evaluate(column, row) for column in order)
+        )
     aggregate = any(
         isinstance(column, Label) and isinstance(column.element, Function)
         for column in statement.selected_columns
@@ -134,14 +136,14 @@ def select_rows(statement: sa.Select, tables: dict[str, list[dict]]) -> list[dic
 
 def aggregate_rows(statement: sa.Select, rows: list[dict]) -> list[dict]:
     """Project SQL aggregates, preserving empty ungrouped COUNT results."""
-    group_by = statement.compile().group_by_clause(statement).removeprefix(" GROUP BY ")
+    group_by = statement._group_by_clauses  # ruff: ignore[private-member-access]
     groups: dict[tuple, list[dict]] = {}
     if not group_by:
         groups[()] = rows
     else:
-        columns = [name.rsplit(".", 1)[-1].strip('"') for name in group_by.split(", ")]
         for row in rows:
-            groups.setdefault(tuple(row[column] for column in columns), []).append(row)
+            group = tuple(evaluate(column, row) for column in group_by)
+            groups.setdefault(group, []).append(row)
     return [
         {
             column.key: aggregate_value(column, group)

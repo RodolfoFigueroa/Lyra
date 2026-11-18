@@ -36,6 +36,7 @@ from lyra.server.table_response import TableResponse
 from tests.arrow_download_helpers import BASE, Retained, retained
 from tests.mcp_helpers import mcp_headers, tool_call_payload
 from tests.retained_table_helpers import mixed_result
+from tests.retrieval_client_helpers import NativeAPI, native_api
 from tests.sqlite_helpers import Database, database
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
 
     from starlette.types import Message
 
-__all__ = ["database", "retained"]
+__all__ = ["database", "native_api", "retained"]
 
 
 @pytest.mark.parametrize(
@@ -300,6 +301,7 @@ def test_stream_resources_close(
     database.engine.reset_mock()
     response = TableResponse(retained.service.stream_table(retained.reference, "rows"))
     sent = asyncio.Event()
+    events = []
 
     async def receive() -> Message:
         await sent.wait()
@@ -307,6 +309,7 @@ def test_stream_resources_close(
 
     async def send(message: Message) -> None:
         await asyncio.sleep(0)
+        events.append(message)
         sent.set()
         if ending == "disconnect" and message["type"] == "http.response.body":
             msg = "client disconnected"
@@ -323,10 +326,13 @@ def test_stream_resources_close(
         "receive-disconnect": None,
         "disconnect": ClientDisconnect,
         "fetch-error": RuntimeError,
-        "conversion-error": ResultIntegrityError,
+        "conversion-error": None,
     }[ending]
     with nullcontext() if exception is None else pytest.raises(exception):
         asyncio.run(run())
+    assert [
+        event["status"] for event in events if event["type"] == "http.response.start"
+    ] == {"fetch-error": [], "conversion-error": [500]}.get(ending, [200])
     assert released == ["writer"]
     assert all(cursor.close.called for cursor in cursors)
     assert next(response.stream, None) is None
@@ -384,3 +390,33 @@ def test_native_task_cancellation_joins_reader(
     assert next(response.stream, None) is None
     database.connection.__exit__.assert_called()
     database.engine.dispose.assert_called()
+
+
+@pytest.mark.parametrize("damaged", [0, -1])
+@pytest.mark.parametrize("retained", [(True, "large")], indirect=True)
+def test_damaged_geometry_returns_json_and_preserves_destination(
+    retained: Retained,
+    database: Database,
+    native_api: NativeAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    damaged: int,
+) -> None:
+    rows = next(
+        rows for name, rows in database.rows.items() if name.startswith("data_")
+    )
+    rows[damaged]["geometry"] = b"damaged"
+    path = retained.service.result_store_path.with_suffix(".arrow")
+    path.write_bytes(b"previous download")
+    with (
+        native_api.serve(retained.public, monkeypatch) as http,
+        native_api.connect() as api,
+    ):
+        response = native_api.runner.run(http.get(retained.url, headers=mcp_headers()))
+        assert response.status_code == 500
+        expected = ResultIntegrityError(retained.reference, "rows")
+        assert response.json() == {"detail": error_payload(expected).model_dump()}
+        with pytest.raises(ResultIntegrityError):
+            native_api.resolve(
+                api.results.download_table(retained.reference, "rows", path)
+            )
+    assert path.read_bytes() == b"previous download"

@@ -11,8 +11,14 @@ import pyarrow as pa
 import pytest
 from jsonschema import validate
 
-from lyra.contracts.errors import RowTooLargeError
+from lyra.contracts.errors import ResultNotFoundError, RowTooLargeError
 from lyra.contracts.results import ResultRowPage
+from lyra.contracts.retrieval_paths import (
+    location_input_download_path,
+    location_input_rows_path,
+    table_download_path,
+    table_rows_path,
+)
 from lyra.server.response_budget import MAX_RETRIEVAL_BYTES, http_response_budget
 from lyra.server.result_rows import RowPageContext
 from tests.arrow_download_helpers import BASE, Retained, retained
@@ -348,3 +354,63 @@ def test_lookup_and_bound_cursor_errors(
             assert tool_payload(response)["error"] == error
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("name", ["unknown", "", "a/b", "%2F"])
+def test_unknown_names_reach_domain_lookup(
+    retained: Retained,
+    native_api: NativeAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    name: str,
+) -> None:
+    ref = retained.reference
+    with (
+        native_api.serve(retained.public, monkeypatch) as http,
+        native_api.connect() as api,
+    ):
+        for path, call, is_input in (
+            (table_rows_path, lambda: api.results.rows(ref, name), False),
+            (
+                table_download_path,
+                lambda: api.results.download_table(ref, name, tmp_path / "out"),
+                False,
+            ),
+            (
+                location_input_rows_path,
+                lambda: api.results.location_input_rows(ref, name),
+                True,
+            ),
+            (
+                location_input_download_path,
+                lambda: api.results.download_location_input(
+                    ref, name, tmp_path / "out"
+                ),
+                True,
+            ),
+        ):
+            response = native_api.runner.run(
+                http.get(f"{BASE}/{path(ref, name)}", headers=mcp_headers())
+            )
+            assert response.status_code == 404
+            detail = response.json()["detail"]
+            assert detail["code"] == "result_not_found"
+            assert detail["input_name" if is_input else "output_name"] == name
+            with pytest.raises(ResultNotFoundError) as caught:
+                native_api.resolve(call())
+            assert caught.value.result_ref == ref
+            assert caught.value.output_name == (None if is_input else name)
+            assert caught.value.input_name == (name if is_input else None)
+
+
+@pytest.mark.anyio
+async def test_newline_in_name_reaches_retrieval_route(retained: Retained) -> None:
+    # Model a reverse proxy supplying the deployment prefix in the ASGI scope.
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=retained.app, root_path="/public/api"),
+        base_url=BASE + "/",
+        headers=mcp_headers(),
+    ) as http:
+        response = await http.get(table_rows_path(retained.reference, "line\nbreak"))
+    assert response.status_code == 404
+    assert response.json()["detail"]["output_name"] == "line\nbreak"

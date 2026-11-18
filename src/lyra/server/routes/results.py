@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.convertors import PathConvertor, register_url_convertor
 
 from lyra.contracts.errors import InvalidPaginationError, ResultAccessError
 from lyra.contracts.results import (
@@ -20,11 +21,19 @@ from lyra.server.routes.retrieval_errors import retrieval_error_response
 from lyra.server.runtime import ConfigDependency, ResultServiceDependency
 from lyra.server.table_response import TableResponse
 
+
+class RetrievalNameConvertor(PathConvertor):
+    """Capture the decoded name, including empty strings, slashes and newlines."""
+
+    regex = "(?s:.*)"
+
+
+register_url_convertor("lyra_retrieval_name", RetrievalNameConvertor())
 router = APIRouter(tags=["Results"], dependencies=[Depends(require_agent_key)])
 
 
 @router.get(
-    "/results/{result_ref}/tables/{output_name}/download",
+    "/results/{result_ref}/tables/{output_name:lyra_retrieval_name}/download",
     response_class=StreamingResponse,
     responses={200: {"content": {"application/vnd.apache.arrow.stream": {}}}},
 )
@@ -75,7 +84,8 @@ class RowQuery(BaseModel):
 
 
 @router.get(
-    "/results/{result_ref}/tables/{output_name}/rows", response_model=ResultRowPage
+    "/results/{result_ref}/tables/{output_name:lyra_retrieval_name}/rows",
+    response_model=ResultRowPage,
 )
 async def result_rows(
     result_ref: str,
@@ -107,7 +117,7 @@ async def result_rows(
 
 
 @router.get(
-    "/results/{result_ref}/location-inputs/{input_name}/download",
+    "/results/{result_ref}/location-inputs/{input_name:lyra_retrieval_name}/download",
     response_class=StreamingResponse,
     responses={200: {"content": {"application/vnd.apache.arrow.stream": {}}}},
 )
@@ -115,13 +125,11 @@ async def download_location_input(
     result_ref: str, input_name: str, results: ResultServiceDependency
 ) -> TableResponse:
     """Return a retained location input as a generated Arrow stream."""
-    return TableResponse(
-        results.stream_location_input(result_ref, input_name), verify=True
-    )
+    return TableResponse(results.stream_location_input(result_ref, input_name))
 
 
 @router.get(
-    "/results/{result_ref}/location-inputs/{input_name}/rows",
+    "/results/{result_ref}/location-inputs/{input_name:lyra_retrieval_name}/rows",
     response_model=ResultRowPage,
 )
 async def location_input_rows(

@@ -14,6 +14,7 @@ import shapely
 from pydantic import BaseModel
 
 from lyra.contracts.errors import RowTooLargeError
+from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.results import ResultRowPage
 from lyra.runtime.result_store import ResultStore
 from lyra.server.mcp.server import LyraFastMCP
@@ -239,3 +240,41 @@ def test_sdk_wire_page_matches_measured_budget(retained: Retained) -> None:
             assert len(page.rows) == 1
 
     asyncio.run(run())
+
+
+def test_case_colliding_structural_columns_round_trip_and_paginate(
+    tmp_path: Path,
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "ROW_KEY": ["x", "y", "z"],
+            "row_key": ["1", "2", "1"],
+            "LOCATION_ID": ["north", "south", "east"],
+            "location_id": ["a", "a", "b"],
+        },
+        dtype="string",
+    )
+    declaration = pda.DataFrameSchema(
+        {
+            name: pda.Column("string", description=name, metadata={"unit": None})
+            for name in frame.columns
+        },
+        strict=True,
+        unique=["location_id", "row_key"],
+    )
+    service, reference = retained_service(
+        tmp_path / "tables.sqlite",
+        declaration,
+        frame,
+        owner=ProviderScope(provider_id="places"),
+    )
+    with ResultStore.open(service.result_store_path) as store:
+        restored = store.read_table(reference, "rows")
+        pd.testing.assert_frame_equal(restored, frame)
+        builder = RowPageBuilder(store, BASE, http_response_budget())
+        cursor = None
+        for index, expected in enumerate(frame.to_dict("records")):
+            page = builder.build(reference, "rows", 1, cursor)
+            assert page.rows == [expected]
+            cursor = page.next_cursor
+            assert (cursor is None) == (index == len(frame) - 1)

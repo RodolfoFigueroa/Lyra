@@ -190,7 +190,7 @@ def test_stream_cleanup(
 def test_input_response_cancellation_joins_reader(
     retained_input: RetainedInput, database: Database, stage: str
 ) -> None:
-    response = TableResponse(retained_input.stream(), verify=True)
+    response = TableResponse(retained_input.stream())
     release = threading.Event()
     database.connection.reset_mock()
     database.engine.reset_mock()
@@ -299,7 +299,7 @@ def test_damaged_record_returns_integrity_error_before_arrow(
         return {"type": "http.disconnect"}
 
     asyncio.run(
-        TableResponse(retained.stream(), verify=True)(
+        TableResponse(retained.stream())(
             {"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send
         )
     )
@@ -350,7 +350,7 @@ def test_verified_download_disconnect_closes_temporary_file(
             raise OSError(message_text)
 
     async def run() -> None:
-        response = TableResponse(chunks(), verify=True)
+        response = TableResponse(chunks())
         with (
             pytest.raises(ClientDisconnect)
             if phase == "transmission"
