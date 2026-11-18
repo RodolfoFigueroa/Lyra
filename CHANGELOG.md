@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.28.0](https://github.com/RodolfoFigueroa/Lyra/compare/v0.27.0...v0.28.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* Unify package structure
+
+### Features
+
+* Add durable execution reports ([533ea3c](https://github.com/RodolfoFigueroa/Lyra/commit/533ea3c63314c45867eb8286d92bfac620638a9e))
+* Add GIS exports ([39c400d](https://github.com/RodolfoFigueroa/Lyra/commit/39c400d6359c33ec97e4f05abab98ed84da7ddfa))
+* Add intervention tracking ([3a7bc01](https://github.com/RodolfoFigueroa/Lyra/commit/3a7bc0100c1d82bfba34a06101b0b69aa02d9c2f))
+* Add operation filtering via Ibis ([079ecbb](https://github.com/RodolfoFigueroa/Lyra/commit/079ecbb2bf91c019dcffc4468c13668db275c613))
+* Add result fetching interfaces ([146b4b4](https://github.com/RodolfoFigueroa/Lyra/commit/146b4b48f8880aaadeadf06b8cd2354af1a4ab1a))
+* Cache per-node results ([9bfc0d4](https://github.com/RodolfoFigueroa/Lyra/commit/9bfc0d4129e39073e4853f8b138c0609922dc3dc))
+* Clarify cache failure ownership and generation cleanup ([b637054](https://github.com/RodolfoFigueroa/Lyra/commit/b637054f755732111eff7a239cb42f690f0b5f6e))
+* Finish replacing the old application registry ([8bcb11f](https://github.com/RodolfoFigueroa/Lyra/commit/8bcb11fafae55cea64b69a60c315cc350c42cc61))
+* Implement native httpx clients ([fd97eb7](https://github.com/RodolfoFigueroa/Lyra/commit/fd97eb70ff34971f4c4ec8709fa536287ef39f64))
+* Implement plugin discovery and normalize jobs ([e8a08f8](https://github.com/RodolfoFigueroa/Lyra/commit/e8a08f8288c80004e9568fff8443fc39218ae252))
+* Improve behavioral testing policy ([7c7939c](https://github.com/RodolfoFigueroa/Lyra/commit/7c7939c0648865098823f177baf95bdb41f29051))
+* Make SQLite the default backend for result storage ([9d8ae61](https://github.com/RodolfoFigueroa/Lyra/commit/9d8ae61eda95dae8bd119bfae2429a8ed3344c6a))
+* Normalize node contracts and derive redundant views ([b04f578](https://github.com/RodolfoFigueroa/Lyra/commit/b04f5789762f5ec1bdc7e3e419834e40a35b6127))
+* Organize MCP server and add shared references ([32f32f8](https://github.com/RodolfoFigueroa/Lyra/commit/32f32f88b721adf0f2fee04636733053b1273b33))
+* Rebuild artifact storage around job results ([d8842ce](https://github.com/RodolfoFigueroa/Lyra/commit/d8842ce499d956b965950ffafb927571c4513d8f))
+* Replace unit registry with Pint ([c67a442](https://github.com/RodolfoFigueroa/Lyra/commit/c67a442a1b302004817af09cd65ca60d313ba928))
+* Retain location inputs and cache ([b706e8b](https://github.com/RodolfoFigueroa/Lyra/commit/b706e8b3b1699719012d27af3773180d3c1631d5))
+* Revamp location providers. Add origins. ([514c539](https://github.com/RodolfoFigueroa/Lyra/commit/514c539fbbee4ce036577e7cdaf051833346b597))
+* Separate computation identity from descriptive metadata ([38bc4cb](https://github.com/RodolfoFigueroa/Lyra/commit/38bc4cb5f5adbb3cec3852405ef02e4cb8756da5))
+* Simplify client transport and polling ownership ([ce68886](https://github.com/RodolfoFigueroa/Lyra/commit/ce68886ba7fb9d5135fe6d1e639276d2f3bb7842))
+* Simplify geometry storage ([7b7ab82](https://github.com/RodolfoFigueroa/Lyra/commit/7b7ab82647c2a99a17ff692c9012e778fcab038b))
+* Unify accepted-plan persistence and provenance ([0a57d1f](https://github.com/RodolfoFigueroa/Lyra/commit/0a57d1ff3a2d139215a264a11b72042fd5477a80))
+* Unify graph execution ([5ca5b13](https://github.com/RodolfoFigueroa/Lyra/commit/5ca5b13ae38066f90679b508384e4206170886ac))
+* Unify package structure ([2b55c67](https://github.com/RodolfoFigueroa/Lyra/commit/2b55c674b85b5007837aaa773fc2bda4746c2a74))
+
+
+### Bug Fixes
+
+* Fix implementation issues ([13aaac6](https://github.com/RodolfoFigueroa/Lyra/commit/13aaac6788573c84e2d31d5ed1d7accc2d3a597b))
+* Fix result retrieval bug ([824f6ea](https://github.com/RodolfoFigueroa/Lyra/commit/824f6ea49b62b63d34baddc7443a03d6a0aedfee))
+* Fix table validation performance when requesting paginated results ([0cc196d](https://github.com/RodolfoFigueroa/Lyra/commit/0cc196daca46329c0678ddddcccdedb6f8c67612))
+* Share worker and local planning ([4529120](https://github.com/RodolfoFigueroa/Lyra/commit/452912051b000ed52f515b78d2e023a4714f6a72))
+
+
+### Performance Improvements
+
+* Remove Cartesian execution-plan validation at startup ([feb29c8](https://github.com/RodolfoFigueroa/Lyra/commit/feb29c8d32199632f50baf6d043c01d29a5378f4))
+
 ## [0.27.0](https://github.com/RodolfoFigueroa/Lyra/compare/lyra-v0.26.0...lyra-v0.27.0) (2026-11-03)
 
 
