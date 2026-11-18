@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import runpy
@@ -21,7 +22,7 @@ from rq.job import JobStatus
 from typing_extensions import override
 
 from docs.scripts.generate_docs import CONTENT_DIR
-from lyra.api import LyraClient
+from lyra.api import AsyncLyraClient, LyraClient
 from lyra.contracts.config import LyraConfig
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import JobEnvelope
@@ -145,7 +146,8 @@ class CityServer:
                 "/mcp/",
                 json=tool_call_payload(name, arguments),
                 headers={**mcp_headers(), "Host": "localhost:5219"},
-            )
+            ),
+            wrapped=name in {"lyra_inspect_report", "lyra_describe_result"},
         )
 
 
@@ -317,6 +319,110 @@ def assert_mcp_handoff(
         link.lyra_api.method, link.lyra_api.url, headers=mcp_headers()
     )
     assert complete.json()["outputs"] == expected
+
+
+def discover_street_schema(server: CityServer, name: str, proposal: dict) -> dict:
+    metric = server.tool("lyra_get_metric", {"metric": name})
+    provider = metric["providers"][proposal["catalog"]]
+    assert provider["membership_capable"]
+    schema = provider["contract"]["family"]["structure"]["output"]
+    columns = {column["name"]: column for column in schema["columns"]}
+    (addition,) = proposal["add"]
+    assert set(addition) == columns.keys()
+    assert columns[schema["geometry"]]["parameters"]["crs"] == "EPSG:32614"
+    assert columns["condition_score"]["unit"] == "score"
+    return schema
+
+
+def test_inline_street_proposal_through_json_tools(city_server: CityServer) -> None:
+    request = next(
+        body
+        for body in published_requests("reference/mcp-payloads.md")
+        if "interventions" in body
+    )
+    (proposal,) = cast("list[dict]", request["interventions"])
+    schema = discover_street_schema(
+        city_server, cast("str", request["metric"]), proposal
+    )
+    tool = city_server.tool
+
+    submitted = tool("lyra_run_metric", request)
+    job = tool("lyra_get_job_result", {"job_id": submitted["job_id"]})["result"]
+    assert job["status"] == "succeeded"
+    city_server.jobs.clear()  # Expire the queue entry before durable reads.
+    ref = job["result_ref"]
+    report = tool("lyra_inspect_report", {"execution_id": job["execution_id"]})[
+        "result"
+    ]
+    assert report["kind"] == "complete"
+    (accepted,) = report["report"]["request"]["interventions"]
+    assert {key: accepted[key] for key in proposal} == proposal
+    assert accepted["addition_schema"] == schema
+    (validation,) = report["report"]["intervention_validations"]
+    assert validation["membership_lookup"] == "executed"
+    scope = validation["scope"]
+    assert scope["intervention"] == {
+        key: proposal[key] for key in ("catalog", "id", "revision")
+    }
+    description = tool("lyra_describe_result", {"result_ref": ref})["result"][
+        "description"
+    ]
+    assert description["location_inputs"]["streets"]["provider_scope"] == scope
+    assert tool(
+        "lyra_get_location_input_rows",
+        {
+            "result_ref": ref,
+            "input_name": "streets",
+            "limit": 1,
+        },
+    ) == {"rows": proposal["add"], "next_cursor": None}
+    expected = [{"street_id": "proposed-1", "length_m": 150.0}]
+    assert tool(
+        "lyra_get_result_rows",
+        {
+            "result_ref": ref,
+            "output_name": "lengths",
+            "limit": 1,
+        },
+    ) == {"rows": expected, "next_cursor": None}
+
+    response = city_server.dispatch(
+        "POST", "/jobs", json=request, headers=mcp_headers()
+    )
+    assert response.status_code == 202
+    repeated = tool("lyra_get_job_result", {"job_id": response.json()["job_id"]})[
+        "result"
+    ]
+    assert repeated["outputs"]["lengths"]["preview"] == expected
+
+
+@pytest.mark.usefixtures("city_server")
+def test_native_street_proposal_across_runners_and_clients(tmp_path: Path) -> None:
+    path = tmp_path / "street_proposal.py"
+    path.write_text(published_python("use/local-execution.md", path.name))
+    example = runpy.run_path(str(path))
+    metric = "city_street_lengths"
+    inputs, changes = example["inputs"], [example["proposal"]]
+    expected = [{"street_id": "proposed-1", "length_m": 150.0}]
+    assert example["result"].tables["lengths"].to_dict("records") == expected
+    development = example["runner"].run_development(
+        metric, inputs=inputs, interventions=changes
+    )
+    assert development.tables["lengths"].to_dict("records") == expected
+
+    async def async_outputs() -> dict:
+        async with AsyncLyraClient(
+            "example.test", agent_api_key="agent-secret"
+        ) as client:
+            return (
+                await client.jobs.run(metric, inputs=inputs, interventions=changes)
+            ).outputs
+
+    with LyraClient("example.test", agent_api_key="agent-secret") as client:
+        assert client.jobs.run(
+            metric, inputs=inputs, interventions=changes
+        ).outputs == {"lengths": expected}
+    assert asyncio.run(async_outputs()) == {"lengths": expected}
 
 
 def test_retained_city_table_matches_local_run_beyond_preview(

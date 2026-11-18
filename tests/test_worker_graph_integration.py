@@ -632,6 +632,7 @@ def test_repeated_submission_to_worker(
             "metric": "root",
             "inputs": {},
             "parameters": {},
+            "interventions": [],
         }
         run_and_read(worker.run_metric_task, payload)
         assert len(calls) == 1

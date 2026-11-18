@@ -11,8 +11,10 @@ import pandas as pd
 from pydantic import Field
 from typing_extensions import override
 
+from lyra.contracts.interventions import AcceptedIntervention
 from lyra.contracts.metric_scope import CachePolicy
 from lyra.contracts.origins import Origin
+from lyra.data.interventions import Intervention
 from lyra.runtime.execution import ExecutionOutcome, GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import prepare_execution
@@ -28,7 +30,7 @@ from lyra.sdk import (
 from lyra.sdk.managed_provider import ManagedLocationProvider
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.provider_schema import ProviderSchema
-from test_support.location_operations import Parameters, Places
+from test_support.location_operations import CatalogPlaces, Parameters, Places
 from tests.cache_helpers import SCHEMA
 
 
@@ -59,7 +61,7 @@ def selector_definitions(
     seen = []
     selected = []
 
-    class Source(Places):
+    class Source(CatalogPlaces):
         id = "sources"
 
         @override
@@ -67,7 +69,7 @@ def selector_definitions(
             events.append(("source", frozenset(ids)))
             return super().resolve(ids)
 
-    class Target(Places, ManagedLocationProvider):
+    class Target(CatalogPlaces, ManagedLocationProvider):
         id = "targets"
         cache = target_cache
         code_revision = identity.target_revision
@@ -91,6 +93,17 @@ def selector_definitions(
                 if selected
                 else schema.empty_frame()
             )
+
+        @override
+        def select_effective(
+            self,
+            expression: ir.Table,
+            schema: ProviderSchema,
+            intervention: AcceptedIntervention,
+        ) -> gpd.GeoDataFrame:
+            pool = self.select(expression, schema)
+            assert not intervention.add
+            return pool.loc[~pool.location_id.isin(intervention.remove)]
 
     def selector(
         records: gpd.GeoDataFrame, relation: ir.Table, *, parameters: Parameters
@@ -207,6 +220,7 @@ def workload(
         parameters: dict | None = None,
         *,
         exact: bool = False,
+        interventions: list[Intervention] | None = None,
     ) -> ExecutionOutcome:
         request = {
             "metric": "consumer",
@@ -218,7 +232,11 @@ def workload(
                 "metric": "exact_consumer",
                 "inputs": {"places": {"provider": "targets", "ids": list(ids)}},
             }
-        return executor.execute(prepare_execution(runner.catalog, request))
+        return executor.execute(
+            prepare_execution(
+                runner.catalog, request, native_interventions=interventions
+            )
+        )
 
     return run, events, seen
 

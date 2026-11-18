@@ -249,14 +249,15 @@ async def _async_generator_resolver(
         _async_generator_resolver,
     ],
 )
+@pytest.mark.parametrize("method", ["resolve", "existing_ids"])
 def test_invalid_resolvers_fail_before_construction(
-    resolver: object, monkeypatch: pytest.MonkeyPatch
+    resolver: object, method: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    declared = provider(resolve=resolver)
+    declared = provider(**{method: resolver})
     forbidden = Mock(side_effect=AssertionError("Acquisition during registration"))
     monkeypatch.setattr(declared, "__init__", forbidden)
     monkeypatch.setattr(declared, "setup", forbidden)
     monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
-    with pytest.raises(PluginDefinitionError, match="Provider resolve must"):
+    with pytest.raises(PluginDefinitionError, match=f"Provider {method} must"):
         compile_provider_registry({"test": plugin(places=declared)})
     forbidden.assert_not_called()

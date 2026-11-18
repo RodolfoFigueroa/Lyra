@@ -25,14 +25,17 @@ Pass the selected name as `metric` to `lyra_get_metric`. Read these fields befor
 - `accepted_selections`: source types you can select for each input
 - `bindings`: concrete source contracts for native inputs
 - `computed_inputs`: inputs that dependencies supply during execution
+- `providers`: each provider’s record schema and whether it supports interventions
 
 Build your request from the accepted selections and parameter schema. Lyra supplies computed inputs; don’t include them in the request.
 
+To propose changes, look up the public provider ID in `providers` and check that `membership_capable` is `true`. Read `contract.family.structure.output.columns` for each column’s type, unit, and nullability. On the active geometry column, read `parameters.crs` before preparing coordinates.
+
 ## 2. Submit once
 
-Call `lyra_run_metric` with `metric`, `inputs`, and `parameters`. Build `inputs` from the names and accepted source types that `lyra_get_metric` returns.
+Call `lyra_run_metric` with the metric name in `metric`. Supply the `inputs` and `parameters` that its contract requires. Lyra uses an empty object for either field if you omit it.
 
-Lyra uses an empty object when you omit `inputs` or `parameters`. Supply any selections and parameter values the metric requires. Lyra rejects `null` for `metric`, `inputs`, or `parameters`.
+For a proposal, send complete addition records and removal IDs in `interventions`. For a baseline, omit `interventions` or send `[]`. Lyra rejects explicit `null` for these request fields. The [street proposal payload](../../reference/mcp-payloads/#submit-an-inline-street-proposal) shows the JSON for a replacement street.
 
 For `city_street_maintenance`, submit the ID selection and metric parameters together. Use the `city_streets` provider and IDs from its dataset:
 
@@ -77,6 +80,8 @@ The tool call succeeds (`isError: false`) even when it reports a failed job. Che
 Unknown IDs fail the job during execution. The job also fails if a provider cannot supply the data revision captured when Lyra accepted it. A conversion that returns no locations produces a valid empty selection, and execution continues.
 
 For successful jobs, save `execution_id` for the report and `result_ref` for retained descriptions, tables, and row pages. Inspection groups declarations, column summaries, and previews by output name. All outputs share a preview limit of five rows and twenty columns.
+
+To compare a baseline and a proposal, submit each as a separate job. For each run, use `lyra_inspect_report` to see the submitted changes. Use its result reference to compare [output rows](#read-retained-row-pages) and [selected input records](#read-retained-location-inputs) as JSON.
 
 Truncation metadata records what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric. To read the saved report without truncation, [inspect it with its execution ID](#inspect-a-retained-execution-report).
 

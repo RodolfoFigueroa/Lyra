@@ -6,7 +6,7 @@ contentPlan: use/spatial-inputs
 sidebar: { label: "Supply Spatial Inputs" }
 ---
 
-Supply a named ID selection for each [location input](../../plugins/authoring/#declare-spatial-inputs) that your metric requires. Local execution and remote interfaces use the same selection format. This guide explains how to choose accepted sources and interpret selection failures.
+Supply a named ID selection for each [location input](../../plugins/authoring/#declare-spatial-inputs) your metric requires. To add or remove records for one run, include an intervention set in the same request. Local and remote runs use the same selection rules.
 
 ## Inspect accepted sources
 
@@ -34,6 +34,24 @@ Matching IDs or columns do not make records from different providers interchange
 
 Supply every named input independently, including supporting context. For a metric requiring explicit block and lot selections, supply both and check their completeness. [Aggregate selected lots by block](../../plugins/location-example/) demonstrates that calculation.
 
+## Prepare changes for a catalog
+
+Group all changes for one provider into a single entry in `interventions`. Set `catalog` to its public provider ID and give the set an `id` and a `revision`. Each set needs at least one change.
+
+| Change | What to supply |
+| --- | --- |
+| Add records | In `add`, include every declared column, even nullable attributes. Each ID must be unique among the additions and absent from the entire base dataset. |
+| Remove records | In `remove`, list distinct string IDs that exist in the base dataset. |
+| Replace a record | Remove the original ID and add the complete replacement under a new ID. Other records still refer to the original ID. |
+
+Prepare each addition according to the provider’s column types, units, and geometry rules. Obtain missing attributes, geocode addresses, and prepare complex geometries before submission. Reproject coordinates into the declared CRS when needed. If an earlier run selected a record you need, you can [read its retained input](../results/#read-retained-location-inputs).
+
+Keep the same set ID and revision when you reorder changes. If you change an addition or removal, change the ID or revision. For a run against the base datasets, omit `interventions` or pass an empty list.
+
+During preparation, Lyra checks every target provider and validates its addition records against its schema. Before computing or reusing a result, Lyra checks the IDs against the base dataset, even for catalogs the metric never reads. Later runs can reuse this check for the same [provider scope and set identity](../../concepts/identity/#identify-a-dataset-with-interventions).
+
+Use a [native Python proposal](../local-execution/#run-with-a-street-proposal) or send [inline JSON over HTTP or MCP](../../reference/mcp-payloads/#submit-an-inline-street-proposal).
+
 ## Understand automatic selection
 
 Lyra chooses a [canonical route](../../plugins/location-operations/#offer-canonical-public-selection) to convert your selection into the metric’s declared native input. An exact provider scope match needs no operations. Without a conversion route, an input accepts only its declared provider.
@@ -50,7 +68,7 @@ Preparation rejects invalid requests before acquisition or job creation. During 
 
 | Condition | Outcome |
 | --- | --- |
-| Malformed selection, unsupported source type, or supplied geometry | Preparation rejects the request |
+| Malformed selection, unsupported source type, or geometry inside an ID selection | Preparation rejects the request |
 | Unknown ID | Execution fails with the affected input, source scope, and unresolved IDs |
 | Existing source with no related targets | Selection returns an empty set and downstream handlers still execute |
 | Unavailable revision or invalid provider output | Execution fails |

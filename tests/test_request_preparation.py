@@ -26,6 +26,13 @@ def test_capture() -> None:
     assert prepared.parameters == {}
 
 
+def test_empty_interventions_preserve_ordinary_preparation() -> None:
+    catalog, request = routed_request()
+    ordinary = prepare_execution(catalog, request)
+    request["interventions"] = []
+    assert prepare_execution(catalog, request) == ordinary
+
+
 @pytest.mark.parametrize(
     "change",
     [

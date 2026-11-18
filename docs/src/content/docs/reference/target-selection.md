@@ -157,6 +157,16 @@ Each source location owns its correspondence group, called a result partition. C
 
 If you promise per-location independence, changing the other sources in a batch must leave each source’s result unchanged. That promise covers both selection and mapping, even when the shared candidate pool grows.
 
+## Select from a catalog with interventions
+
+Write your selector against the supplied target relation. When a request changes the target catalog, the relation contains the remaining base records and the additions. Returning the relation selects all those records. Applying a filter tests both base records and additions in the same backend.
+
+The source and target catalogs can each have their own intervention set. Your operation receives the source records after those changes. With a selector, map only IDs from the candidate frame. Lyra uses the matching target records as inputs to subsequent operations.
+
+A filter can return zero matches. If an ID-only operation requests a removed target by ID, resolution fails.
+
+DuckDB and PostGIS load additions and removal IDs on the first predicate query for each affected catalog. Later selectors and batches reuse that temporary data within the run. Exact-ID reads and membership checks need no staging. Lyra removes temporary objects before the backend closes, including after failure or cancellation. See [PostGIS privileges](../../plugins/location-providers/#postgis-relation-configuration).
+
 ## Working copies and empty selections
 
 Each callback receives independent working frames and parameter instances, including detached nested values. Selector edits cannot change the mapping handler’s inputs or retained computation identity. Mapping edits cannot change the allowed candidate IDs or authoritative records that Lyra forwards.

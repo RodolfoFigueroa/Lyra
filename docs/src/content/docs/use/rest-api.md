@@ -62,10 +62,11 @@ Submit the registered name in `metric`. Build your request from the accepted sel
 
 ## Construct the request
 
-Use separate fields for calculation parameters and named ID selections in your JSON request:
+Set `metric` to the registered name. Use the following fields for the selections, settings, and changes your run needs.
 
 - `parameters`: calculation values, such as `condition_threshold`
 - `inputs`: named ID selections, such as `streets`
+- `interventions`: an array of [inline additions and removals](../../reference/mcp-payloads/#submit-an-inline-street-proposal), with one set per target catalog
 
 This request selects one street and sets its condition threshold:
 

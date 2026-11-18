@@ -167,6 +167,11 @@ class Layout:
             sa.Column("report", sa.Text, nullable=False),
             sa.Column("description", sa.Text, nullable=False),
         )
+        self.intervention_validations = sa.Table(
+            "intervention_validations",
+            self.metadata,
+            sa.Column("validation_key", sa.Text, primary_key=True),
+        )
         self.results = sa.Table(
             "stored_results",
             self.metadata,

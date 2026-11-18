@@ -10,6 +10,8 @@ import pytest
 from typing_extensions import override
 
 from lyra.contracts.metric_scope import CachePolicy
+from lyra.contracts.provider_scope import EffectiveScope
+from lyra.data.interventions import Intervention
 from lyra.runtime.execution import ExecutionOutcome, GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import prepare_execution
@@ -22,7 +24,7 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
-from test_support.location_operations import Parameters, Places
+from test_support.location_operations import CatalogPlaces, Parameters
 from tests.cache_helpers import SCHEMA
 from tests.metric_execution_helpers import schema
 from tests.sqlite_helpers import Database, database
@@ -42,12 +44,12 @@ def chain(
     events = []
     seen = []
 
-    class Source(Places):
+    class Source(CatalogPlaces):
         id = "sources"
 
         @override
         def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
-            events.append(("sources", frozenset(ids)))
+            events.append((self.id, frozenset(ids)))
             return super().resolve(ids)
 
     class Middle(Source):
@@ -69,7 +71,7 @@ def chain(
         assert parameters.count >= 0
         events.append(("first", frozenset(source.location_id)))
         return {
-            key: (() if mode == "empty" else (key.upper(),))
+            key: (() if mode == "empty" or key == "empty" else (key.upper(),))
             for key in source.location_id
         }
 
@@ -154,7 +156,12 @@ def chain(
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )
 
-    def run(ids: tuple[str, ...] = ("a", "b", "c"), count: int = 2) -> ExecutionOutcome:
+    def run(
+        ids: tuple[str, ...] = ("a", "b", "c"),
+        count: int = 2,
+        *,
+        interventions: list[Intervention] | None = None,
+    ) -> ExecutionOutcome:
         return executor.execute(
             prepare_execution(
                 runner.catalog,
@@ -168,6 +175,7 @@ def chain(
                         }
                     },
                 },
+                native_interventions=interventions,
             )
         )
 
@@ -269,6 +277,37 @@ def test_overlapping_chain_requests_compute_only_missing_source_groups(
     assert not any(name == "first" and "b" in ids for name, ids in events)
 
 
+@pytest.mark.parametrize("initial", [("a",), ("a", "empty")])
+def test_partial_chain_hits_do_not_acquire_targets_for_cached_consumers(
+    tmp_path: Path,
+    initial: tuple[str, ...],
+    database: Database,
+) -> None:
+    run, events, seen = chain(tmp_path, "per_location")
+    changes = [
+        Intervention(id="plan", revision="1", catalog=name, remove=["outside"])
+        for name in ("middle", "targets")
+    ]
+    run(initial, interventions=changes)
+    events.clear()
+    result = run((*initial, "c"), interventions=changes)
+    assert set(result.outputs["data"].location_id) == {"shared", "c"}
+    assert seen[-1] == {("C", "c")}
+    assert [ids for name, ids in events if name == "middle"] == [frozenset({"C"})]
+    assert [ids for name, ids in events if name == "targets"] == [frozenset({"c"})]
+    roles = {
+        (
+            EffectiveScope.model_validate_json(row["owner_scope"]).intervention.catalog,
+            EffectiveScope.model_validate_json(
+                row["target_scope"]
+            ).intervention.catalog,
+        )
+        for row in database.rows["stored_results"]
+        if row["node_id"] == "second"
+    }
+    assert roles == {("middle", "targets")}
+
+
 @pytest.mark.parametrize("policy", ["off", "full", "per_location"])
 def test_separate_branch_still_acquires_required_sources(
     tmp_path: Path, policy: CachePolicy
@@ -280,6 +319,29 @@ def test_separate_branch_still_acquires_required_sources(
     assert ("sources", frozenset({"a", "b", "c"})) in events
     assert ("outer", frozenset({"a", "b", "c"})) in events
     assert not any(name in {"first", "second", "consumer"} for name, _ in events)
+
+
+@pytest.mark.parametrize("catalog", ["sources", "middle", "targets"])
+def test_effective_scopes_propagate_through_dependency_route(
+    tmp_path: Path, catalog: str
+) -> None:
+    run, events, seen = chain(tmp_path, "per_location", mode="branch")
+    baseline = run()
+    events.clear()
+    change = Intervention(
+        catalog=catalog, id="scenario", revision="1", remove=["outside"]
+    )
+    result = run(interventions=[change])
+    executed = {name for name, _ in events}
+    assert ("first" in executed) == (catalog != "targets")
+    assert {"second", "consumer"} <= executed
+    assert seen[-1] == {("A", "shared"), ("B", "shared"), ("C", "c")}
+    original = {entry.node: entry.computations for entry in baseline.completions}
+    for entry in result.completions:
+        assert entry.computations != original[entry.node]
+    events.clear()
+    run(interventions=[change])
+    assert not {"first", "second", "consumer"}.intersection(name for name, _ in events)
 
 
 def branch_metric(events: list) -> Callable:

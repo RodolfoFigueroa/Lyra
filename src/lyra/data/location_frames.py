@@ -1,5 +1,7 @@
 """Structural validation for producer location frames."""
 
+from collections.abc import Iterable
+
 import geopandas as gpd
 
 
@@ -38,4 +40,24 @@ def validate_frame(frame: gpd.GeoDataFrame, id_column: str) -> None:
         raise ValueError(msg)
     if frame.crs is None:
         msg = "GeoDataFrame requires a known CRS"
+        raise ValueError(msg)
+
+
+def validate_record_columns(
+    frame: gpd.GeoDataFrame, id_column: str, columns: Iterable[str]
+) -> None:
+    """Check the declared record shape and native IDs before coercion or encoding.
+
+    Raises:
+        ValueError: If the columns differ or an ID is invalid or repeated.
+    """
+    if not frame.columns.is_unique or set(frame.columns) != set(columns):
+        msg = "Location frame must contain exactly the declared columns"
+        raise ValueError(msg)
+    identifiers = frame[id_column]
+    if any(type(value) is not str or not value for value in identifiers):
+        msg = "Feature id must be a nonempty string"
+        raise ValueError(msg)
+    if not identifiers.is_unique:
+        msg = "IDs must be unique within the scope"
         raise ValueError(msg)

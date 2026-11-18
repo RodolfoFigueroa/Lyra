@@ -1,29 +1,77 @@
 """Read a declared PostgreSQL relation through a borrowed native backend."""
 
-from typing import ClassVar
+from functools import partial
+from typing import TYPE_CHECKING, ClassVar, cast
+from uuid import uuid4
 
 import geopandas as gpd
+import ibis
 import ibis.expr.datatypes as dt
 import ibis.expr.operations as ops
 import ibis.expr.types as ir
+import shapely
 
-from lyra.sdk.managed_provider import ManagedLocationProvider, decode_records
+from lyra.data.relational import geometry_wkt
+from lyra.sdk.managed_provider import (
+    ManagedLocationProvider,
+    StagedCatalog,
+    decode_records,
+    staging_tables,
+)
 from lyra.sdk.postgres import PostgresIO
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import compile_query_schema
 from lyra.sdk.resources import resource_dependencies
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    import pyarrow as pa
+
+    from lyra.contracts.interventions import AcceptedIntervention
+    from lyra.contracts.resources import IOConfig
+
+
+@ibis.udf.scalar.builtin(name="ST_GeomFromWKB")
+def _from_wkb(value: bytes, srid: dt.Int32) -> dt.GeoSpatial:
+    """PostGIS constructor for staged binary geometry in the registered CRS.
+
+    Raises:
+        NotImplementedError: The database implements this function.
+    """
+    raise NotImplementedError
+
+
+@ibis.udf.scalar.builtin(name="ST_GeomFromText")
+def _from_wkt(value: str, srid: dt.Int32) -> dt.GeoSpatial:
+    """PostGIS constructor for full-precision selector literals.
+
+    Raises:
+        NotImplementedError: The database implements this function.
+    """
+    raise NotImplementedError
+
 
 class PostGISLocationProvider(ManagedLocationProvider):
     """Declare one existing table, view, or materialized view and its database.
 
-    Subclasses bind ``database: Annotated[PostgresIO, Resource("key")]``.
-    The resource owns the connection; this provider only borrows it for reads.
+    Bind `database: Annotated[PostgresIO, Resource("key")]` on your subclass.
+    The database resource owns the connection. Grant its role `TEMPORARY` on
+    the database if a selector queries a catalog with additions or removals.
     """
 
     database: PostgresIO
     db_schema: ClassVar[str]
     table: ClassVar[str]
+
+    def __init__(self, config: "IOConfig", secrets: "Mapping[str, str]") -> None:
+        """Store the provider configuration for this execution."""
+        super().__init__(config, secrets)
+        self._staging = StagedCatalog()
+
+    def close(self) -> None:
+        """Drop temporary tables for this catalog before the connection closes."""
+        self._staging.close()
 
     @classmethod
     def validate_declaration(cls) -> None:
@@ -93,24 +141,100 @@ class PostGISLocationProvider(ManagedLocationProvider):
             relation.filter(relation.location_id.isin(ids)), schema
         )
 
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        """Return base membership through the borrowed backend's ID-only read."""
+        if not ids:
+            return set()
+        relation = self._base_relation(ProviderSchema(self.schema))
+        selected = relation.select("location_id")
+        selected = selected.filter(selected.location_id.isin(ids))
+        with self.database.backend.to_pyarrow_batches(selected, limit=None) as batches:
+            return set(batches.read_all()["location_id"].to_pylist())
+
     def select(self, expression: ir.Table, schema: ProviderSchema) -> gpd.GeoDataFrame:
-        """Bind a validated selector and materialize its complete matching records.
+        """Run a validated selector against the base relation.
+
+        The selector must start from a symbolic target table.
 
         Returns:
-            Native records for the shared candidate validation boundary.
-
-        Raises:
-            TypeError: If the expression is not rooted in a symbolic relation.
+            Complete records that match the selector.
         """
+        return self._select_from(self._base_relation(schema), expression, schema)
+
+    def _stage_table(self, name: str, data: "pa.Table") -> ir.Table:
+        backend = self.database.backend
+        table = backend.create_table(
+            name, schema=ibis.schema(data.schema), database="pg_temp", temp=True
+        )
+        # CREATE has committed. Register cleanup before COPY can fail, and
+        # never claim a table whose CREATE failed (including a name collision).
+        self._staging.drops.append(partial(self._drop_table, name))
+        if data.num_rows:
+            # Only the generated table name enters SQL. The driver encodes
+            # each typed cell, including BYTEA geometry and SQL NULLs.
+            with (
+                backend.begin() as cursor,
+                cursor.copy(f'COPY pg_temp."{name}" FROM STDIN') as stream,
+            ):
+                for batch in data.to_batches(max_chunksize=8192):
+                    for row in zip(
+                        *(column.to_pylist() for column in batch.columns), strict=True
+                    ):
+                        stream.write_row(row)
+        return table
+
+    def _drop_table(self, name: str) -> None:
+        # Ibis 12's drop_table emits a bare DROP TABLE with the locked SQLGlot.
+        with self.database.backend.begin() as cursor:
+            cursor.execute(f'DROP TABLE pg_temp."{name}"')
+
+    def select_effective(
+        self,
+        expression: ir.Table,
+        schema: ProviderSchema,
+        intervention: "AcceptedIntervention",
+    ) -> gpd.GeoDataFrame:
+        """Return matching records after applying additions and removals."""
+        if self._staging.relation is None:
+            base = self._base_relation(schema)
+            query = compile_query_schema(schema.schema)
+            additions, removals = staging_tables(intervention, schema, query)
+            token = uuid4().hex
+            added = self._stage_table(f"lyra_added_{token}", additions)
+            removed = self._stage_table(f"lyra_removed_{token}", removals)
+            geometry = cast("dt.GeoSpatial", query.schema["geometry"])
+            added = added.mutate(geometry=_from_wkb(added.geometry, geometry.srid))
+            remaining = base.filter(base.location_id.notin(removed.location_id))
+            # The source may expose narrower scalars or a concrete geometry
+            # subtype. Cast to common union types without constraining geometry
+            # dimensions or changing coordinates/SRIDs on the base branch.
+            remaining = remaining.mutate(
+                **{
+                    name: ops.Cast(remaining[name], to=dtype).to_expr()
+                    for name, dtype in added.schema().items()
+                    if remaining.schema()[name] != dtype
+                }
+            )
+            self._staging.relation = remaining.union(added, distinct=False)
+        return self._select_from(self._staging.relation, expression, schema)
+
+    def _select_from(
+        self, relation: ir.Table, expression: ir.Table, schema: ProviderSchema
+    ) -> gpd.GeoDataFrame:
         root = expression.op()
         while isinstance(root, ops.Filter):
             root = root.parent
         if not isinstance(root, ops.UnboundTable):
             message = "PostGIS selection requires a validated symbolic filter"
             raise TypeError(message)
-        relation = self._base_relation(schema)
         # Recursive replacement also rebinds fields referencing intermediate
         # filters. Ibis nodes are immutable, so the author expression is retained.
-        # PostgreSQL supports SRID-bearing geometry literals without translation.
-        bound = expression.op().replace({root: relation.op()}).to_expr()
+        replacements: dict[ops.Node, ops.Node] = {root: relation.op()}
+        for literal in expression.op().find(ops.Literal):
+            if isinstance(literal.dtype, dt.GeoSpatial):
+                replacements[literal] = _from_wkt(
+                    geometry_wkt(literal.value),
+                    literal.dtype.srid or int(shapely.get_srid(literal.value)),
+                ).op()
+        bound = expression.op().replace(replacements).to_expr()
         return self._materialize(bound, schema)

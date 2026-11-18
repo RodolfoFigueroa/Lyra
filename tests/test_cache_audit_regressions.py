@@ -7,7 +7,10 @@ import geopandas as gpd
 import pandas as pd
 import pytest
 
+from lyra.contracts.errors import LocationInputUnavailableError
+from lyra.data.interventions import Intervention
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.results import ResultStore
 from lyra.sdk import (
     Dependency,
     Input,
@@ -16,7 +19,7 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
-from test_support.location_operations import Places
+from test_support.location_operations import CatalogPlaces, Places
 from tests.cache_helpers import SCHEMA
 from tests.metric_execution_helpers import schema
 from tests.operation_reuse_helpers import WorkloadOptions, configured_workload
@@ -200,12 +203,16 @@ def test_shared_mapping_retention_upgrades_without_execution(
     )
 
 
-def test_derived_empty_primary_skips_other_membership(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("ids", "policy"), [([], "per_location"), (["a"], "off")])
+def test_derived_empty_primary_skips_other_membership(
+    tmp_path: Path, ids: list[str], policy: "CachePolicy"
+) -> None:
     work = []
 
     @location_operation(
         name="empty",
         description="Empty primary mapping",
+        cache=policy,
         inputs={"source": LocationDependency(provider=Places.id)},
         target_provider=Places.id,
     )
@@ -249,13 +256,43 @@ def test_derived_empty_primary_skips_other_membership(tmp_path: Path) -> None:
             "p": PluginDefinition(
                 metrics=[root],
                 location_operations=[empty, unused],
-                resources={"places": Places},
+                resources={"places": CatalogPlaces},
             )
         },
         result_store_path=tmp_path / "values.sqlite",
     )
     result = runner.run(
-        "root", inputs={"source": {"provider": Places.id, "ids": ["a"]}}
+        "root",
+        inputs={"source": {"provider": Places.id, "ids": ids}},
+        interventions=[
+            Intervention(
+                catalog=Places.id, id="changes", revision="1", remove=["outside"]
+            )
+        ],
     )
     assert result.tables["data"].empty
-    assert work == [{"a"}]
+    assert work == ([{"a"}] if ids else [])
+    result.metadata.store_path.touch()
+    with ResultStore.open(result.metadata.store_path) as reader:
+        ref = result.metadata.result_ref
+        descriptions = reader.describe_result(ref).location_inputs
+        assert descriptions["primary"].availability == "available"
+        assert descriptions["shared"].availability == "not_materialized"
+        scope = result.report.intervention_validations[0].scope
+        assert (
+            descriptions["primary"].source_scope
+            == descriptions["primary"].provider_scope
+            == scope
+        )
+        export = tmp_path / "empty.parquet"
+        reader.export_location_input_geoparquet(ref, "primary", export)
+        exported = gpd.read_parquet(export)
+        assert exported.empty
+        assert exported.crs == "EPSG:4326"
+        assert exported.attrs["lyra"]["description"] == descriptions[
+            "primary"
+        ].model_dump(mode="json")
+        with pytest.raises(LocationInputUnavailableError):
+            reader.export_location_input_geoparquet(
+                ref, "shared", tmp_path / "unavailable.parquet"
+            )

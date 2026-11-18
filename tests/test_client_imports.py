@@ -3,6 +3,7 @@
 import pytest
 
 from test_support.imports import assert_fresh_imports
+from test_support.location_resolution import SELECTED
 
 HIGHER_LAYERS = ("lyra.sdk", "lyra.data", "lyra.runtime", "lyra.server")
 NATIVE = (
@@ -287,5 +288,72 @@ def test_arrow_conversion_missing_dependency() -> None:
             assert 'pyarrow' in str(exc)
         else:
             raise AssertionError('Arrow conversion requires pyarrow')
+        """,
+    )
+
+
+def test_submission_without_native_dependencies() -> None:
+    assert_fresh_imports(
+        ["lyra.api", "lyra.data.interventions"],
+        blocked=("lyra.sdk", "lyra.runtime", "lyra.server", *NATIVE),
+        assertions="""
+        import asyncio
+        from functools import partial
+        from unittest.mock import patch
+        import httpx
+        from lyra.api import AsyncLyraClient, LyraClient
+        from lyra.data.interventions import Intervention
+        from tests.client_helpers import _job_response
+        change = Intervention(id="p", revision="1", catalog="places", remove=["001"])
+        def handle(request):
+            assert request.method == "POST"
+            return httpx.Response(202, json=_job_response())
+        transport = httpx.MockTransport(handle)
+        with patch("httpx.Client", partial(httpx.Client, transport=transport)):
+            with LyraClient("example.test") as client:
+                for changes in (None, [], [change]):
+                    client.jobs.create("metric", interventions=changes)
+        async def run():
+            async with AsyncLyraClient("example.test") as client:
+                for changes in (None, [], [change]):
+                    await client.jobs.create("metric", interventions=changes)
+        configured = partial(httpx.AsyncClient, transport=transport)
+        with patch("httpx.AsyncClient", configured):
+            asyncio.run(run())
+        """,
+    )
+
+
+def test_additions_submission_with_tables_extra() -> None:
+    provider = SELECTED.declaration.model_dump(mode="json")
+    assert_fresh_imports(
+        ["lyra.api"],
+        blocked=("lyra.sdk", "lyra.runtime", "lyra.server", "pandera"),
+        unavailable=("pyarrow",),
+        assertions=f"""
+        import json
+        from functools import partial
+        from unittest.mock import patch
+        import geopandas as gpd
+        import httpx
+        from shapely.geometry import Point
+        from lyra.api import LyraClient
+        from lyra.data.interventions import Intervention
+        from tests.client_helpers import _job_response, _metric_response
+        detail = _metric_response()
+        detail["providers"]["test_units"] = {provider!r}
+        def handle(request):
+            if request.method == "GET":
+                return httpx.Response(200, json=detail)
+            row, = json.loads(request.content)["interventions"][0]["add"]
+            assert row == dict(location_id="001", original="01", geometry="POINT (1 2)")
+            return httpx.Response(202, json=_job_response())
+        frame = gpd.GeoDataFrame(dict(location_id=["001"], original=["01"]),
+                                 geometry=[Point(1, 2)], crs=4326)
+        change = Intervention(id="p", revision="1", catalog="test_units", add=frame)
+        transport = httpx.MockTransport(handle)
+        with patch("httpx.Client", partial(httpx.Client, transport=transport)):
+            with LyraClient("example.test") as client:
+                assert client.jobs.create("metric", interventions=[change]).job_id
         """,
     )

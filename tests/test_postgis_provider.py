@@ -1,5 +1,5 @@
 from typing import Annotated, cast
-from unittest.mock import MagicMock, Mock, call
+from unittest.mock import Mock, call
 
 import geopandas as gpd
 import ibis
@@ -33,6 +33,7 @@ from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.runtime.provider_acquisition import (
     acquire_provider_candidates,
     acquire_provider_input,
+    acquire_provider_membership,
 )
 from lyra.runtime.resources import ResourceScope
 from lyra.runtime.selector_validation import validate_selector_expression
@@ -42,15 +43,13 @@ from lyra.sdk import (
     PluginDefinition,
     PostgresIO,
     Resource,
-    ResourceConfig,
-    SecretReference,
     location_operation,
     metric,
 )
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import compile_query_schema
 from test_support.location_operations import Places as SourcePlaces
-from tests.postgis_provider_helpers import Places
+from tests.postgis_provider_helpers import Places, native_postgres, setup
 from tests.provider_schema_helpers import declaration, frame
 
 
@@ -91,27 +90,6 @@ def return_records(backend: Mock, data: pd.DataFrame) -> None:
     backend.to_pyarrow_batches.side_effect = lambda *_args, **_kwargs: batch.to_reader(
         max_chunksize=1
     )
-
-
-def setup(
-    provider: type[Places] = Places,
-) -> tuple[PreparedProviderInput, ResourceScope]:
-    resources = {"places_binding": provider, "database": PostgresIO}
-    registry = compile_provider_registry(
-        {"city": PluginDefinition(resources=resources)}
-    )
-    scope = ResourceScope(
-        resources,
-        {
-            "database": ResourceConfig(
-                config={"host": "db", "database": "city", "user": "reader"},
-                secrets={"password": SecretReference(env="TEST_POSTGIS_PASSWORD")},
-            )
-        },
-    )
-    return PreparedProviderInput(
-        "places", frozenset({"a", "b"}), registry["places"]
-    ), scope
 
 
 @pytest.mark.parametrize("name", ["base_table", "existing_view", "materialized_view"])
@@ -229,6 +207,8 @@ def test_discovery_is_service_free_and_identity_ignores_binding(backend: Mock) -
     )
     registered = registry["places"]
     assert registered.query_capable
+    assert registered.membership_capable
+    assert registered.declaration.membership_capable
     assert registered.query is not None
     assert isinstance(registered.query.target_relation(), ir.Table)
     assert registered.scope == selection.provider.scope
@@ -637,19 +617,56 @@ def projected_places() -> type[Places]:
     return type("Projected", (Places,), {"schema": schema})
 
 
-def native_postgres(
-    monkeypatch: pytest.MonkeyPatch, provider: type[Places] = Places
-) -> tuple[MagicMock, MagicMock]:
-    """Keep native compilation/batch conversion and fake only service boundaries."""
-    native = Backend()
-    connection = MagicMock()
-    monkeypatch.setattr(native, "con", connection, raising=False)
-    monkeypatch.setattr(native, "reconnect", Mock())
-    query = compile_query_schema(ProviderSchema(provider.schema).schema)
-    monkeypatch.setattr(native, "get_schema", Mock(return_value=query.schema))
-    monkeypatch.setattr("ibis.backends.postgres.Backend", Mock(return_value=native))
-    monkeypatch.setenv("TEST_POSTGIS_PASSWORD", "fixture")
-    return connection, connection.cursor.return_value.__enter__.return_value
+@pytest.mark.parametrize("found", [[], ["a"], ["a", "b"]])
+def test_membership_native_id_only_batches(
+    monkeypatch: pytest.MonkeyPatch, found: list[str]
+) -> None:
+    connection, cursor = native_postgres(monkeypatch)
+    cursor.execute.return_value.fetchmany.side_effect = [[(key,)] for key in found] + [
+        []
+    ]
+    monkeypatch.setattr(ibis.options.sql, "default_limit", 1)
+    selection, scope = setup()
+    with scope.activate():
+        assert acquire_provider_membership(
+            selection.provider, ["a", "b", "missing", "a"], scope
+        ) == set(found)
+        provider = cast("Places", scope.get("places_binding"))
+        provider.close()
+        # The provider borrows this connection; only the resource owner closes it.
+        connection.close.assert_not_called()
+        assert provider.existing_ids([]) == set()
+    connection.close.assert_called_once()
+    connection.cursor.return_value.__exit__.assert_called_once()
+    # One read, with no staging/DDL privilege needed.
+    cursor.execute.assert_called_once()
+    sql = cursor.execute.call_args.args[0]
+    tree = sg.parse_one(sql, dialect="postgres")
+    assert {column.name for column in tree.find_all(sge.Column)} == {"location_id"}
+    assert {(table.db, table.name) for table in tree.find_all(sge.Table)} == {
+        ("city data", "places")
+    }
+    assert tree.find(sge.Limit) is None
+    assert "ST_" not in sql.upper()
+    assert "IN ('a', 'b', 'missing')" in sql
+
+
+@pytest.mark.parametrize("failure", ["query", "later_batch"])
+def test_membership_native_failures_close_cursor_and_owner(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    connection, cursor = native_postgres(monkeypatch)
+    primary = RuntimeError("membership query failed")
+    if failure == "query":
+        cursor.execute.side_effect = primary
+    else:
+        cursor.execute.return_value.fetchmany.side_effect = [[("a",)], primary]
+    selection, scope = setup()
+    with scope.activate(), pytest.raises(LocationAcquisitionError) as caught:
+        acquire_provider_membership(selection.provider, ["a", "missing"], scope)
+    assert caught.value.__cause__ is primary
+    connection.cursor.return_value.__exit__.assert_called_once()
+    connection.close.assert_called_once()
 
 
 @pytest.mark.parametrize("selected", [False, True])

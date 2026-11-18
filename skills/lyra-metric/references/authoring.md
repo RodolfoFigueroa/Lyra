@@ -637,6 +637,14 @@ Raise `UnresolvedLocationIDsError(self.id, "location", missing_ids)` with every 
 
 Create clients in `setup()`, release them in `close()`, and wrap acquisition in `self.operation("resolve")`. Dependencies initialize first and remain usable during cleanup; borrowers do not close them. Preparation and inspection read declarations without acquiring resources. Prepared scopes must still match before acquisition; declarations do not archive historical data.
 
+### Support intervention sets
+
+To accept interventions on a custom provider, implement the synchronous method `existing_ids(self, ids: list[str]) -> set[str]`. Check the entire base dataset under the same provider scope as `resolve()`. Return only the requested IDs present there and propagate acquisition errors. Parquet and PostGIS providers already implement this method.
+
+Before acquisition, Lyra checks each target for membership support and validates additions against its schema. It then checks all added and removed IDs in one lookup per target, even for empty selections or cached computations. Lyra can reuse a successful lookup for the same base scope and set identity. These rules also apply to catalogs the metric never reads.
+
+Use the location frames Lyra passes to your metric to calculate results for an intervention. Direct resource reads return the original source data. In a selector, filter the supplied target relation. The backend applies your predicate to the remaining base rows and the additions together.
+
 ## Select locations in operations
 
 Decorate a synchronous function with `@location_operation`. Declare its name, description, one provider-form source, and target provider; `code_revision` is optional:
@@ -1051,6 +1059,12 @@ The file path cannot identify:
 - A collection of files
 
 GeoParquet metadata must agree with the declared CRS. Plain Parquet with WKB geometry uses the schema CRS. Both managed adapters preserve registered types for empty results and reject invalid geometry encodings or CRS metadata. Prepare column names and computed attributes upstream, and reproject geometry before acquisition.
+
+### Run selectors against proposed changes
+
+On the first predicate query for a catalog with interventions, DuckDB and PostGIS stage its additions and removal IDs. Later queries for that catalog reuse the staged data within the same run.
+
+For PostGIS, grant read access to the base relation and the database’s `TEMPORARY` privilege for staging. Base membership checks and exact-ID reads need only read access. Lyra drops the run’s temporary tables after success, failure, or cancellation, including tables from partial setup. The shared database resource retains ownership of its connection.
 
 ### Declare callback signatures
 

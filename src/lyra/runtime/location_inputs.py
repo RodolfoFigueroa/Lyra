@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from lyra.contracts.provider_scope import EffectiveScope
 from lyra.contracts.references import RetrievalName
 from lyra.contracts.results import LocationInputDescription
 from lyra.contracts.value_identity import value_key
@@ -39,6 +40,7 @@ class InputSelection(BaseModel):
     registration: Registration
     records: tuple[str, ...] = ()
     operations: tuple[OperationSelection, ...] = ()
+    added_ids: tuple[str, ...] = Field(default=(), exclude_if=lambda ids: not ids)
 
     @model_validator(mode="after")
     def validate_selection(self) -> "InputSelection":
@@ -62,10 +64,19 @@ class InputSelection(BaseModel):
         membership_invalid = (
             ("source_location_id" in names) != (desc.kind == "correspondence")
             or len(set(self.records)) != len(self.records)
+            or (
+                bool(self.added_ids)
+                and not isinstance(desc.provider_scope, EffectiveScope)
+            )
+            or tuple(sorted(set(self.added_ids))) != self.added_ids
+            or (
+                desc.kind == "provider"
+                and not set(self.added_ids).issubset(self.records)
+            )
             or bool(self.operations if desc.kind == "provider" else self.records)
             or (
                 desc.availability == "not_materialized"
-                and bool(self.records or self.operations)
+                and bool(self.records or self.operations or self.added_ids)
             )
         )
         roles_invalid = any(

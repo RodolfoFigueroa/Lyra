@@ -13,7 +13,7 @@ from typing import (
     cast,
 )
 
-from lyra.api.client import endpoints
+from lyra.api.client import endpoints, submission
 from lyra.api.client.httpx import SyncHTTPTransport
 from lyra.api.client.polling import PollingState
 from lyra.api.client.results import successful_result, successful_status
@@ -37,7 +37,7 @@ from lyra.contracts.retrieval_paths import report_download_path
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
     from types import TracebackType
 
@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from lyra.contracts.reports import ExecutionReport, ExecutionReportInspection
     from lyra.contracts.results import ResultDescription, ResultRowPage
     from lyra.contracts.types import JsonObject
+    from lyra.data.interventions import Intervention
 
 _SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult)
 SuccessfulJobResult = TableJobResult
@@ -450,14 +451,18 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
+        interventions: Sequence[Intervention] | None = None,
     ) -> JobCreateResponse:
-        return self._transport.request(
-            endpoints.create_job(
-                metric,
-                inputs=inputs,
-                parameters=parameters,
+        request = endpoints.create_job(metric, inputs=inputs, parameters=parameters)
+        changes = submission.capture(interventions)
+        if changes:
+            discovery = (
+                self._transport.request(endpoints.get_metric(metric))
+                if any(change.add is not None for change in changes)
+                else None
             )
-        )
+            request = submission.with_interventions(request, changes, discovery)
+        return self._transport.request(request)
 
     def submit(
         self,
@@ -465,6 +470,7 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
+        interventions: Sequence[Intervention] | None = None,
     ) -> JobHandle[SuccessfulJobResult]:
         return JobHandle(
             self._transport,
@@ -472,6 +478,7 @@ class _JobsResource:
                 metric,
                 inputs=inputs,
                 parameters=parameters,
+                interventions=interventions,
             ),
         )
 
@@ -481,6 +488,7 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
+        interventions: Sequence[Intervention] | None = None,
         **kwargs: Unpack[RunRequestOptions],
     ) -> SuccessfulJobResult:
         if kwargs.keys() - {"options"}:
@@ -491,6 +499,7 @@ class _JobsResource:
             metric,
             inputs=inputs,
             parameters=parameters,
+            interventions=interventions,
         )
         state = PollingState(
             handle.job_id,
@@ -515,6 +524,7 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
+        interventions: Sequence[Intervention] | None = None,
         path: str | os.PathLike[str],
         **kwargs: Unpack[RunRequestOptions],
     ) -> None:
@@ -526,6 +536,7 @@ class _JobsResource:
             metric,
             inputs=inputs,
             parameters=parameters,
+            interventions=interventions,
         )
         state = PollingState(
             handle.job_id,

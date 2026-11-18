@@ -16,12 +16,18 @@ from pydantic import (
     model_validator,
 )
 
+from lyra.contracts.interventions import (
+    AcceptedIntervention,
+    InterventionSpec,
+    validate_intervention_catalogs,
+)
 from lyra.contracts.locations import (
     LocationContract,
     LocationContractReference,
     LocationSelection,
 )
 from lyra.contracts.outputs import OutputMetadata
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.revisions import BuildRevision, RevisionPlan
 from lyra.contracts.value_identity import check_json_value
 
@@ -35,6 +41,15 @@ class ExecutionRequest(BaseModel):
     metric: str
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
     inputs: dict[str, LocationSelection] = Field(default_factory=dict)
+    interventions: list[InterventionSpec] = Field(default_factory=list)
+
+    @field_validator("interventions")
+    @classmethod
+    def validate_interventions(
+        cls, values: list[InterventionSpec]
+    ) -> list[InterventionSpec]:
+        """Return independently captured sets with distinct catalogs."""
+        return deepcopy(validate_intervention_catalogs(values))
 
 
 class SubmittedRequest(BaseModel):
@@ -42,7 +57,7 @@ class SubmittedRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @field_validator("parameters", "inputs", mode="before")
+    @field_validator("parameters", "inputs", "interventions", mode="before")
     @classmethod
     def capture_values(cls, value: object) -> object:
         """Return independent values captured at construction."""
@@ -51,6 +66,15 @@ class SubmittedRequest(BaseModel):
     metric: str
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
     inputs: dict[str, LocationSelection] = Field(default_factory=dict)
+    interventions: list[AcceptedIntervention] = Field(default_factory=list)
+
+    def submission_payload(self) -> dict:
+        """Return public fields for validation against the worker's registration."""
+        payload = self.model_dump(exclude={"interventions"})
+        payload["interventions"] = [
+            value.submission_payload() for value in self.interventions
+        ]
+        return payload
 
 
 @dataclass(frozen=True)
@@ -85,6 +109,7 @@ class PreparedExecution(BaseModel):
         "revisions",
         "outputs",
         "locations",
+        "intervention_targets",
         mode="before",
     )
     @classmethod
@@ -103,6 +128,7 @@ class PreparedExecution(BaseModel):
     build_revision: BuildRevision | None
     outputs: dict[str, OutputMetadata] = Field(min_length=1)
     locations: tuple[LocationContract, ...]
+    intervention_targets: dict[str, ProviderDeclaration] = Field(default_factory=dict)
     has_parameters: bool
     description: str
 
@@ -149,7 +175,35 @@ class PreparedExecution(BaseModel):
             message = "Input bindings disagree with original request"
             raise ValueError(message)
         _validate_bindings(self, self.request)
+        _validate_intervention_targets(self)
         return self
+
+
+def _validate_intervention_targets(plan: PreparedExecution) -> None:
+    catalogs = [value.catalog for value in plan.request.interventions]
+    if (
+        len(catalogs) != len(set(catalogs))
+        or set(catalogs) != plan.intervention_targets.keys()
+    ):
+        msg = "Interventions must have exactly one pinned declaration per catalog"
+        raise ValueError(msg)
+    for value in plan.request.interventions:
+        target = plan.intervention_targets[value.catalog]
+        if target.id != value.catalog or not target.membership_capable:
+            msg = f"Incompatible pinned intervention target: {value.catalog!r}"
+            raise ValueError(msg)
+        if value.addition_schema != target.contract.family.structure.output:
+            msg = f"Addition schema differs from pinned target: {value.catalog!r}"
+            raise ValueError(msg)
+    for binding in plan.revisions.bindings:
+        target = plan.intervention_targets.get(binding.contract.collection)
+        if target is not None and (
+            target.contract.reference != binding.contract
+            or target.contract.data_revision != binding.revision
+            or target.contract not in plan.locations
+        ):
+            msg = "Intervention scope differs from the pinned computation scope"
+            raise ValueError(msg)
 
 
 def _validate_bindings(plan: PreparedExecution, request: SubmittedRequest) -> None:

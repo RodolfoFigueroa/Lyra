@@ -293,7 +293,7 @@ def create_job(
         metric=metric,
         inputs={} if inputs is None else inputs,
         parameters={} if parameters is None else parameters,
-    ).model_dump(exclude_none=True)
+    ).model_dump(exclude_unset=True)
     return RequestSpec(
         "POST",
         "jobs",

@@ -13,7 +13,7 @@ from lyra.contracts.errors import (
     LocationSelectionError,
     ResourceConfigurationError,
 )
-from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.provider_scope import DatasetScope, RecordReferences
 from lyra.runtime.native_inputs import copy_frame
 from lyra.runtime.planning.provider_preparation import (
     PreparedProviderInput,
@@ -23,7 +23,11 @@ from lyra.runtime.planning.provider_registry import RegisteredProvider
 from lyra.runtime.resources import ResourceScope
 
 if TYPE_CHECKING:
+    from lyra.contracts.interventions import AcceptedIntervention
+    from lyra.contracts.provider_scope import EffectiveScope
+    from lyra.contracts.types import JsonValue
     from lyra.runtime.provider_records import ProviderRecords
+    from lyra.sdk.locations import LocationProvider
     from lyra.sdk.managed_provider import ManagedLocationProvider
 
 
@@ -32,11 +36,84 @@ class _ExactIDProvider(Protocol):
 
 
 @dataclass(frozen=True)
+class CatalogChanges:
+    """Keep the accepted set and index its records for exact-ID access."""
+
+    accepted: "AcceptedIntervention"
+    scope: "EffectiveScope"
+    additions: dict[str, dict[str, "JsonValue"]]
+    removals: frozenset[str]
+
+
+@dataclass(frozen=True)
 class AcquiredProviderInput:
     """Native records retaining declaration identity outside mutable metadata."""
 
     frame: gpd.GeoDataFrame
-    scope: ProviderScope
+    scope: DatasetScope
+    added_ids: frozenset[str] = frozenset()
+
+
+def acquire_provider_membership(
+    registered: RegisteredProvider,
+    ids: Sequence[str],
+    resources: ResourceScope,
+) -> set[str]:
+    """Look up deduplicated base IDs once, independently of selected inputs.
+
+    Callers may submit the combined addition and removal IDs. The caller owns
+    resource cleanup; this lookup neither fetches nor publishes record values.
+
+    Returns:
+        An owned set of requested IDs present in the complete base dataset.
+
+    Raises:
+        LocationSelectionError: If submitted IDs are malformed.
+        LocationProviderContractError: If unsupported or the result is malformed.
+        ResourceConfigurationError: If resource configuration is invalid.
+        LocationAcquisitionError: If resource setup or the lookup fails.
+    """
+    name = "membership"
+    if not registered.membership_capable:
+        raise LocationProviderContractError(
+            name,
+            f"Provider {registered.scope.provider_id!r} does not support existing_ids",
+        )
+    try:
+        parsed = ProviderSelection(provider=registered.scope.provider_id, ids=list(ids))
+    except ValueError as exc:
+        raise LocationSelectionError(name, "Invalid membership IDs") from exc
+    requested = list(dict.fromkeys(parsed.ids))
+    if not requested:
+        return set()
+    try:
+        provider = cast("LocationProvider", resources.get(registered.resource))
+        with provider.operation("existing_ids"):
+            output = provider.existing_ids(list(requested))
+            return _validate_membership(output, requested)
+    except (ResourceConfigurationError, LocationProviderContractError):
+        raise
+    except Exception as exc:
+        message = (
+            "Membership acquisition failed for provider "
+            f"{registered.scope.provider_id!r}"
+        )
+        raise LocationAcquisitionError(message, ids=requested, input_name=name) from exc
+
+
+def _validate_membership(output: object, requested: list[str]) -> set[str]:
+    if (
+        not isinstance(output, set)
+        or any(type(value) is not str for value in output)
+        or not output.issubset(requested)
+    ):
+        name = "membership"
+        raise LocationProviderContractError(
+            name,
+            "Provider existing_ids must return a set of requested strict strings",
+            requested,
+        )
+    return set(output)
 
 
 def acquire_provider_candidates(
@@ -44,6 +121,7 @@ def acquire_provider_candidates(
     expression: ir.Table,
     resources: ResourceScope,
     *,
+    changes: CatalogChanges | None = None,
     records: "ProviderRecords | None" = None,
 ) -> AcquiredProviderInput:
     """Execute a validated selector and validate its complete candidate batch once.
@@ -59,7 +137,13 @@ def acquire_provider_candidates(
     try:
         provider = cast("ManagedLocationProvider", resources.get(registered.resource))
         with provider.operation("select"):
-            output = provider.select(expression, registered.schema)
+            output = (
+                provider.select_effective(
+                    expression, registered.schema, changes.accepted
+                )
+                if changes is not None
+                else provider.select(expression, registered.schema)
+            )
             frame = _validate_candidates(registered, output)
     except (ResourceConfigurationError, LocationProviderContractError):
         raise
@@ -69,9 +153,15 @@ def acquire_provider_candidates(
             f"{registered.scope.provider_id!r}"
         )
         raise LocationAcquisitionError(message, input_name="candidates") from exc
+    scope = changes.scope if changes else registered.scope
+    added = (
+        frozenset(key for key in frame.location_id if key in changes.additions)
+        if changes
+        else frozenset()
+    )
     if records is not None:
-        records.publish(registered, frame)
-    return AcquiredProviderInput(copy_frame(frame), registered.scope)
+        records.publish(registered, frame, references=RecordReferences(scope, added))
+    return AcquiredProviderInput(copy_frame(frame), scope, added)
 
 
 def _validate_candidates(

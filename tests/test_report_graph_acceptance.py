@@ -7,7 +7,9 @@ import pandas as pd
 import pytest
 
 from lyra.contracts.reports import ExecutionReport, ReportNode
+from lyra.data.interventions import Intervention
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.results import ResultStore
 from lyra.sdk import Dependency, Input, PluginDefinition, metric
 from tests.cache_helpers import SCHEMA
 from tests.receiving_route_helpers import Trace, definitions, request
@@ -161,17 +163,25 @@ def test_shared_and_distinct_uses_with_cached_consumer(
 
 
 @pytest.mark.parametrize("ids", [["a", "b"], ["empty"], []])
+@pytest.mark.parametrize("intervened", [False, True])
 def test_published_selector_stages_and_partial_reuse(
-    tmp_path: Path, ids: list[str]
+    tmp_path: Path, ids: list[str], *, intervened: bool
 ) -> None:
     plugins, events, _ = selector_definitions(target_cache=False)
     runner = LocalRunner.from_definitions(
         plugins, result_store_path=tmp_path / "results.sqlite"
     )
+    changes = [
+        Intervention(catalog=name, id=f"{name}-plan", revision="1", remove=["outside"])
+        for name in ("sources", "targets")
+        if intervened
+    ]
     for warm in (False, True):
         events.clear()
         result = runner.run(
-            "consumer", inputs={"source": {"provider": "sources", "ids": ids}}
+            "consumer",
+            inputs={"source": {"provider": "sources", "ids": ids}},
+            interventions=changes,
         )
         nodes = graph(result.report)
         operation = next(n for n in nodes.values() if n.node_id == "mapping")
@@ -184,6 +194,33 @@ def test_published_selector_stages_and_partial_reuse(
         ) == (expected,) * 3
         assert operation.origins == []
         assert operation.operation.target_scope.provider_id == "targets"
+        if intervened:
+            validations = {
+                v.scope.provider_id: v for v in result.report.intervention_validations
+            }
+            source, target = validations["sources"], validations["targets"]
+            assert (
+                source.membership_lookup
+                == target.membership_lookup
+                == ("skipped" if warm else "executed")
+            )
+            assert operation.inputs["source"].provider_scope == source.scope
+            assert operation.operation.target_scope == target.scope
+            assert (
+                nodes[result.report.root_use_id].inputs["places"].provider_scope
+                == target.scope
+            )
+            assert (
+                nodes[result.report.root_use_id].outputs["result"].owner_scope is None
+            )
+            result.metadata.store_path.touch()
+            with ResultStore.open(result.metadata.store_path) as reader:
+                saved = reader.describe_result(
+                    result.report.result_ref
+                ).location_inputs["places"]
+                assert saved.source_scope == source.scope
+                assert saved.provider_scope == target.scope
+                assert reader.read_report(result.report.execution_id) == result.report
         assert set(result.report.request.inputs) == {"source"}
         assert result.report.request.inputs["source"].ids == ids
         assert operation.outcome == ("reused" if warm and ids else expected)
@@ -195,7 +232,9 @@ def test_published_selector_stages_and_partial_reuse(
             )
     if ids == ["a", "b"]:
         result = runner.run(
-            "consumer", inputs={"source": {"provider": "sources", "ids": ["b", "c"]}}
+            "consumer",
+            inputs={"source": {"provider": "sources", "ids": ["b", "c"]}},
+            interventions=changes,
         )
         operation = next(n for n in result.report.nodes if n.node_id == "mapping")
         assert operation.outcome == "mixed"

@@ -29,3 +29,15 @@ class LocationProvider(BaseIO[ConfigT], ABC):
     @abstractmethod
     def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
         """Return exactly one record for each requested nonempty, deduplicated ID."""
+
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        """Return requested IDs present in the complete base dataset.
+
+        This optional capability reads membership without fetching records.
+        Missing IDs are omitted; resource and query failures must propagate.
+        Selections and interventions do not affect base membership.
+
+        Raises:
+            NotImplementedError: If the provider does not implement membership.
+        """
+        raise NotImplementedError

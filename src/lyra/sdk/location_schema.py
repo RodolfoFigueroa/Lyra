@@ -8,7 +8,7 @@ import pyproj
 
 from lyra.contracts.locations import LocationFamily
 from lyra.contracts.outputs import LocationOutputMetadata
-from lyra.data.location_frames import validate_frame
+from lyra.data.location_frames import validate_frame, validate_record_columns
 from lyra.sdk import storage_schema
 from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.results import validate_registered_result
@@ -101,19 +101,7 @@ class LocationOutputSchema:
         return validated.reset_index(drop=True)
 
     def _check_frame(self, frame: gpd.GeoDataFrame) -> None:
-        if not frame.columns.is_unique or set(frame.columns) != set(
-            self.schema.columns
-        ):
-            msg = "Location frame must contain exactly the declared columns"
-            raise ValueError(msg)
-        identifiers = frame[self.id_column]
-        if any(type(value) is not str or not value for value in identifiers):
-            msg = "Feature id must be a nonempty string"
-            raise ValueError(msg)
-        if not identifiers.is_unique:
-            msg = "IDs must be unique within the scope"
-            raise ValueError(msg)
-
+        validate_record_columns(frame, self.id_column, self.schema.columns)
         for name, column in self.schema.columns.items():
             if not column.nullable and frame[name].isna().any():
                 msg = f"Column {name!r} is not nullable"

@@ -42,6 +42,14 @@ class Places(LocationProvider):
         )
 
 
+class CatalogPlaces(Places):
+    """Every requested ID has a synthetic base record in this provider."""
+
+    @override
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        return set(ids)
+
+
 @location_operation(
     code_revision="1",
     inputs={"source": LocationDependency(provider=Places.id)},

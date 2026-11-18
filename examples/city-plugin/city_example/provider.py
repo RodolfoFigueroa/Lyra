@@ -34,6 +34,11 @@ class CityStreetProvider(LocationProvider):
         self.frame = street_frame(city)
 
     @override
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        """Return requested IDs present in the bundled street survey."""
+        return set(ids).intersection(self.frame.location_id)
+
+    @override
     def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
         """Return selected streets for automatic exact-membership validation."""
         with self.operation("resolve"):

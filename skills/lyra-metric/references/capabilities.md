@@ -35,8 +35,15 @@ Public requests use these values across local execution, Python clients, HTTP, a
 - `metric`: the registered public metric name
 - `inputs`: named source ID selections
 - `parameters`: ordinary calculation values
+- `interventions`: optional request-specific additions and removals, with one set per public provider ID
 
-For local runs and Python client job methods, pass the registered metric name first. Supply selections and calculation settings through keyword-only `inputs=None` and `parameters=None`. Python `None` means omission.
+For local runs and Python client job methods, pass the registered metric name first. Use the keywords `inputs`, `parameters`, and `interventions`. Python `None` means omission.
+
+Import `Intervention` from `lyra.data.interventions`. Give each set a catalog, ID, revision, and at least one addition or removal. New IDs must be absent from the base dataset. Removal IDs must exist there.
+
+For `add`, pass a GeoDataFrame in Python or an array of inline records over HTTP or MCP. Include every declared column, even nullable attributes. For `remove`, list distinct string IDs.
+
+The catalog, set ID, and revision identify immutable contents. Change the ID or revision when you change an action or attribute. Lyra includes the base scope and set identity in cache keys for dependent inputs and operation targets.
 
 HTTP `POST /jobs` accepts the shared request as its body; MCP `lyra_run_metric` accepts it as tool arguments. Lyra treats omitted mappings as empty mappings and still checks required selections and parameters.
 
@@ -110,6 +117,8 @@ Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execut
 Keep the addresses in `.metadata` to [reopen reports and results](authoring.md#persist-and-reopen-local-results). The report has matching IDs and `status="succeeded"`. Nested edits to returned values cannot change saved state or later reads; field access doesn’t make further copies.
 
 Read `report.request` for complete normalized caller selections and effective root parameters, including defaults and nulls. Derived inputs and selected routes remain in the resolved graph.
+
+Read `report.request.interventions` for all accepted changes, including additions outside the selection. To inspect the records the calculation selected, read its [retained location inputs](authoring.md#inspect-retained-location-inputs).
 
 A resolved use combines a definition with particular inputs and effective parameters. `report.nodes` contains one summary per use; several consumers of the same use share its summary. Two uses of one definition can have different `use_id` values. These IDs are local to the report, and `root_use_id` identifies the root.
 

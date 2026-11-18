@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
 from lyra.contracts.dependencies import Input
+from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.value_identity import (
     ComputationIdentity,
     check_json_value,
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from lyra.contracts.accepted import AcceptedSource, PreparedExecution
+    from lyra.contracts.interventions import AcceptedIntervention
     from lyra.contracts.locations import LocationContractReference
     from lyra.contracts.origins import Origin
     from lyra.contracts.plugins import NodeManifest
@@ -136,7 +138,14 @@ class BoundLocation:
 
     def select(self, ids: frozenset[str]) -> BoundLocation:
         """Return target owners with every incoming source pair."""
-        if ids == frozenset(self.ids or ()):
+        # Even all represented targets can exclude a completed empty source group.
+        if ids == frozenset(self.ids or ()) and (
+            not self.pairs
+            or all(
+                group is None or group in self._pair_index.forward
+                for _, group in self.computations
+            )
+        ):
             return self
         pairs = self.matching_pairs(ids, reverse=True)
         sources = {source for source, _ in pairs}
@@ -155,6 +164,8 @@ class BoundLocation:
 
     def related(self, primary: BoundLocation) -> BoundLocation | None:
         """Return related groups by following declared correspondence edges."""
+        if self is primary:
+            return self
         ancestors = {}
         current = primary
         ids = frozenset(current.ids or ())
@@ -390,12 +401,25 @@ class _Binder:
     catalog: CompiledCatalog
     uses: dict[str, dict] = field(default_factory=dict)
     routes: dict[str, AcceptedSource] = field(default_factory=dict)
+    interventions: dict[str, AcceptedIntervention] = field(default_factory=dict)
+
+    def effective_reference(
+        self, reference: LocationContractReference
+    ) -> LocationContractReference:
+        base = reference.provider_scope
+        if isinstance(base, ProviderScope) and (
+            change := self.interventions.get(base.provider_id)
+        ):
+            return reference.model_copy(
+                update={"provider_scope": change.effective_scope(base)}
+            )
+        return reference
 
     def routed(
         self, value: BoundLocation, target: LocationContractReference, key: str
     ) -> BoundLocation:
         route = self.routes[key]
-        if (route.source, route.target) != (value.provider, target):
+        if (route.source, route.target) != (value.provider.declaration, target):
             message = f"Receiving route differs from bound providers: {key}"
             raise ValueError(message)
         for index, operation in enumerate(route.operations):
@@ -411,7 +435,9 @@ class _Binder:
             raise ValueError(message)
         source_name = next(iter(node.location_inputs))
         invocation = self.visit(name, {source_name: source}, key)
-        return BoundLocation(node.output_contract.reference, None, invocation)
+        return BoundLocation(
+            self.effective_reference(node.output_contract.reference), None, invocation
+        )
 
     def visit(
         self, name: str, supplied: Mapping[str, BoundLocation], scope: str
@@ -442,7 +468,10 @@ class _Binder:
                 message = "Location binding requires an operation"
                 raise ValueError(message)
             locations[key] = BoundLocation(
-                operation.output_contract.reference, None, invocation, binding_path=path
+                self.effective_reference(operation.output_contract.reference),
+                None,
+                invocation,
+                binding_path=path,
             )
             active.remove(key)
             return locations[key]
@@ -471,7 +500,9 @@ class _Binder:
                 for key, value in dependencies.items()
             },
             origins=frozenset(node.origins) if node.kind == "metric" else frozenset(),
-            target=node.output_contract.provider_scope
+            target=self.effective_reference(
+                node.output_contract.reference
+            ).provider_scope
             if node.kind == "location_operation"
             else None,
         )
@@ -523,7 +554,7 @@ class _Binder:
                     message = "Location binding requires an operation"
                     raise ValueError(message)
                 value = BoundLocation(
-                    operation.output_contract.reference,
+                    self.effective_reference(operation.output_contract.reference),
                     None,
                     invocation,
                     binding_path=nested_path,
@@ -551,9 +582,14 @@ class _Binder:
         if self.routes != prepared.dependency_routes:
             message = "Selected dependency routes differ from accepted plan"
             raise ValueError(message)
+        self.interventions = {
+            change.catalog: change for change in prepared.request.interventions
+        }
         supplied = {}
         for item in prepared.inputs:
-            value = BoundLocation(item.binding.source, item.ids)
+            value = BoundLocation(
+                self.effective_reference(item.binding.source), item.ids
+            )
             for index, operation in enumerate(item.binding.operations):
                 value = self.operation_result(
                     operation, value, route_key(item.name, index)

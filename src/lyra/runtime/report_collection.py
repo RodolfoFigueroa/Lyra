@@ -11,6 +11,7 @@ from uuid import uuid4
 from lyra.contracts.reports import (
     DataBinding,
     ExecutionReport,
+    InterventionValidation,
     NodeOutcome,
     OperationReport,
     ParameterBinding,
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
     from lyra.contracts.accepted import PreparedExecution, SubmittedRequest
     from lyra.contracts.origins import Origin
-    from lyra.contracts.provider_scope import ProviderScope
+    from lyra.contracts.provider_scope import DatasetScope
     from lyra.runtime.planning.bindings import BoundInvocation, BoundLocation
     from lyra.runtime.planning.catalog import CompiledCatalog
 
@@ -45,7 +46,7 @@ class ResolvedUse:
 class OperationDescription:
     """Declared operation target, independent of stage observations."""
 
-    target_scope: ProviderScope
+    target_scope: DatasetScope
     target_adapter: Literal["parquet", "postgis"] | None
     has_selector: bool
 
@@ -107,6 +108,9 @@ class ReportCollection:
     )
     nodes: tuple[ReportNode, ...] | None = field(default=None, init=False)
     selectors: set[str] = field(default_factory=set, init=False)
+    intervention_validations: list[InterventionValidation] = field(
+        default_factory=list, init=False
+    )
     target_queries: set[str] = field(default_factory=set, init=False)
     _acquired: dict[str, set[str]] = field(default_factory=dict, init=False)
 
@@ -182,6 +186,7 @@ class ReportCollection:
             nodes=list(self.nodes),
             parameter_bindings=self.parameter_bindings,
             build_revision=self.build_revision,
+            intervention_validations=self.intervention_validations,
         )
 
     def observe_selector(self, bound: BoundInvocation | None) -> None:
@@ -339,7 +344,10 @@ class ReportCollection:
             }
             origins = list(dict.fromkeys(node.origins))
         else:
-            target = catalog.provider_registry[str(node.target_provider)].scope
+            target = bound.descriptor.target
+            if target is None:
+                msg = f"Missing bound target for operation {bound.node!r}"
+                raise ValueError(msg)
             operation = OperationDescription(
                 deepcopy(target),
                 catalog.provider_registry[target.provider_id].adapter,

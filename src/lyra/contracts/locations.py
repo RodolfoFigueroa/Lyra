@@ -9,7 +9,7 @@ from typing import Annotated, Self
 from pydantic import ConfigDict, Field, model_validator
 
 from lyra.contracts.outputs import LocationOutputMetadata
-from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.provider_scope import DatasetScope, EffectiveScope, ProviderScope
 from lyra.contracts.strict import StrictBaseModel
 
 CollectionName = Annotated[
@@ -43,12 +43,19 @@ class LocationContractReference(StrictBaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    provider_scope: ProviderScope | None = None
+    provider_scope: DatasetScope | None = None
     collection: CollectionName
     unit_type: UnitType
     source: Name
     geographical_edition: Name
     edition: Name | None = None
+
+    @property
+    def declaration(self) -> Self:
+        """The underlying location contract used to validate handler bindings."""
+        if isinstance(self.provider_scope, EffectiveScope):
+            return self.model_copy(update={"provider_scope": self.provider_scope.base})
+        return self
 
     @property
     def identity_payload(self) -> dict[str, object]:
@@ -64,7 +71,7 @@ class LocationUnitIdentity(StrictBaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    provider_scope: ProviderScope | None = None
+    provider_scope: DatasetScope | None = None
     collection: CollectionName
     unit_type: UnitType
     geographical_edition: Name

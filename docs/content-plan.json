@@ -391,6 +391,7 @@
       "audience": "Developers looking up an interface contract",
       "contentPlan": [
         "Submission input",
+        "Submit an inline street proposal and encode complete addition records",
         "Submission response",
         "Queued job",
         "Running job",
@@ -418,6 +419,7 @@
         "Supported filters",
         "Spatial filters and parameters",
         "Mapping and correspondence rules",
+        "Filter the effective target records and explain when the adapter stages changes",
         "Working copies and empty selections",
         "Resource access and revisions"
       ],
@@ -515,6 +517,7 @@
       "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
         "Explain provider lookup through the street request",
+        "Measure a proposed street with a native intervention set",
         "Introduce canonical conversion through block selection",
         "Explain when inspection, resources, and persistent reuse are useful",
         "Configure SQLite storage and save the path, execution ID, and result reference",
@@ -535,7 +538,7 @@
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "1. Discover a suitable metric",
-        "2. Submit once",
+        "2. Submit once, including optional inline interventions",
         "3. Observe the result",
         "4. Download the complete result",
         "Describe a retained result",
@@ -616,6 +619,7 @@
       "contentPlan": [
         "Inspect accepted sources",
         "Supply each named selection",
+        "Prepare complete additions and removals for a catalog",
         "Understand automatic selection",
         "Handle selection failures"
       ],
@@ -672,13 +676,14 @@
     "plugins/location-providers": {
       "contentType": "Reference",
       "overview": "Declare a native record schema and resolve exact IDs through a named resource.",
-      "goal": "Implement exact ID resolution through a managed resource",
+      "goal": "Implement exact ID resolution and optional membership lookup through a managed resource",
       "audience": "Plugin authors",
       "contentPlan": [
         "Declare a provider",
         "Reuse records by ID",
         "Declare the native schema",
         "Resolve a batch",
+        "Look up base membership",
         "Register and configure the resource",
         "Manage acquisition and cleanup",
         "Define revision coverage",
@@ -945,7 +950,8 @@
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
         "Choose metric names and parameters",
-        "Maintain revision coverage"
+        "Maintain revision coverage",
+        "Identify effective datasets and their dependent computations"
       ],
       "openQuestions": []
     },

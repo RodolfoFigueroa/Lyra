@@ -55,6 +55,8 @@ Each scope retains the provider and origin identities from the retained executio
 
 An omitted origin revision identifies fixed unversioned data. A provider scope and `location_id` together identify a provider record; the bare ID doesn’t identify it across datasets.
 
+For a catalog with interventions, read `base` for the provider scope and `intervention` for the catalog, set ID, and revision. In a correspondence export, check the source and target separately. Each can identify a different [effective dataset](../../concepts/identity/#identify-a-dataset-with-interventions) from the same run.
+
 Computed outputs keep their own result and named-table identity. Structural columns identify records within their applicable scopes:
 
 | Table | Structural columns |

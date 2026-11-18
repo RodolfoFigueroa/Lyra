@@ -1,6 +1,6 @@
 """Catalog-only request preparation, with no execution or acquisition."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 
 from lyra.contracts.accepted import (
@@ -10,12 +10,15 @@ from lyra.contracts.accepted import (
     SubmittedRequest,
 )
 from lyra.contracts.errors import MetricInputError
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.runtime.planning._execution_plan import (
     validate_execution_plan,
 )
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.parameters import prepare_parameter_uses
 from lyra.runtime.planning.provider_preparation import validate_provider_selections
+from lyra.sdk.interventions import Intervention, accept_interventions
 
 
 class PreparationError(MetricInputError):
@@ -24,9 +27,10 @@ class PreparationError(MetricInputError):
 
 def prepare_execution(
     catalog: CompiledCatalog,
-    request: ExecutionRequest | Mapping[str, object],
+    request: ExecutionRequest | JobCreateRequest | Mapping[str, object],
     *,
     allow_private: bool = False,
+    native_interventions: Sequence[Intervention] | None = None,
     normalized_uses: Mapping[str, dict] | None = None,
 ) -> PreparedExecution:
     """Validate and pin a request using the live catalog.
@@ -39,11 +43,13 @@ def prepare_execution(
     Raises:
         PreparationError: If identity, selections, or parameters are invalid.
     """
-    raw = (
-        request.model_dump(exclude_unset=True)
-        if isinstance(request, ExecutionRequest)
-        else dict(request)
-    )
+    if isinstance(request, ExecutionRequest | JobCreateRequest):
+        raw = request.model_dump(exclude={"interventions"})
+        # Keep the current actions and the distinction between omitted and empty add.
+        if request.interventions or "interventions" in request.model_fields_set:
+            raw["interventions"] = request.interventions
+    else:
+        raw = dict(request)
     metric = str(raw.get("metric", "<request>"))
     try:
         parsed = ExecutionRequest.model_validate(deepcopy(raw))
@@ -51,6 +57,7 @@ def prepare_execution(
             catalog,
             parsed,
             allow_private=allow_private,
+            native_interventions=native_interventions,
             normalized_uses=normalized_uses,
         )
     except (ValueError, TypeError) as exc:
@@ -62,6 +69,7 @@ def _prepare(
     request: ExecutionRequest,
     *,
     allow_private: bool,
+    native_interventions: Sequence[Intervention] | None,
     normalized_uses: Mapping[str, dict] | None,
 ) -> PreparedExecution:
     node_name = request.metric
@@ -103,8 +111,8 @@ def _prepare(
     )
     uses, dependency_routes = effective.uses, effective.routes
     parameters = uses["root"]
-    original_request = SubmittedRequest.model_validate(
-        request.model_dump() | {"parameters": parameters}
+    original_request, targets = _capture_request(
+        catalog, request, parameters, native_interventions
     )
     revisions = catalog.revisions.plan(
         node_name,
@@ -117,6 +125,7 @@ def _prepare(
         raise ValueError(message)
     return PreparedExecution(
         request=original_request,
+        intervention_targets=targets,
         node=node_name,
         inputs=tuple(inputs),
         parameters=parameters,
@@ -139,3 +148,41 @@ def _prepare(
         is not None,
         description=catalog.graph.nodes[node_name].node.description,
     )
+
+
+def _capture_request(
+    catalog: CompiledCatalog,
+    request: ExecutionRequest,
+    parameters: dict,
+    native_interventions: Sequence[Intervention] | None,
+) -> tuple[SubmittedRequest, dict[str, ProviderDeclaration]]:
+    if native_interventions is not None and (
+        "interventions" in request.model_fields_set
+        or not isinstance(native_interventions, Sequence)
+        or isinstance(native_interventions, str | bytes | bytearray)
+        or not all(isinstance(value, Intervention) for value in native_interventions)
+    ):
+        msg = "Supply native interventions as a separate sequence of Intervention"
+        raise ValueError(msg)
+    values = (
+        request.interventions if native_interventions is None else native_interventions
+    )
+    targets = {}
+    schemas = {}
+    for value in values:
+        provider = catalog.provider_registry.get(value.catalog)
+        if provider is None:
+            msg = f"Unknown intervention catalog: {value.catalog!r}"
+            raise ValueError(msg)
+        if not provider.membership_capable:
+            msg = f"Intervention target {value.catalog!r} does not support existing_ids"
+            raise ValueError(msg)
+        targets[value.catalog] = provider.declaration
+        schemas[value.catalog] = provider.schema
+    original_request = SubmittedRequest(
+        metric=request.metric,
+        parameters=parameters,
+        inputs=request.inputs,
+        interventions=list(accept_interventions(values, schemas)),
+    )
+    return original_request, targets

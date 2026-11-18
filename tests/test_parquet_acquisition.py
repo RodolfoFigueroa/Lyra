@@ -30,18 +30,16 @@ from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.operations import execute_operation, forward_correspondences
-from lyra.runtime.planning.provider_preparation import PreparedProviderInput
 from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.runtime.provider_acquisition import (
     acquire_provider_candidates,
     acquire_provider_input,
+    acquire_provider_membership,
 )
 from lyra.runtime.resources import ResourceScope
 from lyra.runtime.selector_validation import validate_selector_expression
 from lyra.sdk import (
     LocationDependency,
-    Origin,
-    ParquetLocationProvider,
     PluginDefinition,
     ResourceConfig,
     location_operation,
@@ -49,99 +47,93 @@ from lyra.sdk import (
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import compile_query_schema
 from test_support.location_operations import Places as SourcePlaces
-from test_support.location_schema import column
-from tests.provider_schema_helpers import declaration, frame
+from tests.parquet_helpers import (
+    Places,
+    backend_fixture,
+    binary_records,
+    records,
+    return_records,
+    setup,
+    source_fixture,
+    transport_schema,
+)
+from tests.provider_schema_helpers import frame
+
+__all__ = ["backend_fixture", "source_fixture"]
 
 
-class Places(ParquetLocationProvider):
-    id = "places"
-    code_revision = "1"
-    origins = (Origin(id="inventory", revision="2026"),)
-    schema = declaration()
-    schema.columns.update(
-        {
-            "label": column("string", nullable=True),
-            "height": column("Float64", nullable=True),
-            "active": column("boolean", nullable=True),
-            "integer": column("int64"),
-            "number": column("float64"),
-            "flag": column("bool"),
-        }
-    )
-
-
-def records() -> gpd.GeoDataFrame:
-    data = frame()
-    data["count"] = pd.Series([2**53 + 1, None], dtype="Int64")
-    data["label"] = pd.Series(
-        ["first", None],
-        dtype=ProviderSchema(Places.schema).schema.columns["label"].dtype.type,
-    )
-    data["height"] = pd.Series([1.25, None], dtype="Float64")
-    data["active"] = pd.Series([True, None], dtype="boolean")
-    data["integer"] = pd.Series([2**53 + 1, 2], dtype="int64")
-    data["number"] = [1.25, 2.5]
-    data["flag"] = [True, False]
-    return data[list(ProviderSchema(Places.schema).schema.columns)]
-
-
-def binary_records(data: gpd.GeoDataFrame | None = None) -> pa.Table:
-    data = records() if data is None else data
-    values = {
-        name: data[name].to_wkb() if name == "geometry" else data[name]
-        for name in data.columns
-    }
-    return pa.Table.from_pydict(
-        values,
-        schema=compile_query_schema(ProviderSchema(Places.schema).schema).interchange,
-    )
-
-
-@pytest.fixture
-def source(tmp_path: Path) -> Path:
-    path = tmp_path / "places.parquet"
-    pq.write_table(binary_records(), path)
-    return path
-
-
-@pytest.fixture
-def backend(monkeypatch: pytest.MonkeyPatch) -> Mock:
-    native = Mock(spec=Backend)
+@pytest.mark.parametrize("found", [[], ["a"], ["a", "b"]])
+def test_membership_native_id_only_batches(
+    source: Path, monkeypatch: pytest.MonkeyPatch, found: list[str]
+) -> None:
+    # Keep native compilation and Arrow wrapping; no embedded connection is opened.
+    native = Backend()
     native.con = Mock()
+    data = pa.table({"location_id": pa.array(found, type=pa.string())})
+    cursor = Mock()
+    cursor.fetch_record_batch.side_effect = lambda **_kwargs: data.to_reader(
+        max_chunksize=1
+    )
+    raw_sql = Mock(return_value=cursor)
     query = compile_query_schema(ProviderSchema(Places.schema).schema)
     types = dict(query.schema.items())
     types["geometry"] = dt.binary
-    native.read_parquet.return_value = ibis.table(types, name="configured_file")
-    native.to_pyarrow_batches.side_effect = lambda *_args, **_kwargs: (
-        binary_records().to_reader(max_chunksize=1)
+    monkeypatch.setattr(native, "reconnect", Mock())
+    monkeypatch.setattr(
+        native, "read_parquet", Mock(return_value=ibis.table(types, name="base_file"))
     )
+    monkeypatch.setattr(native, "_run_pre_execute_hooks", Mock())
+    monkeypatch.setattr(native, "raw_sql", raw_sql)
     monkeypatch.setattr("ibis.backends.duckdb.Backend", Mock(return_value=native))
-    return native
+    monkeypatch.setattr(ibis.options.sql, "default_limit", 1)
+    selection, scope = setup(source)
+    with scope.activate():
+        assert acquire_provider_membership(
+            selection.provider, ["a", "b", "missing", "a"], scope
+        ) == set(found)
+        native.con.close.assert_not_called()
+    native.con.close.assert_called_once()
+    raw_sql.assert_called_once()  # One logical membership query, even across batches.
+    sql = raw_sql.call_args.args[0]
+    tree = sg.parse_one(sql, dialect="duckdb")
+    assert {column.name for column in tree.find_all(sge.Column)} == {"location_id"}
+    assert {table.name for table in tree.find_all(sge.Table)} == {"base_file"}
+    assert tree.find(sge.Limit) is None
+    assert "ST_" not in sql.upper()
+    assert "IN ('a', 'b', 'missing')" in sql
 
 
-def setup(
-    path: Path, alias: str = "source"
-) -> tuple[PreparedProviderInput, ResourceScope]:
-    resources = {alias: Places}
-    registry = compile_provider_registry(
-        {"city": PluginDefinition(resources=resources)}
+@pytest.mark.parametrize("failure", ["query", "batch", "invalid_ids"])
+def test_membership_failure_closes_owned_backend(
+    source: Path, backend: Mock, failure: str
+) -> None:
+    primary = RuntimeError("membership query failed")
+    if failure == "query":
+        backend.to_pyarrow_batches.side_effect = primary
+    elif failure == "batch":
+
+        def batches() -> Iterator[pa.RecordBatch]:
+            yield pa.record_batch({"location_id": ["a"]})
+            raise primary
+
+        backend.to_pyarrow_batches.side_effect = lambda *_args, **_kwargs: (
+            pa.RecordBatchReader.from_batches(
+                pa.schema({"location_id": pa.string()}), batches()
+            )
+        )
+    else:
+        return_records(backend, pa.table({"location_id": [1]}))
+    selection, scope = setup(source)
+    error = (
+        LocationProviderContractError
+        if failure == "invalid_ids"
+        else LocationAcquisitionError
     )
-    return (
-        PreparedProviderInput("places", frozenset({"a", "b"}), registry["places"]),
-        ResourceScope(resources, {alias: ResourceConfig(config={"path": str(path)})}),
-    )
-
-
-def return_records(backend: Mock, data: pa.Table) -> None:
-    backend.to_pyarrow_batches.side_effect = lambda *_args, **_kwargs: data.to_reader(
-        max_chunksize=1
-    )
-
-
-def transport_schema(schema: pa.Schema) -> pa.Schema:
-    # Native DuckDB batches mark fields nullable; the producer enforces the
-    # declared nullability on their values.
-    return pa.schema([field.with_nullable(nullable=True) for field in schema])
+    with scope.activate(), pytest.raises(error) as caught:
+        acquire_provider_membership(selection.provider, ["a", "missing"], scope)
+    if failure != "invalid_ids":
+        assert caught.value.__cause__ is primary
+    backend.disconnect.assert_called_once()
 
 
 @pytest.mark.parametrize("geoparquet", [False, True])

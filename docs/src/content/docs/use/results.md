@@ -270,6 +270,8 @@ including reference inputs and operation-derived inputs. Ordinary metric depende
 are excluded. `RunResult.tables` and `read_result()` contain metric outputs; load
 geographic inputs explicitly when you need them.
 
+When you read or export an available input, Lyra returns the saved selection, including any added records the calculation selected. Retrieval uses the saved values without querying the provider again. To see every submitted change, including additions outside the selection and all removal IDs, read `report.request.interventions`.
+
 For the city result above, inspect and read the `streets` input:
 
 ```python title="reopen_result.py"

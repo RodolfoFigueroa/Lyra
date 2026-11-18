@@ -6,7 +6,7 @@ contentPlan: reference/mcp-payloads
 sidebar: { label: "MCP Payload Examples" }
 ---
 
-These Model Context Protocol (MCP) examples show JSON tool requests and responses. Response examples show `structuredContent`, with job, description, and report inspections under `structuredContent.result`. For those inspections, the text content represents the inner result; other tools represent the direct structured payload.
+These Model Context Protocol (MCP) examples show JSON requests and the values tools return in `structuredContent`. For job, description, and report inspections, read `structuredContent.result`. If you read the text response instead, job inspections include the `result` wrapper. Description and report inspections contain the value inside that wrapper.
 
 Responses can include optional `null` fields. Argument validation errors set `isError` to `true` and describe the failure in text content.
 
@@ -14,11 +14,7 @@ For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, u
 
 ## Submission input
 
-Submission accepts `metric`, `inputs`, and `parameters`. Before submitting, use `lyra_get_metric` to inspect the selected metric’s contract:
-
-- Input names
-- Accepted source types
-- Parameter schema
+Pass the registered metric name in `metric`. Use `lyra_get_metric` to find the accepted selections for `inputs` and the schema for `parameters`. Include `interventions` when you want to change a catalog for this run.
 
 For the city metric, select `city_streets` with IDs known to that provider. For another metric, use its inspected accepted selections. This request selects one street for the city maintenance metric:
 
@@ -34,6 +30,43 @@ For the city metric, select `city_streets` with IDs known to that provider. For 
   "parameters": {"condition_threshold": 50}
 }
 ```
+
+## Submit an inline street proposal
+
+Pass this JSON to `lyra_run_metric` or send it as the body of `POST /jobs`. For this run, `remove` excludes `street-1` and `add` defines its proposed replacement. The `streets` input selects the new ID, so the metric measures the proposed 150 m street.
+
+```json {4,6-16}
+{
+  "metric": "city_street_lengths",
+  "inputs": {
+    "streets": {"provider": "city_streets", "ids": ["proposed-1"]}
+  },
+  "interventions": [{
+    "catalog": "city_streets",
+    "id": "street-extension",
+    "revision": "1",
+    "add": [{
+      "location_id": "proposed-1",
+      "geometry": "LINESTRING (500050 2100000, 500050 2100150)",
+      "condition_score": 20.0
+    }],
+    "remove": ["street-1"]
+  }]
+}
+```
+
+Include every declared column in each addition. Use the provider’s schema to choose the JSON representation for each value.
+
+| Provider value | JSON representation |
+| --- | --- |
+| String or location ID | String with the original spelling, including leading zeros |
+| Signed 64-bit integer | Decimal string, such as `"42"` |
+| Finite float | JSON number |
+| Boolean | `true` or `false` |
+| Geometry | Full-precision well-known text (WKT) in the provider’s CRS |
+| Missing value in a nullable column | `null` |
+
+For additions alone, omit `remove` or send `[]`. For removals alone, omit `add` or send `[]`. Lyra rejects unknown request or intervention fields and explicit `null` for sections or actions. See [intervention validation rules](../../use/spatial-inputs/#prepare-changes-for-a-catalog).
 
 ## Submission response
 

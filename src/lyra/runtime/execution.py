@@ -6,7 +6,7 @@ import json
 import logging
 import traceback
 from collections import UserDict
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
@@ -41,6 +41,7 @@ from lyra.runtime.input_capture import (
     capture_skipped_inputs,
     remember_inputs,
 )
+from lyra.runtime.intervention_validation import validate_interventions
 from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.metric_tables import MetricTables
@@ -77,6 +78,7 @@ from lyra.runtime.planning.parameters import (
     route_key,
     use_key,
 )
+from lyra.runtime.planning.provider_registry import capture_provider
 from lyra.runtime.report_collection import ReportCollection
 from lyra.runtime.resources import ResourceScope, collect_resources
 from lyra.runtime.result_descriptions import (
@@ -89,13 +91,15 @@ from lyra.runtime.results import ExecutionMetadata, RunOutputMetadata
 from lyra.runtime.reuse import publication_required, reuse_allowed
 from lyra.runtime.sqlite_schema import Registration
 from lyra.runtime.sqlite_store import DamagedDataError, Header, SQLiteStore
+from lyra.sdk.locations import LocationProvider
 from lyra.sdk.storage_schema import empty_frame
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Generator, Mapping, Sequence
 
     from lyra.contracts.accepted import AcceptedSource
     from lyra.contracts.dependencies import LocationDependency
+    from lyra.contracts.interventions import AcceptedIntervention
     from lyra.contracts.locations import LocationContractReference
     from lyra.contracts.metric_scope import OutputScope
     from lyra.contracts.outputs import OutputMetadata
@@ -303,7 +307,8 @@ class GraphExecutor:
         resources = self._collect_resources()
         for plugin in self.plugins.values():
             plugin.definition.validate_resources(resources)
-        ResourceScope(resources, self.resource_config, self.resource_overrides)
+        scope = ResourceScope(resources, self.resource_config, self.resource_overrides)
+        self._validate_intervention_targets(prepared, scope)
         return bound
 
     def _validate_scopes(self, prepared: PreparedExecution) -> None:
@@ -349,10 +354,10 @@ class GraphExecutor:
                 "Cannot honor pinned revision: scopes differ from live definitions"
             )
             raise ValueError(message)
+
+        required = {item.contract for item in prepared.revisions.bindings}
         for provider in self.providers.values():
-            if provider.declaration.contract.reference not in {
-                item.contract for item in prepared.revisions.bindings
-            }:
+            if provider.declaration.contract.reference not in required:
                 continue
             binding = self.plugins.get(provider.distribution)
             if binding is None or not binding.matches_location_provider(
@@ -363,6 +368,34 @@ class GraphExecutor:
                     "differs or is unavailable"
                 )
                 raise ValueError(message)
+
+    def _validate_intervention_targets(
+        self, prepared: PreparedExecution, scope: ResourceScope
+    ) -> None:
+        """Verify the live schema and concrete resource class before acquisition.
+
+        Raises:
+            ValueError: If the registration or its implementation has changed.
+        """
+        for name, pinned in prepared.intervention_targets.items():
+            live = self.catalog.provider_registry.get(name)
+            expected = executable_contract(pinned)
+            if live is None or executable_contract(live.declaration) != expected:
+                msg = (
+                    f"Intervention target {name!r} differs from its pinned declaration"
+                )
+                raise ValueError(msg)
+            provider = scope.providers.get(pinned.resource)
+            if (
+                provider is None
+                or not issubclass(provider, LocationProvider)
+                or executable_contract(
+                    capture_provider(pinned.resource, provider).declaration
+                )
+                != expected
+            ):
+                msg = f"Provider {name!r} implementation differs or is unavailable"
+                raise ValueError(msg)
 
     _provenance: ExecutionProvenance | None = field(default=None, init=False)
 
@@ -384,15 +417,9 @@ class GraphExecutor:
         """
         prepared = prepared.model_copy(deep=True)
         self.validate_plan(prepared)
-        resources = self._collect_resources()
-        scope = ResourceScope(resources, self.resource_config, self.resource_overrides)
-        with scope.activate():
-            resolver = LocationResolver(
-                scope,
-                providers=self.catalog.provider_registry,
-                provider_records=self.provider_records,
-                retained_providers=self.retained_providers,
-            )
+        with self._acquisition_scope(
+            prepared.request.interventions, ReportCollection()
+        ) as resolver:
             return resolver.resolve_prepared(prepared)
 
     def _validate_implementations(
@@ -519,17 +546,59 @@ class GraphExecutor:
             completions,
         )
 
-    def _run_scoped(
-        self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
-    ) -> tuple[NativeOutputs, ExecutionMetadata]:
+    @contextmanager
+    def _acquisition_scope(
+        self,
+        interventions: Sequence[AcceptedIntervention],
+        report: ReportCollection,
+        *,
+        retain_result: bool = False,
+    ) -> Generator[LocationResolver]:
+        """Share validation resources with all subsequent acquisition.
+
+        Yields:
+            The shared location resolver after every intervention is valid.
+
+        Raises:
+            ValueError: If intervention validation has no configured store.
+        """
         store = self.provider_records.store if self.provider_records else self.store
-        if self.retain_result and store is not None:
-            with persistence_boundary(completed.report.execution_id):
+        if interventions or (retain_result and store is not None):
+            with persistence_boundary(report.execution_id):
+                if store is None:
+                    msg = "Intervention validation requires a configured store"
+                    raise ValueError(msg)
                 store.initialize()
         scope = ResourceScope(
             self._collect_resources(), self.resource_config, self.resource_overrides
         )
         with scope.activate():
+            if interventions and store is not None:
+                validate_interventions(
+                    interventions, self.catalog.provider_registry, scope, store, report
+                )
+            yield LocationResolver(
+                scope,
+                providers=self.catalog.provider_registry,
+                interventions=interventions,
+                provider_records=self.provider_records,
+                retained_providers=self.retained_providers,
+                report=report,
+            )
+
+    def _run_scoped(
+        self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
+    ) -> tuple[NativeOutputs, ExecutionMetadata]:
+        interventions = (
+            root.request.interventions if isinstance(root, PreparedExecution) else ()
+        )
+        with self._acquisition_scope(
+            interventions, completed.report, retain_result=self.retain_result
+        ) as resolver:
+            completed.resolver = resolver
+            if isinstance(root, PreparedExecution):
+                for name, selection in root.request.inputs.items():
+                    resolver.check_removals(name, selection)
             bound = completed.bound_root
             primary = (
                 root.locations.get(bound.primary_input or "")
@@ -552,10 +621,10 @@ class GraphExecutor:
                         ].select(frozenset())
                     },
                 )
-                return self._run_bound_metric(bound, completed, scope)
+                return self._run_bound_metric(bound, completed)
             if isinstance(root, PreparedExecution) and bound is not None:
-                return self._run_bound_metric(bound, completed, scope)
-            return self._execute_scoped(root, scope, completed)
+                return self._run_bound_metric(bound, completed)
+            return self._execute_scoped(root, resolver, completed)
 
     def _resolve_bound(
         self,
@@ -731,11 +800,12 @@ class GraphExecutor:
                 invocation,
                 completed,
                 (bound.node,),
-                retained=groups,
                 retain_membership=retain_membership,
             )
+            # Cached groups supply membership here. Acquire their records only
+            # if a consumer subsequently materializes those targets.
             groups.update(result.groups)
-            completed[demand.identity] = result
+            completed[invocation.identity] = result
         elif keys and (not membership or not any(groups.values())):
             completed.observations.append(
                 InvocationObservation(
@@ -798,7 +868,6 @@ class GraphExecutor:
         self,
         bound: BoundInvocation,
         completed: RunState,
-        scope: ResourceScope,
     ) -> tuple[NativeOutputs, ExecutionMetadata]:
         """Execute known root partitions with acquisition driven by cache misses.
 
@@ -808,14 +877,6 @@ class GraphExecutor:
         Raises:
             TypeError: If the bound use is not a metric.
         """
-        resolver = LocationResolver(
-            scope,
-            providers=self.catalog.provider_registry,
-            provider_records=self.provider_records,
-            retained_providers=self.retained_providers,
-            report=completed.report,
-        )
-        completed.resolver = resolver
         bound = self._resolve_bound(bound, completed)
         completed.bound_root = bound
         outputs = self._bound_metric(bound, None, (bound.node,), completed)
@@ -1138,19 +1199,11 @@ class GraphExecutor:
     def _execute_scoped(
         self,
         root: PreparedResolvedInvocation | PreparedExecution,
-        scope: ResourceScope,
+        resolver: LocationResolver,
         completed: RunState,
         *,
         primary_demand: frozenset[str] | None = None,
     ) -> tuple[NativeOutputs, ExecutionMetadata]:
-        resolver = LocationResolver(
-            scope,
-            providers=self.catalog.provider_registry,
-            provider_records=self.provider_records,
-            retained_providers=self.retained_providers,
-            report=completed.report,
-        )
-        completed.resolver = resolver
         if isinstance(root, PreparedResolvedInvocation):
             for value in root.original().locations.values():
                 resolver.retain(value)
@@ -1548,7 +1601,9 @@ class GraphExecutor:
                         invocation.identity,
                         name,
                         node.scope,
-                        primary.contract if primary is not None else None,
+                        invocation.location_contract(node.primary_input)
+                        if node.primary_input is not None
+                        else None,
                         frozenset(primary.ids) if primary is not None else frozenset(),
                         invocation.node,
                         tuple(invocation.computation_keys.items()),
@@ -1757,10 +1812,9 @@ class GraphExecutor:
         entry = self.graph.nodes[invocation.node]
         plugin = self.plugins[entry.distribution]
         key = invocation.identity
+        primary_name = entry.node.primary_input
         primary = (
-            invocation.original().locations[entry.node.primary_input]
-            if entry.node.primary_input
-            else None
+            invocation.original().locations[primary_name] if primary_name else None
         )
         selections = tuple(
             (
@@ -1768,8 +1822,10 @@ class GraphExecutor:
                     value_key=value_key,
                     node_id=invocation.node,
                     output_scope=entry.node.scope,
-                    owner_scope=primary.contract.provider_scope
-                    if primary is not None
+                    owner_scope=invocation.location_contract(
+                        primary_name
+                    ).provider_scope
+                    if primary_name
                     else None,
                 ),
                 tuple(sorted(set(primary.ids)))
@@ -1904,21 +1960,25 @@ class GraphExecutor:
         ):
             message = "Operation requires a fixed target and active resolver"
             raise ValueError(message)
-        source = next(iter(invocation.locations.values()))
-        target = self.catalog.provider_registry[node.target_provider]
-        keys = invocation.computation_keys
+        source_name, source = next(iter(invocation.locations.items()))
+        source_scope = invocation.location_contract(source_name).provider_scope
+        target_scope = (
+            invocation.bound_use.descriptor.target
+            if invocation.bound_use is not None
+            else node.output_contract.provider_scope
+        )
         selections = tuple(
             (
                 Header(
                     value_key=key,
                     node_id=invocation.node,
                     output_scope="location",
-                    owner_scope=source.contract.provider_scope,
-                    target_scope=target.scope,
+                    owner_scope=source_scope,
+                    target_scope=target_scope,
                 ),
                 source.ids if group is None else (group,),
             )
-            for group, key in keys.items()
+            for group, key in invocation.computation_keys.items()
         )
         # The caller-owned provider store is shared when available. Automatic
         # local/worker store configuration is completed in the later phases.

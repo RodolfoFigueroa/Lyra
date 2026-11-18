@@ -10,7 +10,7 @@ from shapely.errors import GEOSException
 from sqlalchemy import exc
 
 from lyra.contracts.outputs import OutputMetadata
-from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.provider_scope import DatasetScope
 from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.reports import ExecutionReport, ReportOutput
 from lyra.contracts.results import ResultDescription as PublicResultDescription
@@ -53,7 +53,7 @@ class ResultOutput(BaseModel):
 
     model_config = ConfigDict(frozen=True)
     registration_key: str
-    owner_scope: ProviderScope | None
+    owner_scope: DatasetScope | None
     computations: tuple[ComputationSelection, ...]
 
 

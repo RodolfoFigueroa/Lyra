@@ -16,6 +16,7 @@ from lyra.contracts.config import ApiConfig
 from lyra.contracts.discovery import MetricInspection
 from lyra.contracts.errors import ResultAccessError
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES
+from lyra.contracts.interventions import InterventionSpec
 from lyra.contracts.jobs import JobCreateRequest, JobId
 from lyra.contracts.reports import ExecutionReportInspection
 from lyra.contracts.results import (
@@ -67,6 +68,7 @@ _RAW_ARGUMENTS: ContextVar[dict[str, Any]] = ContextVar("mcp_raw_arguments")
 
 _T = TypeVar("_T", bound=BaseModel)
 _EMPTY_OBJECT = Field(default_factory=dict)
+_EMPTY_ARRAY = Field(default_factory=list)
 
 
 def _arguments(model: type[_T]) -> _T:
@@ -148,9 +150,13 @@ SERVER_INSTRUCTIONS = (
     "task terms when selecting a metric for a specific question. Use "
     "lyra_list_metrics only for explicit catalog-inventory requests or after "
     "focused searches return no candidates. Inspect a selected metric with "
-    "lyra_get_metric and submit `metric`, named selections in `inputs`, "
-    "and `parameters`. "
-    "Each named location input selects collection, unit_type, and nonempty ids. "
+    "lyra_get_metric. Submit the metric name in `metric` and its named selections "
+    "in `inputs`. Each selection takes a public provider ID in `provider` and a "
+    "list of strings in `ids`. To add or remove records for this run, choose an "
+    "entry in `providers` where `membership_capable` is true. Read "
+    "`contract.family.structure.output` for its columns, units, and geometry CRS. "
+    "Submit complete addition records and removal IDs in `interventions`. "
+    "Change the set ID or revision whenever its contents change. "
     "Lyra converts accepted source selections to the native input through canonical "
     "operations. Select metrics by their registered public names. "
     "Pass declared parameters under parameters. "
@@ -334,8 +340,11 @@ def create_mcp_app(
         parameters: Annotated[
             dict[str, JsonValue], JobCreateRequest.model_fields["parameters"]
         ] = _EMPTY_OBJECT,
+        interventions: Annotated[
+            list[InterventionSpec], JobCreateRequest.model_fields["interventions"]
+        ] = _EMPTY_ARRAY,
     ) -> RunMetricOutput:
-        """Submit once with `metric`, `inputs`, and `parameters`.
+        """Submit once with optional inputs, parameters, and inline interventions.
 
         Match the contract from `lyra_get_metric`.
 
@@ -346,7 +355,7 @@ def create_mcp_app(
         Returns:
             The requested domain response.
         """
-        del metric, inputs, parameters
+        del metric, inputs, parameters, interventions
         return await tools.run_metric(_arguments(JobCreateRequest), backend)
 
     @server.tool(annotations=read_only)

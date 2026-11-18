@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from functools import partial
 from glob import has_magic
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
 
 import ibis
 import ibis.expr.datatypes as dt
@@ -20,7 +22,13 @@ from ibis import udf
 from pydantic import Field, field_validator
 
 from lyra.contracts.resources import IOConfig
-from lyra.sdk.managed_provider import ManagedLocationProvider, decode_records
+from lyra.data.relational import geometry_wkt
+from lyra.sdk.managed_provider import (
+    ManagedLocationProvider,
+    StagedCatalog,
+    decode_records,
+    staging_tables,
+)
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import ProviderQuery, compile_query_schema
 
@@ -30,6 +38,8 @@ if TYPE_CHECKING:
     import geopandas as gpd
     import ibis.expr.types as ir
     from ibis.backends.duckdb import Backend
+
+    from lyra.contracts.interventions import AcceptedIntervention
 
 
 @udf.scalar.builtin(name="ST_AsWKB")
@@ -186,6 +196,7 @@ class ParquetLocationProvider(ManagedLocationProvider[ParquetConfig]):
         super().__init__(config, secrets)
         self._backend: Backend | None = None
         self._relation: ir.Table | None = None
+        self._staging = StagedCatalog()
 
     def setup(self) -> None:
         """Open one validated source and retain ownership before connecting.
@@ -217,9 +228,13 @@ class ParquetLocationProvider(ManagedLocationProvider[ParquetConfig]):
         # after the embedded connection has been assigned.
         self._backend = backend_type(extensions=["spatial"])
         self._backend.reconnect()
-        self._relation = _prepare_relation(
-            self._backend.read_parquet(str(source)), query
+        # read_parquet creates a DuckDB temporary view. Keep the physical
+        # namespace explicit when composing it with the request's staged rows.
+        file_view = self._backend.read_parquet(str(source)).op()
+        qualified = file_view.copy(
+            namespace=ops.Namespace(catalog="temp", database="main")
         )
+        self._relation = _prepare_relation(qualified.to_expr(), query)
 
     def _base_relation(self) -> ir.Table:
         """Return the shared file relation for managed acquisition.
@@ -236,8 +251,11 @@ class ParquetLocationProvider(ManagedLocationProvider[ParquetConfig]):
         """Attempt cleanup once, including after partial backend setup failure."""
         backend, self._backend = self._backend, None
         self._relation = None
-        if backend is not None and hasattr(backend, "con"):
-            backend.disconnect()
+        try:
+            self._staging.close()
+        finally:
+            if backend is not None and hasattr(backend, "con"):
+                backend.disconnect()
 
     def _materialize(
         self, relation: ir.Table, schema: ProviderSchema
@@ -275,16 +293,66 @@ class ParquetLocationProvider(ManagedLocationProvider[ParquetConfig]):
             relation.filter(relation.location_id.isin(ids)), schema
         )
 
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        """Return base membership using only the requested ID column.
+
+        Raises:
+            RuntimeError: If the source has not been initialized.
+        """
+        if not ids:
+            return set()
+        relation = self._base_relation()
+        if self._backend is None:
+            message = "Parquet provider source is not initialized"
+            raise RuntimeError(message)
+        selected = relation.select("location_id")
+        selected = selected.filter(selected.location_id.isin(ids))
+        # DuckDB Arrow fields are nullable regardless of source declarations.
+        selected = selected.cast({"location_id": "string"})
+        with self._backend.to_pyarrow_batches(selected, limit=None) as batches:
+            return set(batches.read_all()["location_id"].to_pylist())
+
     def select(self, expression: ir.Table, schema: ProviderSchema) -> gpd.GeoDataFrame:
         """Bind a validated filter to the file and decode all matching records.
 
         Returns:
             Native records for the shared candidate validation boundary.
-
-        Raises:
-            TypeError: If the expression has no symbolic filter root.
-            ValueError: If a geometry literal conflicts with the target CRS.
         """
+        return self._select_from(self._base_relation(), expression, schema)
+
+    def _register_rows(self, name: str, data: pa.Table) -> ir.Table:
+        if self._backend is None:
+            message = "Parquet provider source is not initialized"
+            raise RuntimeError(message)
+        self._backend.con.register(name, data)
+        self._staging.drops.append(partial(self._backend.con.unregister, name))
+        return ibis.table(
+            ibis.schema(data.schema), name=name, catalog="temp", database="main"
+        )
+
+    def select_effective(
+        self,
+        expression: ir.Table,
+        schema: ProviderSchema,
+        intervention: AcceptedIntervention,
+    ) -> gpd.GeoDataFrame:
+        """Return matching records, preparing the effective catalog on first use."""
+        if self._staging.relation is None:
+            base = self._base_relation()
+            query = compile_query_schema(schema.schema)
+            additions, removals = staging_tables(intervention, schema, query)
+            token = uuid4().hex
+            added = self._register_rows(f"lyra_added_{token}", additions)
+            removed = self._register_rows(f"lyra_removed_{token}", removals)
+            remaining = base.filter(base.location_id.notin(removed.location_id))
+            self._staging.relation = remaining.union(
+                _prepare_relation(added, query), distinct=False
+            )
+        return self._select_from(self._staging.relation, expression, schema)
+
+    def _select_from(
+        self, relation: ir.Table, expression: ir.Table, schema: ProviderSchema
+    ) -> gpd.GeoDataFrame:
         root = expression.op()
         while isinstance(root, ops.Filter):
             root = root.parent
@@ -305,10 +373,12 @@ class ParquetLocationProvider(ManagedLocationProvider[ParquetConfig]):
                         f"{expected_srid}; reproject source geometry first"
                     )
                     raise ValueError(message)
-            replacements[literal] = ibis.literal(
-                literal.value, type=literal.dtype.copy(srid=None)
-            ).op()
-        replacements[root] = self._base_relation().op()
+            # A string-to-geometry cast emits the one-argument constructor
+            # while allowing Lyra to control the coordinate precision.
+            replacements[literal] = (
+                ibis.literal(geometry_wkt(literal.value)).cast(literal.dtype).op()
+            )
+        replacements[root] = relation.op()
         # Recursive immutable replacement preserves fields on chained filters,
         # every predicate, and the author's original expression and coordinates.
         bound = expression.op().replace(replacements).to_expr()

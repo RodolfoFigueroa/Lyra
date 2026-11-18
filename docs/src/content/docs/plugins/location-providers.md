@@ -65,6 +65,16 @@ Calling `resolve()` directly skips the runtime’s validation. Test that validat
 
 Raise `UnresolvedLocationIDsError(self.id, "location", missing_ids)` for unknown IDs, including when none resolve. Raise `LocationAcquisitionError` for service failures, chaining the cause without including credentials. The shared runtime adds node and input context. Invalid returned frames raise `LocationProviderContractError`.
 
+## Look up base membership
+
+To support [interventions](../../use/spatial-inputs/#prepare-changes-for-a-catalog), implement the synchronous method `existing_ids(self, ids: list[str]) -> set[str]`. Return the requested IDs that exist in the base dataset as a set of strings. Omit missing IDs and propagate resource or query errors.
+
+Check the entire dataset under the same [provider scope](#define-revision-coverage) as `resolve()`, regardless of the current selection. Ordinary requests can use providers without this method. For an intervention request, Lyra checks each target for an implementation before acquiring resources.
+
+Lyra requests all added and removed IDs in one lookup, passing each ID once. Each added ID must be absent from the base dataset, and each removal ID must exist there. Lyra checks even catalogs the metric never reads. Later runs can reuse a successful check for the same provider scope and intervention identity.
+
+If you use [Parquet or PostGIS providers](#use-managed-parquet-and-postgis-providers), you inherit this method. These lookups read base IDs without creating temporary tables or requiring temporary-table privileges.
+
 ## Register and configure the resource
 
 Register each provider class in the ordinary resource mapping:
@@ -97,6 +107,8 @@ Declare [resource dependencies](../resources/#compose-resources) as annotated at
 Lyra initializes dependencies before the provider and shares one instance per registration within an execution scope. During cleanup, Lyra closes the provider before its dependencies. Don’t close injected resources in the provider’s `close()` method.
 
 Keep acquisition in managed resources and provider resolution. Location operations map source IDs to existing IDs under a fixed target provider. Their handlers don’t acquire data or consume table dependencies. Provider preparation must not invoke a graph. Metrics may acquire supporting tables through ordinary metric dependencies.
+
+Use the location records Lyra passes to your metric to calculate results for an intervention. If your metric reads the source file or database directly, it sees the original data.
 
 ## Define revision coverage
 
@@ -168,7 +180,11 @@ A `PostGISLocationProvider` reads one existing PostgreSQL table, view, or materi
 
 Import `Annotated` from `typing`; import `PostgresIO` and `Resource` from `lyra.sdk`. Configure connections and credentials on the [shared database resource](../resources/#share-a-native-postgresql-backend).
 
-The relation must expose every registered column, unique string IDs, and geometry in the declared CRS. Both acquisition paths read that relation without creating database objects or refreshing materialized views. Query strings and transformation callbacks are unsupported source definitions.
+Expose every registered column through the relation. Use unique strings for location IDs and the declared CRS for geometry. For custom queries or transformations, define a view and use its name as `table`.
+
+Read access to the relation covers exact-ID lookups and base membership checks. It also covers selectors when the request leaves this catalog unchanged.
+
+If a selector queries a catalog with additions or removals, also grant the provider’s role `TEMPORARY` on the database. On the first such query, the provider loads added records and removal IDs into temporary tables. It reuses those tables for that catalog during the run and drops them before the shared connection closes.
 
 ### Collection identity
 

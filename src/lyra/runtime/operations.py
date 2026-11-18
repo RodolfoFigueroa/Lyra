@@ -157,6 +157,7 @@ def forward_correspondences(
         frame,
         result.targets.contract,
         source_scope=result.source_scope,
+        added_ids=result.targets.added_ids,
         description=description,
         source=result.source,
     )

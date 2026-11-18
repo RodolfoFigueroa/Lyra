@@ -14,13 +14,16 @@ Lyra must save the required values and publish the result description with the c
 
 ## Read the normalized request
 
-Read `report.request` to see your complete selection and effective parameters:
+Read `report.request` to see what Lyra accepted for your run.
 
 | Field | Meaning |
 | --- | --- |
 | `metric` | Selected concrete root metric name |
 | `inputs` | Caller selections keyed by input name, each with `provider` and `ids` |
 | `parameters` | Complete effective root parameters, including defaults and nulls |
+| `interventions` | The additions and removals you requested for each catalog, including changes outside your selection |
+
+In each intervention set, `add` lists complete records and `remove` lists the IDs you asked to remove. Read `addition_schema` for the catalog’s record schema and CRS, even when you only requested removals.
 
 The request preserves your complete selection when a [route](../selection/) converts it or cache reuse narrows the work. Inputs derived through operations appear in graph bindings rather than becoming caller inputs. At return, request parameters match the root node’s `parameters` and `result.metadata.parameters`.
 
@@ -59,6 +62,8 @@ for name, binding in root.inputs.items():
 
 A [provider scope](../caching/#reuse-tables-across-executions) identifies a dataset through its provider ID, code revision, and origin identities. For an operation-derived location input, the scope describes the forwarded target records. For a metric table, find ownership in the producer’s named output description. Empty location-scoped outputs retain that ownership; unpartitioned outputs have `owner_scope=None`.
 
+When you add or remove records, the effective scope identifies the dataset your run uses. Read `base` for the original provider scope and `intervention` for the set’s catalog, ID, and revision.
+
 Lyra derives these descriptions from resolved bindings and declarations, so they remain available when execution skips or reuses work. Reporting doesn’t acquire records or save unnecessary intermediate tables. Editing a returned frame’s attributes cannot rewrite the descriptions.
 
 ## Follow named parameters
@@ -91,13 +96,22 @@ A handler that runs and returns an empty table is still `executed` when it reuse
 
 These outcomes summarize current work without counts or event histories for individual rows or partitions. They don’t reconstruct which historical execution produced cached values. Execution IDs and build revisions don’t change [cache identity](../caching/#reuse-tables-across-executions).
 
+Even when a metric reuses every result or skips a catalog, Lyra still validates each intervention set. Find the set by its `scope` in `report.intervention_validations`, then read its `membership_lookup` value.
+
+| `membership_lookup` | What Lyra did |
+| --- | --- |
+| `executed` | Queried the base dataset to confirm each added ID is new and each removal ID exists |
+| `skipped` | Reused a successful validation for the same base dataset and intervention set |
+
+Lyra reports the provider lookup as external acquisition. It excludes the records you supply and any work it does to load them into temporary tables.
+
 ## Read operation targets and stages
 
 Read `node.operation` to distinguish an operation’s target from the steps that ran. Other node kinds have `operation=None`:
 
 | Field | Meaning |
 | --- | --- |
-| `target_scope` | Declared target provider scope, independently of the source provider |
+| `target_scope` | Effective scope of the catalog the operation selects from. The operation’s input binding identifies its immediate source. |
 | `target_adapter` | Configured managed query adapter: `parquet`, `postgis`, or `None` |
 | `selector` | Whether the selector constructed its target expression |
 | `target_query` | Whether the provider executed target-query acquisition |

@@ -44,6 +44,7 @@ class RegisteredProvider:
     query: ProviderQuery | None = None
     cache: bool = False
     adapter: Literal["parquet", "postgis"] | None = None
+    membership_capable: bool = False
 
     @property
     def query_capable(self) -> bool:
@@ -59,6 +60,7 @@ class RegisteredProvider:
             description=self.description,
             cache=self.cache,
             query_capable=self.query_capable,
+            membership_capable=self.membership_capable,
             query_schema=self.query.metadata if self.query is not None else None,
         )
 
@@ -148,7 +150,14 @@ def _capture_provider(
         msg = "Registered providers must be concrete"
         raise ValueError(msg)
     cache = TypeAdapter(bool).validate_python(provider.cache, strict=True)
-    _validate_resolver(provider)
+    _validate_id_method(provider, "resolve")
+    membership = inspect.getattr_static(provider, "existing_ids")
+    membership_capable = (
+        membership is not LocationProvider.existing_ids
+        and not getattr(membership, "__isabstractmethod__", False)
+    )
+    if membership_capable:
+        _validate_id_method(provider, "existing_ids")
     if issubclass(provider, PostGISLocationProvider):
         provider.validate_declaration()
     origins = getattr(provider, "origins", None)
@@ -174,6 +183,7 @@ def _capture_provider(
         description=description,
         schema=schema,
         cache=cache,
+        membership_capable=membership_capable,
         adapter="parquet"
         if issubclass(provider, ParquetLocationProvider)
         else "postgis"
@@ -185,15 +195,15 @@ def _capture_provider(
     )
 
 
-def _validate_resolver(provider: type[LocationProvider[Any]]) -> None:
-    resolver = inspect.getattr_static(provider, "resolve")
+def _validate_id_method(provider: type[LocationProvider[Any]], name: str) -> None:
+    resolver = inspect.getattr_static(provider, name)
     if (
         not inspect.isfunction(resolver)
         or inspect.iscoroutinefunction(resolver)
         or inspect.isasyncgenfunction(resolver)
         or inspect.isgeneratorfunction(resolver)
     ):
-        message = "Provider resolve must be a synchronous, nongenerator instance method"
+        message = f"Provider {name} must be a synchronous, nongenerator instance method"
         raise ValueError(message)
     parameters = tuple(inspect.signature(resolver).parameters.values())
     if len(parameters) != 2 or any(
@@ -206,6 +216,6 @@ def _validate_resolver(provider: type[LocationProvider[Any]]) -> None:
         for argument in parameters
     ):
         message = (
-            "Provider resolve must accept only self and ids as positional arguments"
+            f"Provider {name} must accept only self and ids as positional arguments"
         )
         raise ValueError(message)

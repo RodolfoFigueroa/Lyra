@@ -18,13 +18,47 @@ if TYPE_CHECKING:
     from lyra.contracts.outputs import OutputMetadata
 
 
+_LOGICAL_DTYPES = {
+    "str": "string",
+    "string": "string",
+    "string[pyarrow]": "string",
+    "string[python]": "string",
+    "int64": "Int64",
+    "Int64": "Int64",
+    "bool": "boolean",
+    "boolean": "boolean",
+    "float64": "Float64",
+    "Float64": "Float64",
+    "geometry": "geometry",
+}
+
+
+def logical_dtype(dtype: str) -> str:
+    """Return the canonical pandas dtype for a declared relational column.
+
+    Raises:
+        ValueError: If the declared dtype has no supported cell encoding.
+    """
+    try:
+        return _LOGICAL_DTYPES[dtype]
+    except KeyError as exc:
+        msg = f"Unsupported storage dtype: {dtype}"
+        raise ValueError(msg) from exc
+
+
 @dataclass(frozen=True)
-class StorageDescription:
+class RowLayout:
+    """Column names and logical pandas dtypes used by the row codecs."""
+
+    columns: tuple[str, ...]
+    pandas_dtypes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StorageDescription(RowLayout):
     """Immutable declared layout; scalar dtypes are canonical reconstruction types."""
 
     properties: pa.Schema
-    columns: tuple[str, ...]
-    pandas_dtypes: tuple[str, ...]
     sqlite_types: tuple[str, ...]
     nullable: tuple[bool, ...]
     crs: str | None
@@ -38,13 +72,11 @@ Cell: TypeAlias = str | int | float | bool | bytes | None
 
 
 def rows_from_validated(
-    frame: pd.DataFrame, description: StorageDescription
+    frame: pd.DataFrame, description: RowLayout
 ) -> list[tuple[Cell, ...]]:
-    """Convert a private producer-validated frame using its compiled description.
+    """Convert an owned, validated frame using its declared row layout.
 
-    This internal writer boundary requires runtime ownership and matching layout.
-    External callers must first use storage_schema.prepare_native. Custom checks
-    and coercion belong to that producer boundary, never this conversion.
+    Callers validate the frame against its declaration before conversion.
 
     Returns:
         Native SQL cells, with missing scalars and geometries represented by None.
@@ -96,8 +128,15 @@ def frame_from_rows(
     return frame
 
 
+def geometry_wkt(geometry: shapely.Geometry) -> str:
+    """Return round-trippable WKT for registered geometry and spatial literals."""
+    # GEOS uses fixed notation down to 1e-4. At that magnitude 20 decimal
+    # places retain 17 significant digits, enough to round-trip a binary64.
+    return shapely.to_wkt(geometry, rounding_precision=20)
+
+
 def encode_row(
-    cells: tuple[Cell, ...], description: StorageDescription
+    cells: tuple[Cell, ...], description: RowLayout
 ) -> dict[str, str | float | bool | None]:
     """Encode declared SQL cells without rounding, reprojection, or type inference.
 
@@ -111,9 +150,7 @@ def encode_row(
         if value is None:
             row[name] = None
         elif dtype == "geometry":
-            row[name] = shapely.to_wkt(
-                shapely.from_wkb(cast("bytes", value)), rounding_precision=-1
-            )
+            row[name] = geometry_wkt(shapely.from_wkb(cast("bytes", value)))
         elif dtype == "boolean":
             row[name] = bool(value)
         elif dtype == "Float64":

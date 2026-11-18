@@ -7,16 +7,27 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 from sqlalchemy import event, exc
+from sqlalchemy.dialects.sqlite import insert
 
-from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.provider_scope import DatasetScope, RecordIdentity
 from lyra.runtime.sqlite_schema import Layout, Registration
 
 if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Generator
     from pathlib import Path
+
+
+_DATASET_SCOPE = TypeAdapter(DatasetScope)
 
 
 class MissingValueError(LookupError):
@@ -37,8 +48,8 @@ class Header(BaseModel):
     value_key: str
     node_id: str
     output_scope: Literal["location", "unpartitioned"]
-    owner_scope: ProviderScope | None = None
-    target_scope: ProviderScope | None = None
+    owner_scope: DatasetScope | None = None
+    target_scope: DatasetScope | None = None
     output_rows: dict[str, RowCount | dict[str, RowCount]] | None = None
 
     @model_validator(mode="after")
@@ -69,6 +80,16 @@ class Header(BaseModel):
             raise ValueError(msg)
         return self
 
+    @classmethod
+    def for_record(cls, key: str, record: RecordIdentity) -> Self:
+        """Return the immutable completion header for a qualified record."""
+        return cls(
+            value_key=key,
+            node_id=record.scope.provider_id,
+            output_scope="location",
+            owner_scope=record.scope,
+        )
+
     def record(self) -> dict:
         """Return native SQL cells with deterministic provider-scope metadata."""
         return {
@@ -83,7 +104,7 @@ class Header(BaseModel):
         }
 
 
-def _scope_json(scope: ProviderScope | None) -> str | None:
+def _scope_json(scope: DatasetScope | None) -> str | None:
     return None if scope is None else json.dumps(scope.identity_payload, sort_keys=True)
 
 
@@ -219,6 +240,22 @@ class SQLiteStore:
             raise DamagedDataError(msg) from error
         return tuple(self.layout.descriptions.values())
 
+    def has_intervention_validation(self, key: str) -> bool:
+        """Return whether this base scope and intervention passed validation."""
+        column = self.layout.intervention_validations.c.validation_key
+        with self.engine.connect() as connection:
+            query = sa.select(column).where(column == key)
+            return connection.execute(query).scalar_one_or_none() is not None
+
+    def publish_intervention_validation(self, key: str) -> None:
+        """Commit a successful check, allowing concurrent identical publications."""
+        table = self.layout.intervention_validations
+        statement = insert(table).on_conflict_do_nothing(
+            index_elements=[table.c.validation_key]
+        )
+        with self.transaction() as connection:
+            connection.execute(statement, {"validation_key": key})
+
     def header(
         self, connection: sa.Connection, key: str, *, required: bool = False
     ) -> Header:
@@ -254,7 +291,7 @@ class SQLiteStore:
     def _decode_header(data: dict) -> Header:
         for name in ("owner_scope", "target_scope"):
             if data[name] is not None:
-                data[name] = ProviderScope.model_validate_json(data[name])
+                data[name] = _DATASET_SCOPE.validate_json(data[name])
         if data.get("output_rows") is not None:
             data["output_rows"] = json.loads(data["output_rows"])
         return Header.model_validate(data)

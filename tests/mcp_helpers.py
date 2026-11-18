@@ -48,11 +48,13 @@ def tool_call_payload(
     }
 
 
-def tool_payload(response: httpx.Response) -> dict[str, Any]:
+def tool_payload(response: httpx.Response, *, wrapped: bool = False) -> dict[str, Any]:
     assert response.status_code == 200
     result = response.json()["result"]
-    assert json.loads(result["content"][0]["text"]) == result["structuredContent"]
-    return result["structuredContent"]
+    payload = result["structuredContent"]
+    expected = payload["result"] if wrapped and not result.get("isError") else payload
+    assert json.loads(result["content"][0]["text"]) == expected
+    return payload
 
 
 class ManagedTestClient:

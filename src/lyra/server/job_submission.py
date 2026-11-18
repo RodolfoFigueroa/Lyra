@@ -111,18 +111,7 @@ async def submit_job(
     if request.metric not in compiled.graph.nodes:
         raise UnknownMetricError(request.metric)
     try:
-        plan = prepare_execution(
-            compiled,
-            {
-                "metric": request.metric,
-                **(
-                    {"parameters": request.parameters}
-                    if "parameters" in request.model_fields_set
-                    else {}
-                ),
-                "inputs": request.inputs,
-            },
-        )
+        plan = prepare_execution(compiled, request)
     except PreparationError as exc:
         raise MetricPayloadValidationError(
             [{"loc": [], "msg": str(exc), "type": "value_error"}]

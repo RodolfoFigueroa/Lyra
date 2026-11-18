@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from lyra.contracts.metric_scope import CachePolicy
-from tests.selector_reuse_helpers import Identity, workload
+from lyra.contracts.provider_scope import EffectiveScope
+from lyra.data.interventions import Intervention
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.bindings import BoundInvocation, bind_execution
+from lyra.runtime.planning.preparation import prepare_execution
+from tests.selector_reuse_helpers import Identity, selector_definitions, workload
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
@@ -152,3 +157,75 @@ def test_candidate_records_support_later_exact_requests(
     run(("a-2", "unused"), exact=True)
     assert seen[-1] == {"a-2", "unused"}
     assert events == ([] if target_cache else [("exact", frozenset({"a-2", "unused"}))])
+
+
+@pytest.mark.parametrize("policy", ["full", "per_location"])
+def test_effective_target_controls_selector_hits_and_empty_groups(
+    tmp_path: Path, policy: CachePolicy
+) -> None:
+    run, events, seen = workload(tmp_path, policy=policy, metric_cache="full")
+    ids = ("a", "empty")
+    target = Intervention(id="plan", revision="1", catalog="targets", remove=["x", "y"])
+    source = replace(target, catalog="sources")
+    run(ids, interventions=[source])
+    events.clear()
+    run(ids, interventions=[source, target])
+    assert callbacks(events) == [
+        ("selector", frozenset(ids)),
+        ("query", frozenset({"a-2"})),
+        ("mapping", frozenset(ids)),
+    ]
+    assert ("metric", 2) in events
+    assert seen[-1] == {("a", "a-2")}
+    events.clear()
+    run(ids[::-1], interventions=[replace(target, remove=["y", "x"]), source])
+    assert events == []
+    run(("empty", "b"), interventions=[source, target])
+    expected = (
+        frozenset({"b"}) if policy == "per_location" else frozenset({"empty", "b"})
+    )
+    assert callbacks(events) == [
+        ("selector", expected),
+        ("query", frozenset({"b-2"})),
+        ("mapping", expected),
+    ]
+    assert seen[-1] == {("b", "b-2")}
+
+
+def test_operation_binds_effective_target_before_candidate_discovery() -> None:
+    definitions, events, _ = selector_definitions()
+    catalog = LocalRunner.from_definitions(definitions).catalog
+    request = {
+        "metric": "consumer",
+        "inputs": {"source": {"provider": "sources", "ids": ["a"]}},
+    }
+    change = Intervention(
+        id="scenario", catalog="targets", revision="1", remove=["outside"]
+    )
+
+    def bind(changes: list[Intervention]) -> BoundInvocation:
+        return bind_execution(
+            catalog, prepare_execution(catalog, request, native_interventions=changes)
+        )
+
+    base = bind([])
+    root = bind([change])
+    targets = root.locations["places"]
+    op = targets.upstream
+    original = base.locations["places"].upstream
+    assert original is not None
+    assert op is not None
+    assert targets.ids is None
+    effective = targets.provider.provider_scope
+    assert isinstance(effective, EffectiveScope)
+    assert op.descriptor.target == effective
+    assert effective.base == original.descriptor.target
+    assert effective.intervention.model_dump() == {
+        "catalog": "targets",
+        "id": "scenario",
+        "revision": "1",
+    }
+    assert op.locations["source"].identity == original.locations["source"].identity
+    assert op.demand().computation_keys != original.demand().computation_keys
+    assert root.identity != base.identity
+    assert events == []

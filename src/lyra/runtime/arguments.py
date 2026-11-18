@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from lyra.contracts.dependencies import LocationDependency
+    from lyra.contracts.locations import LocationContractReference
     from lyra.runtime.invocation import BoundPlugin
     from lyra.runtime.planning.bindings import BoundInvocation
     from lyra.runtime.planning.graph import ResolvedLocationDependency
@@ -99,10 +100,11 @@ class PreparedResolvedInvocation:
         if not ids.issubset(primary.ids):
             message = "Primary demand exceeds the original bound selection"
             raise ValueError(message)
-        if ids == frozenset(primary.ids):
+        selected_primary = primary.select_ids(ids)
+        if selected_primary is primary:
             return self.original()
         locations = dict(original)
-        locations[name] = primary.select_ids(ids)
+        locations[name] = selected_primary
         for key, value in original.items():
             if key != name:
                 selected = value.related_selection(locations[name])
@@ -301,6 +303,12 @@ class PreparedResolvedInvocation:
             selected = self.select_primary(primary, frozenset())
             result["empty_context"] = selected.computation_key(empty_context=True)
         return result
+
+    def location_contract(self, name: str) -> LocationContractReference:
+        """Return the dataset binding that owns this computation input."""
+        if self.bound_use is not None and self.bound_identity:
+            return self.bound_use.locations[name].provider
+        return self.locations[name].contract
 
     def arguments(self) -> dict[str, object]:
         """Return ordinary handler inputs, with independently owned native frames."""

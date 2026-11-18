@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 from lyra.contracts.outputs import ColumnMetadata
+from lyra.contracts.provider_scope import RecordReferences
 from lyra.contracts.results import LocationInputDescription
 from lyra.runtime.location_inputs import (
     InputBindings,
@@ -47,7 +48,8 @@ def capture_inputs(
     grouped: dict[str, dict[str, tuple[str, ...]]] = {}
     names = []
     for name, value in locations.items():
-        if value.contract.provider_scope is None:
+        dataset = invocation.location_contract(name).provider_scope
+        if dataset is None or value.contract.provider_scope is None:
             continue
         names.append(name)
         provider = catalog.provider_registry[value.contract.collection]
@@ -56,11 +58,12 @@ def capture_inputs(
             value.frame.drop(
                 columns=["source_location_id"], errors="ignore"
             ).drop_duplicates("location_id"),
+            references=RecordReferences(value.contract.provider_scope, value.added_ids),
         )
         registration = provider_registration(provider)
         description = LocationInputDescription(
             kind="provider",
-            provider_scope=provider.scope,
+            provider_scope=dataset,
             table_schema=provider.schema.metadata,
             availability="available",
         )
@@ -71,7 +74,7 @@ def capture_inputs(
                 raise DamagedDataError(msg)
             description = LocationInputDescription(
                 kind="correspondence",
-                provider_scope=provider.scope,
+                provider_scope=dataset,
                 source_scope=value.source_scope.provider_scope,
                 table_schema=value.description,
                 availability="available",
@@ -152,28 +155,28 @@ def _capture(
     name: str,
     partition: tuple[str | None, str | None],
 ) -> str:
-    """Return a durable reference to selected immediate membership.
-
-    Raises:
-        DamagedDataError: If operation completion is damaged.
-    """
+    """Return a durable reference to selected immediate membership."""
     primary_name, group = partition
     value = invocation.locations[name]
+    if value.source_scope is None:
+        records = (
+            _related_ids(invocation, name, primary_name, group)
+            if group is not None
+            else tuple(sorted(value.ids))
+        )
+        return retained.publish(
+            selection.model_copy(
+                update={
+                    "records": records,
+                    "added_ids": tuple(sorted(value.added_ids.intersection(records))),
+                }
+            )
+        )
     primary = invocation.locations.get(primary_name or "")
     selected = value
     if group is not None and primary is not None:
         selected = (
             value.related_selection(primary.select_ids(frozenset({group}))) or value
-        )
-    if value.source_scope is None:
-        return retained.publish(
-            selection.model_copy(
-                update={
-                    "records": _related_ids(invocation, name, primary_name, group)
-                    if group is not None
-                    else tuple(sorted(value.ids))
-                }
-            )
         )
     computations = selected.computations
     targets = tuple(sorted(selected.ids))
@@ -187,13 +190,31 @@ def _capture(
             selected_sources = {source for source, _ in related.pairs}
             computations = related.computations
             targets = tuple(sorted(set(related.ids or ()) & set(value.ids)))
+    return retained.publish(
+        selection.model_copy(
+            update={
+                "operations": _operation_selections(
+                    retained.store, computations, selected_sources, targets
+                ),
+                "added_ids": tuple(sorted(value.added_ids.intersection(targets))),
+            }
+        )
+    )
+
+
+def _operation_selections(
+    store: "SQLiteStore",
+    computations: tuple[tuple[str, str | None], ...],
+    selected_sources: set[str],
+    targets: tuple[str, ...],
+) -> tuple[OperationSelection, ...]:
     references = {}
     for key, source in computations:
         references.setdefault(key, []).append(source)
     operations = []
-    with retained.store.engine.connect() as connection:
+    with store.engine.connect() as connection:
         for key, sources in references.items():
-            header = retained.store.header(connection, key, required=True)
+            header = store.header(connection, key, required=True)
             counts = header.output_rows["pairs"] if header.output_rows else {}
             if not isinstance(counts, dict):
                 msg = "Missing operation completion"
@@ -209,9 +230,7 @@ def _capture(
                     targets=targets,
                 )
             )
-    return retained.publish(
-        selection.model_copy(update={"operations": tuple(operations)})
-    )
+    return tuple(operations)
 
 
 def capture_skipped_inputs(
@@ -281,10 +300,12 @@ def capture_skipped_inputs(
                             targets=value.ids,
                         )
                     )
-        available = value.ids == () and (not derived or bool(operations))
+        # None is unresolved. A resolved empty membership can have no operation
+        # computations when there were zero source partitions.
+        available = value.ids == ()
         description = LocationInputDescription(
             kind="correspondence" if derived else "provider",
-            provider_scope=provider.scope,
+            provider_scope=value.provider.provider_scope or provider.scope,
             source_scope=source.provider.provider_scope if source else None,
             table_schema=schema,
             availability="available" if available else "not_materialized",

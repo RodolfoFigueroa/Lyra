@@ -207,7 +207,7 @@ class BoundPlugin:
         if node.has_target_selector:
             if (
                 candidates is None
-                or candidates.contract != node.output_contract.reference
+                or candidates.contract.declaration != node.output_contract.reference
             ):
                 message = "Mapping requires candidates from its registered target"
                 raise ValueError(message)
@@ -342,7 +342,7 @@ class BoundPlugin:
         self, name: str, field: str, value: NativeLocationInput
     ) -> None:
         declared = self._get(name).manifest.location_inputs[field].contract
-        if value.contract != declared.reference:
+        if value.contract.declaration != declared.reference:
             message = f"Location input {field!r} differs from its concrete contract"
             raise ValueError(message)
 

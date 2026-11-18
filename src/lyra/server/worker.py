@@ -439,7 +439,7 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
     try:
         live = prepare_execution(
             entry.catalog,
-            plan.request.model_dump(),
+            plan.request.submission_payload(),
             normalized_uses=plan.parameter_uses,
         )
     except ValueError as exc:

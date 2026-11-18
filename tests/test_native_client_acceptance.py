@@ -23,6 +23,7 @@ from lyra.api import (
     LyraClient,
     RunOptions,
 )
+from lyra.data.interventions import Intervention
 from tests.client_helpers import (
     ClientRuntime,
     _job_response,
@@ -59,14 +60,36 @@ def native_factory(
     return install
 
 
+def _expected_body(sections: dict[str, Any]) -> dict:
+    body = {
+        "metric": "metric",
+        "inputs": deepcopy(sections.get("inputs") or {}),
+        "parameters": deepcopy(sections.get("parameters") or {}),
+    }
+    if sections.get("interventions"):
+        body["interventions"] = [
+            {
+                "id": change.id,
+                "catalog": change.catalog,
+                "revision": change.revision,
+                "remove": list(change.remove),
+            }
+            for change in sections["interventions"]
+        ]
+    return body
+
+
 @pytest.mark.parametrize("method", ["create", "submit", "run", "run_to_file"])
 @pytest.mark.parametrize(
     "sections",
     [
         {},
-        {"inputs": None, "parameters": None},
-        {"inputs": {}, "parameters": {}},
+        {"inputs": None, "parameters": None, "interventions": None},
+        {"inputs": {}, "parameters": {}, "interventions": []},
         {
+            "interventions": [
+                Intervention(id="p", revision="v1", catalog="trees", remove=["01"])
+            ],
             "inputs": {"places": {"ids": ["one"]}},
             "parameters": {"nested": [None, {"value": "área"}]},
         },
@@ -83,7 +106,7 @@ def test_native_submission_workflow(
 ) -> None:
     requests: list[httpx.Request] = []
     responses: list[httpx.Response] = []
-    original = deepcopy(sections)
+    original = _expected_body(sections)
     job_id = "lyra://results/λ?#"
     result_payload = _result_response() | {"job_id": job_id}
 
@@ -127,16 +150,12 @@ def test_native_submission_workflow(
         else:
             assert outcome.job_id == job_id
         assert len(requests) == (3 if method in {"run", "run_to_file"} else 1)
-        assert json.loads(requests[0].content) == {
-            "metric": "metric",
-            "inputs": sections.get("inputs") or {},
-            "parameters": sections.get("parameters") or {},
-        }
+        assert json.loads(requests[0].content) == original
         if method == "submit":
             _observe_handle(outcome, client_runtime, job_id)
         _check_job_requests(requests[1:], job_id)
         assert requests[0].url.path == "/base/jobs"
-        assert sections == original
+        assert _expected_body(sections) == original
         assert all(response.is_closed for response in responses)
         for request in requests:
             assert request.headers["Authorization"] == "Bearer consumer"

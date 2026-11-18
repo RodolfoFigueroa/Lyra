@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
-    from lyra.contracts.provider_scope import ProviderScope
+    from lyra.contracts.provider_scope import DatasetScope
     from lyra.data.relational import Cell
     from lyra.runtime.sqlite_schema import DataTable, Registration
     from lyra.runtime.sqlite_store import Header, SQLiteStore
@@ -201,7 +201,7 @@ class OutputSelection:
 
     connection: sa.Connection
     registration: Registration
-    owner_scope: ProviderScope | None
+    owner_scope: DatasetScope | None
     computations: tuple[ComputationRows, ...]
 
     def batches(

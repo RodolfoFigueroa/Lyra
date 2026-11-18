@@ -379,7 +379,9 @@ def test_bound_pair_snapshots_preserve_order_and_shared_targets(
     shared = target.select(frozenset({"Y"}))
     assert shared.pairs == tuple(pair for pair in pairs if pair[1] == "Y")
     assert shared.computations == (("all", None), ("a", "A"), ("b", "B"))
-    assert target.select(frozenset({"Y", "X"})) is target
+    represented = target.select(frozenset({"Y", "X"}))
+    assert represented.pairs == pairs
+    assert represented.computations == (("all", None), ("a", "A"), ("b", "B"))
     assert shared.select(frozenset({"X"})).pairs == ()
     assert target.identity == identity
     assert replace(target) == target

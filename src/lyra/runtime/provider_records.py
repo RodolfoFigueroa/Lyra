@@ -9,13 +9,13 @@ import sqlalchemy as sa
 from shapely.errors import GEOSException
 from sqlalchemy import exc
 
-from lyra.contracts.provider_scope import RecordIdentity
+from lyra.contracts.provider_scope import RecordIdentity, RecordReferences
 from lyra.data.relational import frame_from_rows, rows_from_validated
 from lyra.runtime.sqlite_schema import Registration
 from lyra.runtime.sqlite_store import DamagedDataError, Header
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     import geopandas as gpd
 
@@ -37,7 +37,13 @@ class ProviderRecords:
         """Bind the shared store without database access."""
         self.store = store
 
-    def publish(self, provider: RegisteredProvider, frame: gpd.GeoDataFrame) -> None:
+    def publish(
+        self,
+        provider: RegisteredProvider,
+        frame: gpd.GeoDataFrame,
+        *,
+        references: RecordReferences | None = None,
+    ) -> None:
         """Atomically retain a validated batch, keeping previously published values."""
         if frame.empty:
             return
@@ -48,23 +54,23 @@ class ProviderRecords:
             self.store.layout.register(registration)
         data = self.store.layout.tables[registration.key]
         rows = rows_from_validated(frame, provider.schema.storage)
-        records = [
-            dict(zip(provider.schema.storage.columns, row, strict=True)) for row in rows
-        ]
-        keys = {
-            RecordIdentity(
-                scope=provider.scope, location_id=str(row["location_id"])
-            ).key: row
-            for row in records
-        }
+        by_id = {}
+        for row in rows:
+            record = dict(zip(provider.schema.storage.columns, row, strict=True))
+            by_id[record["location_id"]] = record
+        keys = self._keys(provider, frame["location_id"], references)
         with self.store.transaction() as connection:
-            existing = self._read(connection, provider, tuple(keys))
-            pending = {key: row for key, row in keys.items() if key not in existing}
+            existing = self._read(connection, provider, keys)
+            pending = {
+                key: by_id[record.location_id]
+                for key, record in keys.items()
+                if key not in existing
+            }
             if not pending:
                 return
             connection.execute(
                 self.store.layout.results.insert(),
-                [self._header(provider, key).record() for key in pending],
+                [Header.for_record(key, keys[key]).record() for key in pending],
             )
             connection.execute(
                 self.store.layout.partitions.insert(),
@@ -79,13 +85,16 @@ class ProviderRecords:
             )
 
     @staticmethod
-    def _header(provider: RegisteredProvider, key: str) -> Header:
-        return Header(
-            value_key=key,
-            node_id=provider.scope.provider_id,
-            output_scope="location",
-            owner_scope=provider.scope,
-        )
+    def _keys(
+        provider: RegisteredProvider,
+        ids: Iterable[str],
+        references: RecordReferences | None,
+    ) -> dict[str, RecordIdentity]:
+        references = references or RecordReferences(provider.scope)
+        if references.base != provider.scope:
+            msg = "Record references differ from the registered provider scope"
+            raise ValueError(msg)
+        return references.by_key(ids)
 
     def lookup(
         self,
@@ -93,18 +102,14 @@ class ProviderRecords:
         ids: Sequence[str],
         *,
         required: bool = False,
+        references: RecordReferences | None = None,
     ) -> gpd.GeoDataFrame:
         """Return retained records in one grouped read, with absent IDs omitted.
 
         Raises:
             DamagedDataError: If required records or completed record data are damaged.
         """
-        keys = tuple(
-            dict.fromkeys(
-                RecordIdentity(scope=provider.scope, location_id=location).key
-                for location in ids
-            )
-        )
+        keys = self._keys(provider, ids, references)
         if not keys:
             return provider.schema.empty_frame()
         self.store.load_registrations()
@@ -132,7 +137,7 @@ class ProviderRecords:
         self,
         connection: sa.Connection,
         provider: RegisteredProvider,
-        keys: tuple[str, ...],
+        keys: dict[str, RecordIdentity],
     ) -> dict[str, dict]:
         try:
             return self._read_records(connection, provider, keys)
@@ -150,7 +155,7 @@ class ProviderRecords:
         self,
         connection: sa.Connection,
         provider: RegisteredProvider,
-        keys: tuple[str, ...],
+        keys: dict[str, RecordIdentity],
     ) -> dict[str, dict]:
         layout = self.store.layout
         headers = list(
@@ -167,7 +172,10 @@ class ProviderRecords:
             raise DamagedDataError(msg)
         found = {row["value_key"] for row in headers}
         for row in headers:
-            if dict(row) != self._header(provider, row["value_key"]).record():
+            if (
+                dict(row)
+                != Header.for_record(row["value_key"], keys[row["value_key"]]).record()
+            ):
                 msg = "Provider header scope differs"
                 raise DamagedDataError(msg)
         partitions = list(
@@ -195,10 +203,7 @@ class ProviderRecords:
             key = row[data.value_column]
             if (
                 row["location_id"] != owners[key]
-                or RecordIdentity(
-                    scope=provider.scope, location_id=row["location_id"]
-                ).key
-                != key
+                or row["location_id"] != keys[key].location_id
                 or any(
                     row[column.name] is None
                     for column in registration.columns

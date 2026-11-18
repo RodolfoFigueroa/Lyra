@@ -37,6 +37,14 @@ Omitting `code_revision` is equivalent to declaring `None`. Lyra preserves nonbl
 - [Provider contracts](../../plugins/location-providers/): source declarations
 - [Register concrete metrics](../../plugins/metrics/): calculation names and dependencies
 
+## Identify a dataset with interventions
+
+An effective dataset is the base dataset after your additions and removals. Its identity combines the base provider scope with the `(catalog, id, revision)` of your [intervention set](../../use/spatial-inputs/#prepare-changes-for-a-catalog). Reuse that combination only for the same changes.
+
+For example, two proposals can add a street with the same ID and different lengths. Lyra stores the added street separately for each proposal. Base records keep their original keys in both runs.
+
+Lyra includes the effective dataset identity in cache keys for calculations that use its records. For an operation, Lyra includes the target identity before running the selector. Two target revisions have distinct cache keys even when the selector returns the same IDs. Calculations independent of that catalog can still reuse their results.
+
 ## Distinguish discovery from computation identity
 
 Lyra uses three identities for different decisions:

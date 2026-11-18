@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, model_validator
 
 from lyra.contracts.outputs import OutputMetadata
-from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.provider_scope import DatasetScope
 from lyra.contracts.references import ExecutionID, ResultReference, RetrievalName
 from lyra.contracts.reports import ReportOutput
 from lyra.contracts.strict import StrictBaseModel
@@ -17,8 +17,8 @@ class LocationInputDescription(StrictBaseModel):
 
     kind: Literal["provider", "correspondence"]
     table_schema: OutputMetadata
-    provider_scope: ProviderScope
-    source_scope: ProviderScope | None = None
+    provider_scope: DatasetScope
+    source_scope: DatasetScope | None = None
     availability: Literal["available", "not_materialized"]
 
     @model_validator(mode="after")

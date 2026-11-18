@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from lyra.contracts.origins import Origin
-    from lyra.contracts.provider_scope import ProviderScope
+    from lyra.contracts.provider_scope import DatasetScope
 
 
 def check_json_value(value: object, path: str = "value") -> None:
@@ -56,7 +56,7 @@ class ComputationIdentity:
     inputs: dict
     primary_input: str | None = None
     origins: frozenset[Origin] = frozenset()
-    target: ProviderScope | None = None
+    target: DatasetScope | None = None
     computation_scope: Literal["complete", "per_location"] = "complete"
 
     @property

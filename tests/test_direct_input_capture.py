@@ -13,19 +13,26 @@ from lyra.contracts.errors import (
     LocationInputUnavailableError,
 )
 from lyra.contracts.metric_scope import CachePolicy
+from lyra.contracts.provider_scope import RecordReferences
 from lyra.contracts.results import LocationInputDescription
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
-from lyra.runtime.input_capture import capture_skipped_inputs, remember_inputs
+from lyra.runtime.input_capture import (
+    capture_inputs,
+    capture_skipped_inputs,
+    remember_inputs,
+)
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.location_inputs import InputBindings, InputSelection, LocationInputs
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.bindings import BoundLocation
+from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.provider_records import ProviderRecords, provider_registration
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.results import ResultStore
-from lyra.runtime.sqlite_store import SQLiteStore
+from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk import LocationDependency, LocationProvider, PluginDefinition, metric
+from lyra.sdk.interventions import Intervention, accept_interventions
 from lyra.server import worker
 from tests.metric_execution_helpers import schema
 from tests.provider_schema_helpers import declaration, frame
@@ -44,6 +51,11 @@ def definitions(
         id = "places"
         description = "Captured places"
         schema = declaration()
+
+        @override
+        def existing_ids(self, ids: list[str]) -> set[str]:
+            events.append(("membership", set(ids)))
+            return set(ids)
 
         @override
         def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
@@ -264,7 +276,10 @@ def test_complete_hit_restores_inputs_without_geometry(
 
 
 @pytest.mark.parametrize("development", [False, True])
-def test_skipped_input_inventory(tmp_path: Path, *, development: bool) -> None:
+@pytest.mark.parametrize("intervened", [False, True])
+def test_skipped_input_inventory(
+    tmp_path: Path, *, development: bool, intervened: bool
+) -> None:
 
     events: list = []
 
@@ -293,8 +308,20 @@ def test_skipped_input_inventory(tmp_path: Path, *, development: bool) -> None:
         "primary": {"provider": "places", "ids": []},
         "reference": {"provider": "places", "ids": ["x"]},
     }
-    result = run("skipped", inputs=inputs)
-    assert events == []
+    changes = (
+        [Intervention(catalog="places", id="plan", revision="1", remove=["outside"])]
+        if intervened
+        else []
+    )
+    result = run("skipped", inputs=inputs, interventions=changes)
+    assert events == ([("membership", {"outside"})] if intervened else [])
+    if intervened:
+        (validation,) = result.report.intervention_validations
+        assert validation.membership_lookup == "executed"
+        assert (
+            result.metadata.location_inputs["reference"].provider_scope
+            == validation.scope
+        )
     path.touch()
     with ResultStore.open(path) as reader:
         ref = result.metadata.result_ref
@@ -383,3 +410,90 @@ def test_skipped_matching_selection(tmp_path: Path, *, complete: bool) -> None:
             ("a", "b"),
         )
         assert other.identity not in matching
+
+
+def capture_native_inputs(
+    store: SQLiteStore, catalog: CompiledCatalog, value: NativeLocationInput
+) -> InputBindings:
+    invocation = catalog.implementations["p"].prepare_resolved_invocation(
+        "count", {"left": value, "right": value.select_ids(frozenset())}
+    )
+    table = invocation.arguments()["left"]
+    assert isinstance(table, gpd.GeoDataFrame)
+    assert list(table.columns) == list(value.frame.columns)
+    table.loc[:, "count"] = 44
+    header = Header(value_key="count", node_id="count", output_scope="unpartitioned")
+    return capture_inputs(store, catalog, invocation, ((header, ()),), enabled=True)[
+        "count"
+    ]
+
+
+def test_effective_input_capture_preserves_base_selection(tmp_path: Path) -> None:
+    events = []
+    path = tmp_path / "store"
+    catalog = LocalRunner.from_definitions(
+        definitions(events, cache=False), result_store_path=path
+    ).catalog
+    provider = catalog.provider_registry["places"]
+    mixed = frame()
+    mixed["location_id"] = ["a", "new"]
+    change = accept_interventions(
+        [
+            Intervention(
+                catalog="places",
+                id="plan",
+                revision="r1",
+                add=mixed.iloc[[1]],
+                remove=["b"],
+            )
+        ],
+        {"places": provider.schema},
+    )[0]
+    effective = change.effective_scope(provider.scope)
+
+    with SQLiteStore(path) as store:
+        original = capture_native_inputs(
+            store,
+            catalog,
+            NativeLocationInput(
+                provider.schema.validate(frame()), provider.contract.reference
+            ),
+        )
+        reusable = ProviderRecords(store).lookup(
+            provider,
+            ["a"],
+            required=True,
+            references=RecordReferences(effective, change.added_ids),
+        )
+        assert reusable["count"].tolist() == [1]
+        value = NativeLocationInput(
+            provider.schema.validate(mixed),
+            provider.contract.reference.model_copy(
+                update={"provider_scope": effective}
+            ),
+            added_ids=change.added_ids,
+        )
+        selected = capture_native_inputs(store, catalog, value)
+    with SQLiteStore(path) as reopened, reopened.engine.connect() as connection:
+        inputs = LocationInputs(reopened)
+        ordinary = inputs.frame(connection, original.selections["left"])
+        assert ordinary.location_id.tolist() == ["a", "b"]
+        assert ordinary.loc[0, "count"] == 1
+        current = inputs.frame(connection, selected.selections["left"])
+        assert current.location_id.tolist() == ["a", "new"]
+        assert current.loc[0, "count"] == 1
+        assert current["count"].isna().tolist() == [False, True]
+        assert current.crs == ordinary.crs
+        descriptions = inputs.descriptions(connection, selected)
+        assert (
+            descriptions["left"].provider_scope
+            == descriptions["right"].provider_scope
+            == effective
+        )
+        assert descriptions["left"].provider_scope.model_dump() == {
+            "base": provider.scope.model_dump(),
+            "intervention": {"catalog": "places", "id": "plan", "revision": "r1"},
+        }
+        assert inputs.frame(connection, selected.selections["right"]).empty
+        assert ProviderRecords(reopened).lookup(provider, ["new"]).empty
+    assert not events

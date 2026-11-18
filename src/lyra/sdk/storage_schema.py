@@ -12,7 +12,7 @@ import pyarrow  # ruff: ignore[unconventional-import-alias] - distinguish native
 from pandera.engines import geopandas_engine, pandas_engine
 
 from lyra.data import arrow_conversion
-from lyra.data.relational import StorageDescription
+from lyra.data.relational import StorageDescription, logical_dtype
 from lyra.sdk.output_schema import compile_output
 from lyra.sdk.results import validate_registered_result
 
@@ -122,18 +122,12 @@ def empty_frame(declaration: pandera.DataFrameSchema) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-_TYPES = {
-    "str": ("string", "TEXT"),
-    "string": ("string", "TEXT"),
-    "string[pyarrow]": ("string", "TEXT"),
-    "string[python]": ("string", "TEXT"),
-    "int64": ("Int64", "INTEGER"),
-    "Int64": ("Int64", "INTEGER"),
-    "bool": ("boolean", "INTEGER"),
-    "boolean": ("boolean", "INTEGER"),
-    "float64": ("Float64", "REAL"),
-    "Float64": ("Float64", "REAL"),
-    "geometry": ("geometry", "BLOB"),
+_SQLITE_TYPES = {
+    "string": "TEXT",
+    "Int64": "INTEGER",
+    "boolean": "INTEGER",
+    "Float64": "REAL",
+    "geometry": "BLOB",
 }
 
 
@@ -159,13 +153,9 @@ def describe(
     ):
         msg = "Storage requires strict fixed required columns"
         raise ValueError(msg)
-    types = []
-    for column in declaration.columns.values():
-        kind = _TYPES.get(str(column.dtype))
-        if kind is None:
-            msg = f"Unsupported storage dtype: {column.dtype}"
-            raise ValueError(msg)
-        types.append(kind)
+    types = tuple(
+        logical_dtype(str(column.dtype)) for column in declaration.columns.values()
+    )
     spatial = [
         name
         for name, column in declaration.columns.items()
@@ -181,8 +171,8 @@ def describe(
         metadata=metadata,
         properties=arrow_schema(declaration),
         columns=tuple(declaration.columns),
-        pandas_dtypes=tuple(kind[0] for kind in types),
-        sqlite_types=tuple(kind[1] for kind in types),
+        pandas_dtypes=types,
+        sqlite_types=tuple(_SQLITE_TYPES[dtype] for dtype in types),
         nullable=tuple(column.nullable for column in declaration.columns.values()),
         crs=str(geometry.dtype.crs) if geometry is not None else None,
         geometry="geometry" if spatial else None,

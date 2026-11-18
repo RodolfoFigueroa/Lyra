@@ -1,5 +1,10 @@
 """Internal class boundary for Lyra's managed provider implementations."""
 
+from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
 import geopandas as gpd
 import ibis.expr.types as ir
 import pandas as pd
@@ -7,17 +12,20 @@ import pyarrow as pa
 import pyproj
 import shapely
 
+from lyra.data.intervention_records import decode_cell
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.provider_schema import ProviderSchema
-from lyra.sdk.query_schema import compile_query_schema
+from lyra.sdk.query_schema import ProviderQuery, compile_query_schema
 from lyra.sdk.resources import ConfigT
+
+if TYPE_CHECKING:
+    from lyra.contracts.interventions import AcceptedIntervention
 
 
 class ManagedLocationProvider(LocationProvider[ConfigT]):
     """Identify built-in query adapters by inheritance, without probing resources.
 
-    This internal base supplies no acquisition implementation or public adapter
-    protocol. Managed implementations own both exact-ID and query acquisition.
+    Managed implementations own both exact-ID and query acquisition.
     """
 
     def select(self, expression: ir.Table, schema: ProviderSchema) -> gpd.GeoDataFrame:
@@ -27,6 +35,61 @@ class ManagedLocationProvider(LocationProvider[ConfigT]):
             NotImplementedError: Until the concrete managed adapter supplies execution.
         """
         raise NotImplementedError
+
+    def select_effective(
+        self,
+        expression: ir.Table,
+        schema: ProviderSchema,
+        intervention: "AcceptedIntervention",
+    ) -> gpd.GeoDataFrame:
+        """Select using the accepted changes for this execution's catalog.
+
+        Raises:
+            NotImplementedError: If the adapter cannot select effective records.
+        """
+        raise NotImplementedError
+
+
+@dataclass
+class StagedCatalog:
+    """An execution-owned relation and the cleanup for its temporary objects."""
+
+    relation: ir.Table | None = None
+    drops: list[Callable[[], object]] = field(default_factory=list)
+
+    def close(self) -> None:
+        """Drop all reserved objects in reverse order, preserving the first failure."""
+        self.relation = None
+        drops = reversed(self.drops)
+        self.drops = []
+        try:
+            for drop in drops:
+                drop()
+        finally:
+            # If a drop failed, finish the rest without replacing its error.
+            for drop in drops:
+                with suppress(BaseException):
+                    drop()
+
+
+def staging_tables(
+    intervention: "AcceptedIntervention", schema: ProviderSchema, query: ProviderQuery
+) -> tuple[pa.Table, pa.Table]:
+    """Return typed additions (including WKB) and removal IDs for managed staging."""
+    columns = {
+        column.name: [
+            decode_cell(row[column.name], column.dtype, nullable=column.nullable)
+            for row in intervention.add
+        ]
+        for column in schema.metadata.columns
+    }
+    return (
+        pa.Table.from_pydict(columns, schema=query.interchange),
+        pa.Table.from_pydict(
+            {"location_id": intervention.remove},
+            schema=pa.schema([query.interchange.field("location_id")]),
+        ),
+    )
 
 
 def decode_records(data: pa.Table, schema: ProviderSchema) -> gpd.GeoDataFrame:

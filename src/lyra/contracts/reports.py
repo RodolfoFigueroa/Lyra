@@ -15,7 +15,7 @@ from pydantic import (
 from lyra.contracts.accepted import SubmittedRequest
 from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import OutputMetadata
-from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.provider_scope import DatasetScope, EffectiveScope
 from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.revision_tokens import BuildRevision, ImplementationRevision
 from lyra.contracts.strict import StrictBaseModel
@@ -32,7 +32,7 @@ class ReportOutput(StrictBaseModel):
 
     scope: Literal["location", "unpartitioned"]
     table_schema: OutputMetadata
-    owner_scope: ProviderScope | None
+    owner_scope: DatasetScope | None
 
     @model_validator(mode="after")
     def validate_owner(self) -> Self:
@@ -52,7 +52,7 @@ class DataBinding(StrictBaseModel):
 
     source_use_id: LocalName
     output_name: LocalName | None
-    provider_scope: ProviderScope | None
+    provider_scope: DatasetScope | None
 
 
 class ParameterBinding(StrictBaseModel):
@@ -64,10 +64,17 @@ class ParameterBinding(StrictBaseModel):
     target_parameter: LocalName
 
 
+class InterventionValidation(StrictBaseModel):
+    """A completely validated set and whether this run queried base membership."""
+
+    scope: EffectiveScope
+    membership_lookup: StageOutcome
+
+
 class OperationReport(StrictBaseModel):
     """Declared target and independently observed operation stages."""
 
-    target_scope: ProviderScope
+    target_scope: DatasetScope
     target_adapter: Literal["parquet", "postgis"] | None
     selector: SelectorOutcome
     target_query: SelectorOutcome
@@ -160,8 +167,15 @@ class ExecutionReport(BaseModel):
     nodes: list[ReportNode]
     parameter_bindings: list[ParameterBinding]
     build_revision: BuildRevision | None
+    intervention_validations: list[InterventionValidation] = Field(default_factory=list)
 
-    @field_validator("request", "nodes", "parameter_bindings", mode="before")
+    @field_validator(
+        "request",
+        "nodes",
+        "parameter_bindings",
+        "intervention_validations",
+        mode="before",
+    )
     @classmethod
     def capture_values(cls, value: object) -> object:
         """Return independent descriptions at the report capture boundary."""
@@ -185,6 +199,14 @@ class ExecutionReport(BaseModel):
             or root.parameters != self.request.parameters
         ):
             msg = "Request must match the root metric and effective parameters"
+            raise ValueError(msg)
+        accepted = {change.identity for change in self.request.interventions}
+        observed = [
+            validation.scope.intervention
+            for validation in self.intervention_validations
+        ]
+        if set(observed) != accepted or len(observed) != len(accepted):
+            msg = "Report requires a validation outcome for each accepted intervention"
             raise ValueError(msg)
         for node in self.nodes:
             for binding in node.inputs.values():

@@ -248,6 +248,33 @@ def test_empty_correspondences_keep_completed_source_dependencies() -> None:
     ]
 
 
+def test_native_target_partition_uses_only_its_incoming_groups() -> None:
+    invocation = bound_invocation(("A", "B", "C"))
+    source = invocation.locations["main"]
+
+    def key(groups: tuple[str, ...]) -> str:
+        # B completes successfully with no correspondences in either batch.
+        targets = source.frame.loc[source.frame.location_id.isin(groups)].copy()
+        targets["source_location_id"] = targets.location_id
+        value = NativeLocationInput(
+            targets,
+            source.contract,
+            source_scope=source.contract,
+            source=source,
+            computations=tuple(
+                (f"operation-{group}", group) for group in (*groups, "B")
+            ),
+        )
+        batch = replace(
+            invocation,
+            parameters=None,
+            locations=dict(invocation.locations) | {"main": value},
+        )
+        return batch.computation_keys["A"]
+
+    assert key(("A",)) == key(("A", "C"))
+
+
 def test_unpartitioned_dependency_keeps_whole_reference_context() -> None:
     @metric(
         name="summary",

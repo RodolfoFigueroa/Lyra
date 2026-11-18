@@ -20,6 +20,7 @@ Use this index to find the public objects used by guides. Generated module pages
 | Handle publication and lookup failures | `ExecutionPersistenceError`, `ResultAccessError` | [Errors](../../api/lyra/contracts/errors/) |
 | Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/contracts/locations/) |
 | Work with resolved locations | `geopandas.GeoDataFrame` | [Native location tables](../locations/) |
+| Add or remove locations for one run | `Intervention` | [Native intervention values](../../api/lyra/data/interventions/) and [street proposal example](../../use/local-execution/#run-with-a-street-proposal) |
 | Bind table and location dependencies | `Dependency`, `LocationDependency`, `Input` | [Dependencies](../../api/lyra/sdk/dependencies/) |
 | Read managed Parquet records | `ParquetLocationProvider` | [Parquet provider](../../api/lyra/sdk/parquet/) |
 | Read managed PostGIS records | `PostGISLocationProvider` | [PostGIS provider](../../api/lyra/sdk/postgis/) |

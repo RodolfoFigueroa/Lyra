@@ -2091,7 +2091,7 @@ def test_submission_envelope_validation(arguments: dict[str, Any]) -> None:
     assert (
         set(schema["properties"])
         == set(JobCreateRequest.model_fields)
-        == {"metric", "inputs", "parameters"}
+        == {"metric", "inputs", "parameters", "interventions"}
     )
     assert schema["required"] == ["metric"]
     backend = FakeMCPBackend([])

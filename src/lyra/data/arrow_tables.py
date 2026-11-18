@@ -9,16 +9,24 @@ import pandas as pd
 import pyarrow as pa
 from pyproj import CRS
 
+from lyra.contracts.provider_scope import EffectiveScope
 from lyra.data.arrow_conversion import to_arrow
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from lyra.contracts.provider_scope import DatasetScope
     from lyra.data.relational import Cell, StorageDescription
 
 
-def table_schema(description: StorageDescription) -> pa.Schema:
-    """Return the declared schema, nullable pandas types, and GeoArrow WKB metadata."""
+def table_schema(
+    description: StorageDescription, **scopes: DatasetScope | None
+) -> pa.Schema:
+    """Return declared Arrow fields, GeoArrow CRS and applicable dataset scopes.
+
+    For intervened tables, schema metadata carries the retained JSON scope for
+    each ID role, including the ordinary counterpart in a correspondence.
+    """
     scalars = pd.DataFrame(
         {
             name: pd.Series(dtype=dtype)
@@ -60,6 +68,14 @@ def table_schema(description: StorageDescription) -> pa.Schema:
         **(description.properties.metadata or {}),
         **(properties.metadata or {}),
     }
+    if any(isinstance(scope, EffectiveScope) for scope in scopes.values()):
+        metadata.update(
+            {
+                role.encode(): scope.model_dump_json().encode()
+                for role, scope in scopes.items()
+                if scope is not None
+            }
+        )
     if description.metadata is not None:
         for name in ("meaning", "granularity"):
             value = getattr(description.metadata, name)

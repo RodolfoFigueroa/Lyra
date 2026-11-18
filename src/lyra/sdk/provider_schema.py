@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from copy import copy, deepcopy
 from typing import TYPE_CHECKING
 
+import pandas as pd
 import pandera.pandas as pa
 from pandera.engines import numpy_engine, pandas_engine
 
+from lyra.data.location_frames import validate_frame
 from lyra.sdk.location_schema import LocationOutputSchema
 
 if TYPE_CHECKING:
@@ -75,7 +78,28 @@ class ProviderSchema:
         Types, active geometry and CRS survive empty and all-null columns.
         Authors must rename columns and reproject before returning their frames.
         """
-        return self._compiled.prepare_frame(frame, lazy=lazy)
+        validate_frame(frame, "location_id")
+        compiled = self._compiled
+        for name, column in self.schema.columns.items():
+            if name not in frame:
+                continue
+            dtype = frame[name].dtype
+            if (
+                isinstance(dtype, pd.StringDtype)
+                and isinstance(column.dtype, pandas_engine.STRING)
+                and dtype.storage != column.dtype.storage
+            ):
+                frame = frame.assign(**{name: frame[name].astype(column.dtype.type)})
+            elif (
+                str(column.dtype) == "bool"
+                and column.nullable
+                and isinstance(dtype, pd.BooleanDtype)
+            ):
+                if compiled is self._compiled:
+                    compiled = copy(compiled)
+                    compiled.schema = deepcopy(compiled.schema)
+                compiled.schema.columns[name].dtype = "boolean"
+        return compiled.prepare_frame(frame, lazy=lazy)
 
     def empty_frame(self) -> gpd.GeoDataFrame:
         """Return declared empty columns and CRS without acquiring a provider."""

@@ -9,6 +9,7 @@ import pandas as pd
 
 from lyra.contracts.locations import LocationContractReference
 from lyra.contracts.outputs import OutputMetadata
+from lyra.contracts.provider_scope import EffectiveScope
 
 Frame = TypeVar("Frame", bound=pd.DataFrame)
 
@@ -31,6 +32,7 @@ class NativeLocationInput:
     source_scope: LocationContractReference | None = field(default=None, kw_only=True)
     description: OutputMetadata | None = field(default=None, kw_only=True)
 
+    added_ids: frozenset[str] = field(default_factory=frozenset, kw_only=True)
     computations: tuple[tuple[str, str | None], ...] = field(default=(), kw_only=True)
 
     lineage: object = field(default_factory=object, repr=False, compare=False)
@@ -85,26 +87,47 @@ class NativeLocationInput:
 
     def select_ids(self, ids: frozenset[str]) -> "NativeLocationInput":
         """Return selected owners with their applicable correspondence references."""
-        frame = self.frame.loc[self.frame[self.id_column].isin(ids)]
-        if ids == frozenset(self.ids):
+        complete = ids == frozenset(self.ids)
+        if complete and (not ids or not self.source_scope or not self.computations):
             return self
+        frame = (
+            self.frame
+            if complete
+            else self.frame.loc[self.frame[self.id_column].isin(ids)]
+        )
         groups = set(frame["source_location_id"]) if self.source_scope else set(ids)
+        computations = tuple(
+            (key, group)
+            for key, group in self.computations
+            if group is None or group in groups
+        )
+        if complete and computations == self.computations:
+            return self
         return replace(
             self,
             frame=frame,
-            computations=tuple(
-                (key, group)
-                for key, group in self.computations
-                if group is None or group in groups
-            ),
+            computations=computations,
         )
 
     def __post_init__(self) -> None:
-        """Capture records and identity before any handler receives working data."""
+        """Capture records and identity before any handler receives working data.
+
+        Raises:
+            ValueError: If added records lack an intervention scope.
+        """
         object.__setattr__(self, "frame", copy_frame(self.frame))
         object.__setattr__(self, "contract", self.contract.model_copy(deep=True))
         object.__setattr__(
             self, "ids", tuple(dict.fromkeys(self.frame[self.id_column]))
+        )
+
+        if self.added_ids and not isinstance(
+            self.contract.provider_scope, EffectiveScope
+        ):
+            msg = "Added records require an effective provider scope"
+            raise ValueError(msg)
+        object.__setattr__(
+            self, "added_ids", frozenset(self.added_ids).intersection(self.ids)
         )
 
         for name in ("source_scope", "description"):

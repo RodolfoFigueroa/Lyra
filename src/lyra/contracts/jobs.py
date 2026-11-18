@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 from lyra.contracts.accepted import PreparedExecution
+from lyra.contracts.interventions import InterventionSpec
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations
@@ -278,7 +279,12 @@ class JobCreateRequest(StrictBaseModel):
         default_factory=dict, description="Calculation parameters."
     )
 
-    @field_validator("metric", "inputs", "parameters", mode="before")
+    interventions: list[InterventionSpec] = Field(
+        default_factory=list,
+        description="Inline additions and removals by provider ID.",
+    )
+
+    @field_validator("metric", "inputs", "parameters", "interventions", mode="before")
     @classmethod
     def validate_sections(cls, value: object) -> object:
         """Validate JSON sections before any coercion.

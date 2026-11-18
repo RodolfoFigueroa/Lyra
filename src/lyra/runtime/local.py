@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from lyra.contracts.accepted import PreparedExecution
     from lyra.contracts.provenance import ExecutionProvenance
     from lyra.contracts.resources import ResourceConfig
+    from lyra.data.interventions import Intervention
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import PluginDefinition
     from lyra.sdk.resources import BaseIO
@@ -174,6 +175,7 @@ class LocalRunner:
         *,
         inputs: Mapping[str, object] | None = None,
         parameters: Mapping[str, object] | None = None,
+        interventions: Sequence[Intervention] | None = None,
     ) -> RunResult:
         """Execute a metric, including private roots, using named ID selections.
 
@@ -182,7 +184,7 @@ class LocalRunner:
         Returns:
             Native tables, detached metadata, and the eager complete report.
         """
-        return self._run(metric, inputs, parameters, allow_private=True)
+        return self._run(metric, inputs, parameters, interventions, allow_private=True)
 
     def run(
         self,
@@ -190,6 +192,7 @@ class LocalRunner:
         *,
         inputs: Mapping[str, object] | None = None,
         parameters: Mapping[str, object] | None = None,
+        interventions: Sequence[Intervention] | None = None,
     ) -> RunResult:
         """Execute a public metric using JSON selections and parameter values.
 
@@ -201,13 +204,14 @@ class LocalRunner:
             Native frames, detached metadata, and the eager complete report,
             after required values and final result/report publication are durable.
         """
-        return self._run(metric, inputs, parameters, allow_private=False)
+        return self._run(metric, inputs, parameters, interventions, allow_private=False)
 
     def _run(
         self,
         metric: str,
         inputs: Mapping[str, object] | None,
         parameters: Mapping[str, object] | None,
+        interventions: Sequence[Intervention] | None,
         *,
         allow_private: bool,
     ) -> RunResult:
@@ -223,7 +227,10 @@ class LocalRunner:
         except (ValueError, TypeError) as exc:
             raise PreparationError(metric, "request", str(exc)) from exc
         invocation = prepare_execution(
-            self.catalog, request.model_dump(), allow_private=allow_private
+            self.catalog,
+            request,
+            allow_private=allow_private,
+            native_interventions=interventions,
         )
         return self._execute(invocation)
 

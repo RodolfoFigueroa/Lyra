@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     import geopandas as gpd
     import pandas as pd
 
+    from lyra.contracts.provider_scope import DatasetScope
     from lyra.runtime.output_selection import OutputSelection
 
 
@@ -289,7 +290,12 @@ class ResultStore:
             Arrow IPC chunks with retained schema and GeoArrow geometry metadata.
         """
         with self._select_location_input(result_ref, input_name) as selected:
-            yield from self._stream_selection(selected)
+            description = selected.selections[0].description
+            yield from self._stream_selection(
+                selected,
+                provider_scope=description.provider_scope,
+                source_scope=description.source_scope,
+            )
 
     def validate_table(self, result_ref: str, output_name: str) -> None:
         """Validate a retained output without materializing its rows or report."""
@@ -328,18 +334,21 @@ class ResultStore:
             self._lookup(result_ref, output_name) as lookup,
             lookup.select(result_ref, output_name) as selected,
         ):
-            yield from self._stream_selection(selected)
+            yield from self._stream_selection(
+                selected, owner_scope=selected.owner_scope
+            )
 
     @staticmethod
     def _stream_selection(
         selected: "OutputSelection | InputRows",
+        **scopes: "DatasetScope | None",
     ) -> "Generator[bytes]":
         with (
             closing(selected.batches()) as batches,
             BytesIO() as sink,
         ):
             description = selected.registration.storage_description()
-            schema = table_schema(description)
+            schema = table_schema(description, **scopes)
             with pa.ipc.new_stream(sink, schema) as writer:
                 # An empty batch emits the schema before any value reads, including
                 # for a known empty output. IPC stream framing is filename agnostic.

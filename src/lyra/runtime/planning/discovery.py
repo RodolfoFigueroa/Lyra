@@ -100,14 +100,6 @@ class Discovery:
         """Return a detached public metric description."""
         summary = self._summaries[name]
         node = cast("MetricManifest", self.catalog.graph.nodes[name].node)
-        provider_ids = {
-            value.contract.family.collection for value in node.location_inputs.values()
-        }
-        provider_ids.update(
-            binding.source.collection
-            for sources in self.catalog.accepted_sources[name].values()
-            for binding in sources.values()
-        )
         return discovery.MetricInspection(
             metric=summary.model_copy(deep=True),
             node=name,
@@ -142,7 +134,6 @@ class Discovery:
             providers={
                 key: value.declaration.model_copy(deep=True)
                 for key, value in self.catalog.providers.items()
-                if key in provider_ids
             },
             origins=[
                 origin.model_copy(deep=True)

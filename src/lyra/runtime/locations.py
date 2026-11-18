@@ -1,7 +1,9 @@
 """Shared provider acquisition into existing execution and storage bindings."""
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from contextlib import nullcontext
+from dataclasses import KW_ONLY, InitVar, dataclass, field
+from typing import TYPE_CHECKING, Any, cast
 
 import geopandas as gpd
 import ibis.expr.types as ir
@@ -13,12 +15,16 @@ from lyra.contracts.errors import (
     LocationProviderContractError,
     LocationSelectionError,
 )
-from lyra.contracts.locations import LocationSelection
+from lyra.contracts.locations import LocationContractReference, LocationSelection
+from lyra.contracts.provider_scope import RecordReferences
 from lyra.contracts.resources import ResourceConfig
+from lyra.data.intervention_records import decode_additions
 from lyra.runtime.native_inputs import NativeLocationInput
+from lyra.runtime.persistence import persistence_boundary
 from lyra.runtime.planning.provider_preparation import PreparedProviderInput
 from lyra.runtime.planning.provider_registry import RegisteredProvider
 from lyra.runtime.provider_acquisition import (
+    CatalogChanges,
     acquire_provider_candidates,
     acquire_provider_input,
 )
@@ -26,31 +32,39 @@ from lyra.runtime.resources import ResourceScope
 from lyra.sdk.resources import BaseIO
 
 if TYPE_CHECKING:
+    from lyra.contracts.interventions import AcceptedIntervention
     from lyra.runtime.provider_records import ProviderRecords
     from lyra.runtime.report_collection import ReportCollection
 
 
+@dataclass(eq=False)
 class LocationResolver:
     """Borrow a resource scope and retain authoritative captured declarations."""
 
-    def __init__(
-        self,
-        scope: ResourceScope,
-        *,
-        providers: Mapping[str, RegisteredProvider],
-        provider_records: "ProviderRecords | None" = None,
-        retained_providers: frozenset[str] = frozenset(),
-        report: "ReportCollection | None" = None,
-    ) -> None:
-        """Bind metadata without constructing resources."""
-        self.report = report
-        self.provider_records = provider_records
-        self.retained_providers = retained_providers | frozenset(
-            name for name, provider in providers.items() if provider.cache
+    scope: ResourceScope
+    _: KW_ONLY
+    providers: Mapping[str, RegisteredProvider]
+    provider_records: "ProviderRecords | None" = None
+    retained_providers: frozenset[str] = frozenset()
+    report: "ReportCollection | None" = None
+    interventions: InitVar[Sequence["AcceptedIntervention"]] = ()
+    records: dict[str, NativeLocationInput] = field(default_factory=dict, init=False)
+    _changes: dict[str, CatalogChanges] = field(init=False)
+
+    def __post_init__(self, interventions: Sequence["AcceptedIntervention"]) -> None:
+        """Bind validated request values without constructing resources."""
+        self.retained_providers |= frozenset(
+            name for name, provider in self.providers.items() if provider.cache
         )
-        self.scope = scope
-        self.providers = providers
-        self.records: dict[str, NativeLocationInput] = {}
+        self._changes = {
+            change.catalog: CatalogChanges(
+                change,
+                change.effective_scope(self.providers[change.catalog].scope),
+                {cast("str", row["location_id"]): row for row in change.add},
+                frozenset(change.remove),
+            )
+            for change in interventions
+        }
 
     def select(
         self, provider_id: str, expression: ir.Table, *, use_id: str | None = None
@@ -65,15 +79,23 @@ class LocationResolver:
             registered,
             expression,
             self.scope,
-            records=self.provider_records
-            if provider_id in self.retained_providers
-            else None,
+            changes=self._changes.get(provider_id),
         )
-        candidates = NativeLocationInput(acquired.frame, registered.contract.reference)
+        self._publish_records(
+            registered,
+            acquired.frame,
+            RecordReferences(acquired.scope, acquired.added_ids),
+        )
+        candidates = NativeLocationInput(
+            acquired.frame, self._contract(registered), added_ids=acquired.added_ids
+        )
         self.retain(candidates)
         if self.report is not None:
             self.report.observe_provider(
-                use_id, candidates.ids, executed=True, query=True
+                use_id,
+                set(candidates.ids) - candidates.added_ids,
+                executed=True,
+                query=True,
             )
         return candidates
 
@@ -81,7 +103,7 @@ class LocationResolver:
         """Reuse execution-owned provider records without another acquisition."""
         provider_id = value.contract.collection
         registered = self.providers.get(provider_id)
-        if registered is None or registered.contract.reference != value.contract:
+        if registered is None or self._contract(registered) != value.contract:
             return
         retained = self.records.get(provider_id)
         frame = value.frame.drop(
@@ -96,7 +118,33 @@ class LocationResolver:
                 geometry="geometry",
                 crs=frame.crs,
             )
-        self.records[provider_id] = NativeLocationInput(frame, value.contract)
+        added = value.added_ids | retained.added_ids if retained else value.added_ids
+        self.records[provider_id] = NativeLocationInput(
+            frame, value.contract, added_ids=added
+        )
+
+    def _contract(self, provider: RegisteredProvider) -> LocationContractReference:
+        change = self._changes.get(provider.scope.provider_id)
+        reference = provider.contract.reference
+        return (
+            reference.model_copy(update={"provider_scope": change.scope})
+            if change
+            else reference
+        )
+
+    def check_removals(self, name: str, selection: LocationSelection) -> None:
+        """Reject explicitly removed IDs, including in a skipped input.
+
+        Raises:
+            LocationSelectionError: If any selected ID is unavailable due to removal.
+        """
+        change = self._changes.get(selection.provider)
+        if change and (removed := change.removals.intersection(selection.ids)):
+            raise LocationSelectionError(
+                name,
+                "Requested IDs were removed from the effective dataset",
+                sorted(removed),
+            )
 
     def resolve_prepared(
         self,
@@ -149,7 +197,6 @@ class LocationResolver:
             name = next(iter(set(needed_ids) - set(selections)))
             raise LocationSelectionError(name, "Unknown demanded input")
         prepared = []
-        orders = {}
         for name, raw in selections.items():
             try:
                 selection = LocationSelection.model_validate(raw.model_dump())
@@ -158,67 +205,118 @@ class LocationResolver:
                 raise LocationSelectionError(
                     name, "Invalid provider selection"
                 ) from exc
+            self.check_removals(name, selection)
             demanded = _demanded_selection(
                 name,
                 selection,
                 needed_ids.get(name) if needed_ids is not None else None,
             )
-            orders[name] = list(dict.fromkeys(demanded.ids))
+            ordered = list(dict.fromkeys(demanded.ids))
             prepared.append(
-                PreparedProviderInput(name, frozenset(demanded.ids), registered)
+                (PreparedProviderInput(name, frozenset(ordered), registered), ordered)
             )
-        values = {}
-        for selection in prepared:
-            provider_id = selection.provider.scope.provider_id
-            retained = self.records.get(provider_id)
-            missing = selection.ids - (set(retained.ids) if retained else set())
-            if (
-                missing
-                and self.provider_records is not None
-                and selection.provider.cache
-            ):
-                cached = self.provider_records.lookup(
-                    selection.provider, sorted(missing)
+        return {
+            selection.name: self._resolve_ids(
+                selection,
+                ordered,
+                use_ids.get(selection.name) if use_ids is not None else None,
+            )
+            for selection, ordered in prepared
+        }
+
+    def _resolve_ids(
+        self, selection: PreparedProviderInput, order: list[str], use_id: str | None
+    ) -> NativeLocationInput:
+        provider = selection.provider
+        provider_id = provider.scope.provider_id
+        retained = self.records.get(provider_id)
+        contract = retained.contract if retained else self._contract(provider)
+        if not order and retained is None:
+            return NativeLocationInput(provider.schema.empty_frame(), contract)
+
+        missing = selection.ids.difference(retained.ids) if retained else selection.ids
+        held_additions = retained.added_ids if retained else frozenset()
+        if self.report is not None:
+            self.report.observe_provider(
+                use_id, selection.ids - missing - held_additions, executed=False
+            )
+
+        if retained is None or missing:
+            change = self._changes.get(provider_id)
+            added = (
+                frozenset(key for key in missing if key in change.additions)
+                if change
+                else frozenset()
+            )
+            frames = [retained.frame] if retained else []
+            frames.extend(self._resolve_base(selection, missing - added, use_id))
+            if change and added:
+                additions = decode_additions(
+                    [change.additions[key] for key in sorted(added)],
+                    provider.schema.metadata,
                 )
-                self.retain(
-                    NativeLocationInput(cached, selection.provider.contract.reference)
+                self._publish_records(
+                    provider, additions, RecordReferences(change.scope, added)
                 )
-                retained = self.records[provider_id]
-                missing = selection.ids - set(retained.ids)
-            use_id = use_ids.get(selection.name) if use_ids is not None else None
-            if self.report is not None:
-                self.report.observe_provider(
-                    use_id, selection.ids - missing, executed=False
-                )
-            if retained is None or missing:
-                acquired = acquire_provider_input(
-                    selection,
-                    self.scope,
-                    needed_ids=sorted(missing),
-                    records=self.provider_records
-                    if provider_id in self.retained_providers
-                    else None,
-                )
+                frames.append(additions)
+            frame = (
+                pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+            )
+            retained = NativeLocationInput(
+                frame, contract, added_ids=held_additions | added
+            )
+            self.records[provider_id] = retained
+
+        ordered = (
+            retained.frame.set_index("location_id", drop=False)
+            .loc[order]
+            .reset_index(drop=True)
+        )
+        return NativeLocationInput(ordered, contract, added_ids=retained.added_ids)
+
+    def _resolve_base(
+        self,
+        selection: PreparedProviderInput,
+        missing: frozenset[str],
+        use_id: str | None,
+    ) -> list[gpd.GeoDataFrame]:
+        frames = []
+        if missing and self.provider_records is not None and selection.provider.cache:
+            cached = self.provider_records.lookup(selection.provider, sorted(missing))
+            if not cached.empty:
+                frames.append(cached)
+                missing = missing.difference(cached.location_id)
                 if self.report is not None:
-                    self.report.observe_provider(use_id, missing, executed=True)
-                frame = acquired.frame
-                if retained is not None:
-                    frame = gpd.GeoDataFrame(
-                        pd.concat([retained.frame, frame], ignore_index=True),
-                        geometry="geometry",
-                        crs=frame.crs,
+                    self.report.observe_provider(
+                        use_id, cached.location_id, executed=False
                     )
-                retained = NativeLocationInput(
-                    frame, selection.provider.contract.reference
-                )
-                self.records[provider_id] = retained
-            ordered = (
-                retained.frame.set_index("location_id", drop=False)
-                .loc[orders[selection.name]]
-                .reset_index(drop=True)
+        if missing:
+            acquired = acquire_provider_input(
+                selection, self.scope, needed_ids=sorted(missing)
             )
-            values[selection.name] = NativeLocationInput(ordered, retained.contract)
-        return values
+            self._publish_records(selection.provider, acquired.frame)
+            frames.append(acquired.frame)
+            if self.report is not None:
+                self.report.observe_provider(use_id, missing, executed=True)
+        return frames
+
+    def _publish_records(
+        self,
+        provider: RegisteredProvider,
+        frame: gpd.GeoDataFrame,
+        references: RecordReferences | None = None,
+    ) -> None:
+        if (
+            self.provider_records is None
+            or provider.scope.provider_id not in self.retained_providers
+        ):
+            return
+        with (
+            persistence_boundary(self.report.execution_id)
+            if self.report
+            else nullcontext()
+        ):
+            self.provider_records.publish(provider, frame, references=references)
 
 
 def _demanded_selection(

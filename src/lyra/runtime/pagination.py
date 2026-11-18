@@ -17,7 +17,7 @@ from lyra.runtime.output_selection import RowAddress
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from lyra.contracts.provider_scope import ProviderScope
+    from lyra.contracts.provider_scope import DatasetScope
     from lyra.data.relational import Cell
     from lyra.runtime.output_selection import OutputSelection
     from lyra.runtime.sqlite_schema import Registration
@@ -166,7 +166,7 @@ class CandidatePage:
     """Retained encoding metadata and a context-owned, single-pass row iterator."""
 
     registration: Registration
-    owner_scope: ProviderScope | None
+    owner_scope: DatasetScope | None
     rows: Generator[RowCandidate]
 
 

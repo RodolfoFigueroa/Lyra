@@ -86,12 +86,15 @@ def test_discovery_and_unused_provider_do_not_touch_files(
         {"city": PluginDefinition(resources={"places": Places})}
     )
     assert registry["places"].declaration.query_capable
+    assert registry["places"].membership_capable
+    assert registry["places"].declaration.membership_capable
     assert registry["places"].query is not None
     metadata = resource_metadata(Places)
     assert metadata["secrets"] == []
     config = ParquetConfig(path=unavailable)
     provider = Places(config, {})
     assert provider.resolve([]).empty
+    assert provider.existing_ids([]) == set()
     provider.close()
     with scope_for(unavailable).activate():
         pass

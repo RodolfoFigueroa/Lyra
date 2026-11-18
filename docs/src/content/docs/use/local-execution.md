@@ -66,7 +66,7 @@ For each named location argument, supply a JSON-compatible dictionary with these
 - `provider`: the public provider ID, such as `city_streets`
 - `ids`: a list of nonempty string IDs; the list may be empty
 
-The runner checks whether the input accepts the provider before loading its data. Supply IDs from that provider and omit geometry from the request.
+The runner checks whether the input accepts the provider before loading its data. Supply only the provider ID and record IDs in the selection.
 
 Lyra passes distinct IDs to the provider. Align records by identifier columns because retrieval doesn’t guarantee row order. An unknown ID fails the run during resolution.
 
@@ -79,6 +79,49 @@ Omitting either mapping, or passing Python `None`, uses an empty mapping before 
 For a street report, the city plugin also accepts block IDs. Before loading data, Lyra selects the [canonical route](../../concepts/selection/) and captures the declared provider scopes. It then resolves the selected blocks to streets and passes those streets to the metric.
 
 Before loading data, the executor validates your selected inputs and calculation dependencies against the loaded plugin definitions. These checks also apply before cache reuse and when you run private metrics with `run_development()`.
+
+## Run with a street proposal
+
+To measure a proposed street, prepare its complete record in EPSG:32614, the city provider’s CRS. Give the street a new `location_id` and list the surveyed street’s ID in `remove`. Lyra reads IDs from the column and ignores the frame index.
+
+```python title="street_proposal.py" {7-9,15-16}
+import geopandas as gpd
+from shapely.geometry import LineString
+
+from lyra.data.interventions import Intervention
+
+additions = gpd.GeoDataFrame(
+    {"location_id": ["proposed-1"], "condition_score": [20.0]},
+    geometry=[LineString([(500050, 2100000), (500050, 2100150)])],
+    crs="EPSG:32614",
+)
+proposal = Intervention(
+    catalog="city_streets",
+    id="street-extension",
+    revision="1",
+    add=additions,
+    remove=["street-1"],
+)
+```
+
+Select `proposed-1` in the `streets` input and pass the proposal to `run()`. You can pass the same `interventions` argument to `run_development()`.
+
+```python title="street_proposal.py" {3,8}
+from lyra.runtime.local import LocalRunner
+
+inputs = {"streets": {"provider": "city_streets", "ids": ["proposed-1"]}}
+runner = LocalRunner(plugins=["lyra-city-example"])
+result = runner.run(
+    "city_street_lengths",
+    inputs=inputs,
+    interventions=[proposal],
+)
+print(result.tables["lengths"])
+```
+
+The `lengths` table contains one row for `proposed-1`, with `length_m` equal to 150. Once Lyra accepts the request, you can edit the frame or removal list without affecting that run.
+
+To submit only removals, omit `add`. If you pass an empty frame, include every declared column and set the active geometry and CRS. See [how to prepare changes for a catalog](../spatial-inputs/#prepare-changes-for-a-catalog).
 
 ## Inspect results and execution details
 

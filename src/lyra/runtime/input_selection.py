@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 
-from lyra.contracts.provider_scope import RecordIdentity
+from lyra.contracts.provider_scope import RecordReferences
 from lyra.data.relational import frame_from_rows
 from lyra.runtime.operation_pairs import operation_registration
 from lyra.runtime.output_selection import RowAddress, RowBatch, _read
@@ -150,6 +150,7 @@ class InputRows:
     connection: sa.Connection
     selections: tuple[InputSelection, ...]
     records: tuple[str, ...]
+    references: RecordReferences
     operations: tuple[PairRows, ...]
 
     @classmethod
@@ -179,6 +180,10 @@ class InputRows:
                 sorted(
                     {record for selection in selections for record in selection.records}
                 )
+            ),
+            RecordReferences(
+                first.description.provider_scope,
+                frozenset(location for s in selections for location in s.added_ids),
             ),
             tuple(
                 prepare_pairs(store, connection, operation)
@@ -238,11 +243,8 @@ class InputRows:
                 yield pair
 
     def _records(self, members: list[tuple[str, ...]]) -> dict[str, sa.RowMapping]:
-        scope = self.selections[0].description.provider_scope
-        expected = {
-            RecordIdentity(scope=scope, location_id=member[-1]).key: member[-1]
-            for member in members
-        }
+        references = self.references.by_key(member[-1] for member in members)
+        expected = {key: ref.location_id for key, ref in references.items()}
         registration = self.registration
         self.store.load_registrations((registration.key,))
         retained = self.store.layout.descriptions[registration.key]
@@ -264,11 +266,8 @@ class InputRows:
         )
         if len(headers) != len(expected) or any(
             dict(row)
-            != Header(
-                value_key=row["value_key"],
-                node_id=scope.provider_id,
-                output_scope="location",
-                owner_scope=scope,
+            != Header.for_record(
+                row["value_key"], references[row["value_key"]]
             ).record()
             for row in headers
         ):

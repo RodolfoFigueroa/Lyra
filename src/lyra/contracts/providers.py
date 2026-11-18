@@ -32,6 +32,7 @@ class ProviderDeclaration(StrictBaseModel):
     description: str | None = None
     query_schema: ProviderQuerySchema | None = None
     query_capable: bool = False
+    membership_capable: bool = False
 
     @property
     def id(self) -> str:
