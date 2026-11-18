@@ -26,9 +26,41 @@ from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import PluginDefinition, loading, metric
 from test_support.publication import publish_result
 from tests.result_description_helpers import publish_values
+from tests.retained_table_helpers import retained_service
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
+
+
+@pytest.mark.parametrize("infinity", [float("inf"), float("-inf")])
+def test_infinite_retained_float_is_an_integrity_error(
+    database: Database, tmp_path: Path, infinity: float
+) -> None:
+    path = tmp_path / "results.sqlite"
+    schema = pa.DataFrameSchema(
+        {
+            "value": pa.Column(
+                "Float64", nullable=True, description="Value", metadata={"unit": None}
+            )
+        },
+        strict=True,
+    )
+    frame = pd.DataFrame({"value": pd.array([1.5, None], dtype="Float64")})
+    _, reference = retained_service(path, schema, frame)
+    rows = next(
+        rows for name, rows in database.rows.items() if name.startswith("data_")
+    )
+    with ResultStore.open(path) as store:
+        pd.testing.assert_frame_equal(store.read_table(reference, "rows"), frame)
+        rows[0]["value"] = infinity
+        with pytest.raises(ResultIntegrityError) as named:
+            store.read_table(reference, "rows")
+        assert named.value.result_ref == reference
+        assert named.value.output_name == "rows"
+        with pytest.raises(ResultIntegrityError) as whole:
+            store.read_result(reference)
+        assert whole.value.result_ref == reference
+        assert whole.value.output_name is None
 
 
 @pytest.mark.parametrize("keys", [(), ("one",), ("one", "two")])

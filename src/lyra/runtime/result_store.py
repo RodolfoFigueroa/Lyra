@@ -299,13 +299,10 @@ class ResultStore:
             )
 
     def validate_table(self, result_ref: str, output_name: str) -> None:
-        """Validate a retained output without materializing its rows or report."""
-        validate_retrieval_name(output_name)
-        with (
-            self._lookup(result_ref, output_name) as lookup,
-            lookup.select(result_ref, output_name),
-        ):
-            pass
+        """Verify that every selected output batch can be encoded for download."""
+        with closing(self.stream_table(result_ref, output_name)) as chunks:
+            for _ in chunks:
+                pass
 
     @contextmanager
     def page_candidates(

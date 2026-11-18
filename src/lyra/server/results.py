@@ -156,7 +156,7 @@ class ResultService:
         )
 
     def validate_table(self, result_ref: str, output_name: str) -> None:
-        """Validate a table link without reading table values or report bodies.
+        """Validate the selected output's Arrow stream before issuing its link.
 
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.

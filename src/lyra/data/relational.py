@@ -106,6 +106,9 @@ def frame_from_rows(
 
     Returns:
         Independent DataFrame or GeoDataFrame, including typed empty columns.
+
+    Raises:
+        ValueError: If a retained float column contains infinity.
     """
     records = list(rows)
     data = {}
@@ -120,6 +123,9 @@ def frame_from_rows(
             if dtype == "geometry"
             else pd.Series(values, dtype=dtype)
         )
+        if dtype == "Float64" and np.isinf(data[name]).any():
+            msg = f"Column {name!r} contains infinity"
+            raise ValueError(msg)
     frame = pd.DataFrame(data, index=pd.RangeIndex(len(records)))
     if description.geometry is not None:
         return gpd.GeoDataFrame(

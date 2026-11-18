@@ -191,22 +191,19 @@ def test_lookup_errors_before_stream_and_mcp(
 @pytest.mark.parametrize(
     "retained", [(True, "empty"), (True, "populated")], indirect=True
 )
-def test_mcp_link_is_typed_bounded_and_does_not_read_values(
+def test_mcp_link_is_typed_bounded_and_independent_of_report(
     retained: Retained, database: Database
 ) -> None:
     execute = database.execute
 
-    def metadata_only(statement: sa.Select, parameters: object = None) -> object:
+    def without_report(statement: sa.Select, parameters: object = None) -> object:
         source = statement.get_final_froms()[0]
         assert isinstance(source, sa.Table)
-        if source.name.startswith("data_"):
-            assert "count(" in str(statement)
-            assert "LIMIT" not in str(statement)
         if source.name == "final_results":
             assert "report" not in statement.selected_columns
         return execute(statement, parameters)
 
-    database.connection.execute.side_effect = metadata_only
+    database.connection.execute.side_effect = without_report
 
     async def run() -> None:
         app = retained.app.state.mcp_app
@@ -390,6 +387,35 @@ def test_native_task_cancellation_joins_reader(
     assert next(response.stream, None) is None
     database.connection.__exit__.assert_called()
     database.engine.dispose.assert_called()
+
+
+@pytest.mark.parametrize("damaged", [0, -1])
+@pytest.mark.parametrize("retained", [(True, "large")], indirect=True)
+@pytest.mark.anyio
+async def test_mcp_download_link_rejects_damaged_geometry(
+    retained: Retained, database: Database, damaged: int
+) -> None:
+    rows = next(
+        rows for name, rows in database.rows.items() if name.startswith("data_")
+    )
+    rows[damaged]["geometry"] = b"damaged"
+    app = retained.app.state.mcp_app
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=retained.public)) as http,
+    ):
+        response = await http.post(
+            BASE + "/mcp/",
+            json=tool_call_payload(
+                "lyra_download_table",
+                {"result_ref": retained.reference, "output_name": "rows"},
+            ),
+            headers=mcp_headers(),
+        )
+    result = response.json()["result"]
+    assert result["isError"]
+    expected = error_payload(ResultIntegrityError(retained.reference, "rows"))
+    assert result["structuredContent"] == {"error": expected.model_dump()}
 
 
 @pytest.mark.parametrize("damaged", [0, -1])
