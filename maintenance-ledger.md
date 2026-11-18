@@ -16,11 +16,11 @@ Start the third group with generated job IDs (M19) and on-demand result previews
 | --- | --- | --- |
 | M01 | Remove the unreachable executor branch | accepted |
 | M02 | Retire the prototype provider request planner | accepted |
-| M03 | Remove the standalone geometry codec and unused scope validator | under review |
-| M04 | Exercise the production graph compiler in tests and benchmarks | under review |
-| M05 | Simplify the bridge from provider identity to collection and edition | under review |
-| M06 | Capture the provider registry once during catalog compilation | under review |
-| M07 | Give Pandera one producer-table validation boundary | under review |
+| M03 | Remove the standalone geometry codec and unused scope validator | accepted |
+| M04 | Exercise the production graph compiler in tests and benchmarks | accepted |
+| M05 | Simplify the bridge from provider identity to collection and edition | accepted |
+| M06 | Capture the provider registry once during catalog compilation | accepted |
+| M07 | Give Pandera one producer-table validation boundary | accepted |
 | M08 | Limit Arrow conversion to supported output types | under review |
 | M09 | Validate Pydantic's generated schema and effective parameter values | under review |
 | M10 | Trust SQLite scalar constraints on ordinary retained reads | under review |
@@ -55,29 +55,39 @@ Before deleting the prototype tests, check which supported behaviors already hav
 
 ### M03 · Remove the standalone geometry codec and unused scope validator
 
-`geometry_buffers.py` and `geometry_shapely.py` maintain 134 lines for a standalone WKB Arrow table, with custom rules for geometry types, dimensions, and empty components. Only tests and test helpers use this representation. Retained tables write WKB directly with Shapely. Move any required geometry round-trip assertions to that storage boundary and remove the standalone codec. The separate 21-line `data/location_scope.py` validator has no code callers. [Standalone codec](src/lyra/data/geometry_buffers.py#L35) · [Geometry restrictions](src/lyra/data/geometry_shapely.py#L18) · [Retained WKB writer](src/lyra/data/relational.py#L86) · [Unused scope validator](src/lyra/data/location_scope.py#L18)
+Only tests and test helpers use the standalone WKB Arrow table in `geometry_buffers.py` and `geometry_shapely.py`. Remove both modules, the tests specific to that representation, and the unused `data/location_scope.py` validator. [Standalone codec](src/lyra/data/geometry_buffers.py#L35) · [Codec rules](src/lyra/data/geometry_shapely.py#L18) · [Unused scope validator](src/lyra/data/location_scope.py#L18)
+
+Retained tables write and read WKB directly with Shapely. Test that geometry values round-trip through this path, that the restored frame retains its declared CRS, and that an empty geometry remains distinct from null when the output schema permits both. Providers can enforce stricter geometry rules in their schemas. [Retained WKB writer](src/lyra/data/relational.py#L86) · [Storage round-trip test](tests/test_relational_conversion.py#L79) · [Result contract](docs/src/content/docs/use/results.md#read-a-retained-table) · [Provider schema check](tests/test_provider_schema.py#L143)
 
 ## Duplicate implementations and compatibility bridges
 
 ### M04 · Exercise the production graph compiler in tests and benchmarks
 
-Test support has its own plugin decorators and a 278-line manifest graph compiler. One test compiles a graph, mutates two input contracts, and reassembles it because the fixture rejects a route the live system supports. A catalog benchmark also times the fixture compiler. Build small plugins with the SDK and pass them through `compile_live_catalog`. Preserve assertions about cycles, routes, and bindings, and point the compilation benchmark at the path it is intended to measure. [Fixture decorators](test_support/declarations.py#L55) · [Fixture compiler](test_support/manifest_graph.py#L114) · [Test workaround](tests/test_selected_execution_plans.py#L157) · [Benchmark](benchmarks/catalog.py#L82) · [Production compiler](src/lyra/runtime/planning/catalog.py#L60)
+Replace the test-only plugin decorators and manifest graph compiler with small SDK plugin declarations compiled through `compile_live_catalog`. Preserve coverage for route selection, ambiguous routes, dependency bindings, and cycle rejection. For example, declare two routes that are valid individually and verify that selecting them together fails when they form a cycle. [Fixture decorators](test_support/declarations.py#L55) · [Fixture compiler](test_support/manifest_graph.py#L114) · [Cycle test](tests/test_selected_execution_plans.py#L138) · [Live compiler test](tests/test_dependency_route_planning.py#L27)
+
+Remove assertions that depend solely on overrides the SDK cannot express, such as hand-populated `source_bindings`. Keep any routing assertions in the same tests that SDK declarations can exercise. Update the accepted-sources benchmark to time `compile_live_catalog` as the number of registered providers and metrics grows. M05 covers changes to provider identity separately. [Override tests](tests/test_accepted_sources.py#L57) · [Accepted-sources benchmark](benchmarks/catalog.py#L75) · [Production compiler](src/lyra/runtime/planning/catalog.py#L60)
 
 ### M05 · Simplify the bridge from provider identity to collection and edition
 
-Live registration writes the provider ID into both `collection` and `source`. It sets `unit_type` to `"record"` and `geographical_edition` to `"provider"`. The planner also resolves per-input `source_bindings` overrides that the SDK leaves empty and tests populate manually. Represent routing endpoints by provider identity and retain the schema, origins, revisions, and intervention scope that actually vary. This changes serialized descriptions and identity keys. Address M04 first so routing coverage exercises declarations an SDK author can create. [Provider adapter](src/lyra/runtime/planning/provider_registry.py#L67) · [SDK binding](src/lyra/sdk/plugin.py#L453) · [Override resolution](src/lyra/runtime/planning/catalog.py#L211) · [Fixture-created overrides](tests/test_accepted_sources.py#L57)
+Live registration copies the provider ID into both `collection` and `source`, sets `unit_type` to `"record"`, and sets `geographical_edition` to `"provider"`. Complete M04 first so routing tests exercise SDK declarations. [Provider adapter](src/lyra/runtime/planning/provider_registry.py#L67) · [SDK binding](src/lyra/sdk/plugin.py#L453)
+
+- **Routing.** Use provider IDs for the source and target of each route. Remove the redundant collection, source, unit type, and edition fields from routing contracts and their serialized descriptions. Remove per-input `source_bindings` and their resolution logic. Keep SDK route preferences for choosing between equally short operation paths. [Override resolution](src/lyra/runtime/planning/catalog.py#L211) · [Route compiler](src/lyra/runtime/planning/catalog.py#L312)
+- **Execution and caching.** Preserve the provider ID, provider code revision, origin IDs and revisions, and applicable intervention identity in dataset scope. A new origin revision for the same provider keeps the route valid and gives affected computations distinct cache keys. Editorial changes to provider or origin descriptions leave cache identity unchanged. [Provider scope](src/lyra/contracts/provider_scope.py#L33) · [Intervention scope](src/lyra/contracts/provider_scope.py#L91)
+- **Discovery.** For each metric location input, expose the target provider ID and accepted source provider IDs. Keep the record schema, CRS, and query and membership capabilities available in the provider description. [Metric inspection](src/lyra/runtime/planning/discovery.py#L100) · [Provider declaration](src/lyra/contracts/providers.py#L26)
 
 ### M06 · Capture the provider registry once during catalog compilation
 
-On the unbound path, definition binding builds the provider registry, node compilation builds it again, and final catalog assembly builds it a third time. Each pass collects resources, validates declarations, and captures provider schemas. Pass the captured registry through all three stages. Preserve registration validation, resource ownership, and detection of conflicting provider IDs. [Definition binding](src/lyra/runtime/planning/native_bindings.py#L91) · [Node compilation](src/lyra/runtime/planning/node_declarations.py#L86) · [Catalog assembly](src/lyra/runtime/planning/catalog.py#L92)
+Build one fresh provider registry from all active plugins for each catalog build. Reuse it when binding plugin definitions, compiling nodes, constructing each plugin’s manifest, and assembling the final catalog. This includes server and worker startup, where the installed-plugin loader begins binding before catalog assembly. Validate resource requirements, preserve each plugin’s resource ownership, and reject conflicting provider IDs during the build. [Installed-plugin loader](src/lyra/server/plugins.py#L83) · [Definition binding](src/lyra/runtime/planning/native_bindings.py#L91) · [Node compilation](src/lyra/runtime/planning/node_declarations.py#L86) · [Manifest and catalog assembly](src/lyra/runtime/planning/catalog.py#L78) · [Registration rules](src/lyra/runtime/planning/provider_registry.py#L86)
+
+Keep the execution-time check for intervention targets. Before acquiring a resource, verify that the concrete provider still matches the declaration accepted for that job. [Intervention target validation](src/lyra/runtime/execution.py#L372)
 
 ## Library-backed simplifications and their tradeoffs
 
 ### M07 · Give Pandera one producer-table validation boundary
 
-A provider frame passes through `ProviderSchema.validate`, `LocationOutputSchema.prepare_frame`, and the general result validator. Lyra repeatedly checks frame structure and nullability. The result validator also converts every declared integer value through `Decimal(str(value))` before and after Pandera validation.
+At plugin registration, reject `coerce=True` on a metric output or provider schema and on any of its columns. Apply this rule to both `DataFrameSchema` and `DataFrameModel` declarations. Authors convert source values before returning the frame. At validation time, let Pandera enforce the declared dtypes, nullability, and uniqueness. A validated signed 64-bit integer dtype guarantees its range, so remove the per-value `Decimal` scans. [Schema registration](src/lyra/sdk/output_schema.py#L124) · [Provider registration](src/lyra/sdk/provider_schema.py#L29) · [Integer scan](src/lyra/sdk/results.py#L198)
 
-Check opaque IDs and CRS before coercion. Let Pandera enforce declared dtypes, nullability, uniqueness, and plugin checks, then detach the result at the ownership boundary. For integer columns, require an integer input dtype or restrict the bounds check to inputs that need coercion. This preserves overflow protection where a cast could hide it. [Provider entry](src/lyra/sdk/provider_schema.py#L73) · [Location checks](src/lyra/sdk/location_schema.py#L63) · [Result validation](src/lyra/sdk/results.py#L120) · [Integer scan](src/lyra/sdk/results.py#L198) · [Pandera schemas](https://pandera.readthedocs.io/en/stable/dataframe_schemas.html)
+Treat plugin checks as read-only predicates and run them in one Pandera validation pass per producer frame. Remove repeated validation and tests whose sole purpose is handling mutations by those callbacks. Check Lyra’s rules for opaque location IDs, active geometry, CRS, and serializable values once. Give the runtime an owned frame so later edits to the producer’s original cannot affect it. [Location checks](src/lyra/sdk/location_schema.py#L63) · [Result validation](src/lyra/sdk/results.py#L120) · [Serialization rules](src/lyra/data/results.py#L32) · [Mutation tests](tests/test_location_ingestion.py#L28)
 
 ### M08 · Limit Arrow conversion to supported output types
 
