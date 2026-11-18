@@ -2,13 +2,44 @@
 
 Reviewed on 2026-11-18 at commit `0cc196d`. Lyra was in closed alpha with no existing clients or deployments. The review traced callers through the SDK, local runner, worker, storage, clients, tests, and benchmarks. It included an in-memory Arrow comparison. The test suite and benchmarks were not run, so this ledger makes no measured performance claims.
 
-All entries are **open for implementation**. The recommendations in M19–M26 are **accepted**. Each heading has a stable identifier. When resolving an entry, record the implementing commit or PR under that heading. Source links point into the working tree at the line numbers from the corresponding review.
+Each heading has a stable identifier. When resolving an entry, record the implementing commit or PR under that heading. Source links point into the working tree at the line numbers from the corresponding review.
 
 **Suggested order.** Remove the unreachable executor branch and prototype planner first (M01–M02). Move graph tests onto the production compiler (M04) before simplifying provider identity (M05). Of the changes that relax a guarantee, start with producer validation and Arrow conversion (M07–M08).
 
 Among the workflow changes below, GeoParquet export (M17) is the smallest independent cleanup. Metric cache scheduling (M14) has the highest priority before adding another cache policy.
 
 Start the third group with generated job IDs (M19) and on-demand result previews (M20). Both can ship independently of the durable run ID change (M25). Remove per-metric queue routing (M26) alongside the worker catalog cleanup (M23).
+
+## Acceptance status
+
+| ID | Recommendation | Status |
+| --- | --- | --- |
+| M01 | Remove the unreachable executor branch | accepted |
+| M02 | Retire the prototype provider request planner | accepted |
+| M03 | Remove the standalone geometry codec and unused scope validator | under review |
+| M04 | Exercise the production graph compiler in tests and benchmarks | under review |
+| M05 | Simplify the bridge from provider identity to collection and edition | under review |
+| M06 | Capture the provider registry once during catalog compilation | under review |
+| M07 | Give Pandera one producer-table validation boundary | under review |
+| M08 | Limit Arrow conversion to supported output types | under review |
+| M09 | Validate Pydantic's generated schema and effective parameter values | under review |
+| M10 | Trust SQLite scalar constraints on ordinary retained reads | under review |
+| M11 | Use Arrow for both single and bulk DataFrame retrieval | under review |
+| M12 | Remove cases tied to retired config versions and field names | accepted |
+| M13 | Remove MCP cases tied to retired tools and wait arguments | accepted |
+| M14 | Let the metric scheduler own cache lookup | under review |
+| M15 | Share job submission and waiting across client methods | accepted |
+| M16 | Share exact-ID and intervention queries across managed providers | accepted |
+| M17 | Assemble GeoParquet export metadata once | under review |
+| M18 | Use one catalog pagination path for HTTP and MCP | under review |
+| M19 | Use the job ID format Lyra generates | under review |
+| M20 | Compute result previews only for inspection | under review |
+| M21 | Reuse the published report and avoid rebuilding output tables at publication | under review |
+| M22 | Measure the finished row page against the byte limit | under review |
+| M23 | Load the worker catalog through the application loader | under review |
+| M24 | Retire the SQLite publication helper used by tests and benchmarks | under review |
+| M25 | Use one durable run ID for the report and outputs | under review |
+| M26 | Use one shared RQ queue per deployment | under review |
 
 ## Dead and stale code
 
@@ -18,7 +49,9 @@ Preflight assigns a bound root for every `PreparedExecution`. Dispatch then retu
 
 ### M02 · Retire the prototype provider request planner
 
-`prepare_provider_request` parses requests, compiles registrations, walks dependencies, and forwards parameters. Only its tests call it. The local runner and worker both call `prepare_execution`. Remove the prototype entry point, its request and result types, and its private collector. Keep `PreparedProviderInput` and `validate_provider_selections`, which production still uses. The same test module already exercises rejection before acquisition through `LocalRunner`. [Prototype](src/lyra/runtime/planning/provider_preparation.py#L67) · [Live planner](src/lyra/runtime/planning/preparation.py#L26) · [Acquisition caller](src/lyra/runtime/provider_acquisition.py#L18) · [Behavioral tests to keep](tests/test_provider_preparation.py#L283)
+`prepare_provider_request` parses requests, compiles registrations, walks dependencies, and forwards parameters. Only its tests call it. The local runner and worker both call `prepare_execution`. Remove the prototype entry point, its request and result types, and its private collector. Keep `PreparedProviderInput` and `validate_provider_selections`, which production still uses. [Prototype](src/lyra/runtime/planning/provider_preparation.py#L67) · [Live planner](src/lyra/runtime/planning/preparation.py#L26) · [Acquisition caller](src/lyra/runtime/provider_acquisition.py#L18)
+
+Before deleting the prototype tests, check which supported behaviors already have coverage through `prepare_execution` or `LocalRunner`. Existing tests cover empty and repeated selections and rejection before acquisition. Move any uncovered assertions to those production paths, including checks that caller mutations leave a prepared plan intact and that nested uses of the same operation receive their own parameter values. [Selection coverage](tests/test_dependency_route_planning.py#L221) · [Rejection before acquisition](tests/test_provider_preparation.py#L283) · [Caller mutations](tests/test_provider_preparation.py#L155) · [Nested parameters](tests/test_provider_preparation.py#L207)
 
 ### M03 · Remove the standalone geometry codec and unused scope validator
 
@@ -100,7 +133,7 @@ The local result store and the sync and async clients each have two export metho
 
 HTTP passes an offset and limit to discovery. For each page, MCP requests the full public metric list, slices it, and encodes the next offset and catalog fingerprint in a versioned cursor. Give discovery one operation that returns the requested page and total count, and use it from both interfaces. The MCP tool could also expose a plain offset and retire its cursor codec. That would drop automatic rejection when the catalog changes between pages, so a caller could skip or repeat a metric. Sharing page selection is possible with either cursor policy. [HTTP listing](src/lyra/server/routes/metrics.py#L14) · [Discovery pagination](src/lyra/runtime/planning/discovery.py#L70) · [MCP listing](src/lyra/server/mcp/tools.py#L299) · [Cursor codec](src/lyra/server/mcp/tools.py#L432)
 
-## Accepted changes to jobs, results, and worker startup
+## Jobs, results, and worker startup
 
 Reviewed at commit `ef46012`. M19–M22 include isolated checks using the installed queue library, an in-memory store, or the HTTP page encoder. M23–M25 are based on the production callers and storage schema.
 
