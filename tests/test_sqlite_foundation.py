@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from copy import deepcopy
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -62,7 +63,10 @@ def test_offline_constraints(kind: str, scope: str, primary: list[str]) -> None:
     data = layout.register(definition)
     assert layout.register(definition) is data
     assert list(data.table.primary_key.columns.keys()) == primary
-    assert isinstance(data.table.c.enabled.type, sa.Boolean)
+    ddl = str(CreateTable(data.table).compile(dialect=sqlite.dialect()))
+    assert "STRICT" in ddl
+    assert "enabled INTEGER" in ddl
+    assert "CHECK (enabled IN (0, 1))" in ddl
     assert data.table.c.enabled.nullable
     assert all(not column.nullable for column in data.table.primary_key)
     constraints = list(data.table.foreign_key_constraints)
@@ -83,6 +87,29 @@ def test_offline_constraints(kind: str, scope: str, primary: list[str]) -> None:
         {column.name: None for column in data.table.columns}
     )
     assert "INSERT INTO" in str(statement.compile(dialect=sqlite.dialect()))
+
+
+def test_strict_constraints_follow_physical_column_names() -> None:
+    definition = registration(scope="unpartitioned")
+    names = ('Rate "m"', 'RATE "M"')
+    definition = definition.model_copy(
+        update={
+            "columns": tuple(
+                StoredColumn(name=name, dtype=dtype, nullable=True, unit=None)
+                for name, dtype in zip(names, ("boolean", "Float64"), strict=True)
+            )
+        }
+    )
+    table = Layout().register(definition).table
+    dialect = sqlite.dialect()
+    ddl = str(CreateTable(table).compile(dialect=dialect))
+    boolean, real = (
+        dialect.identifier_preparer.format_column(table.c[name]) for name in names
+    )
+    assert f"CHECK ({boolean} IN (0, 1))" in ddl
+    assert (
+        f"CHECK ({real} BETWEEN {-sys.float_info.max} AND {sys.float_info.max})" in ddl
+    )
 
 
 def test_registration_metadata_and_collision() -> None:

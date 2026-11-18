@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
@@ -22,7 +23,6 @@ from lyra.contracts.provider_scope import DatasetScope, RecordIdentity
 from lyra.runtime.sqlite_schema import Layout, Registration
 
 if TYPE_CHECKING:
-    import sqlite3
     from collections.abc import Generator
     from pathlib import Path
 
@@ -109,6 +109,9 @@ def _scope_json(scope: DatasetScope | None) -> str | None:
 
 
 def _configure_connection(connection: sqlite3.Connection, _record: object) -> None:
+    if sqlite3.sqlite_version_info < (3, 37, 0):
+        msg = "Retained result storage requires SQLite 3.37 or newer"
+        raise RuntimeError(msg)
     cursor = connection.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys=ON")

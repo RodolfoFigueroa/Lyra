@@ -42,8 +42,10 @@ if TYPE_CHECKING:
 
     import geopandas as gpd
     import pandas as pd
+    from sqlalchemy import Connection
 
     from lyra.contracts.provider_scope import DatasetScope
+    from lyra.runtime.location_inputs import InputSelection
     from lyra.runtime.output_selection import OutputSelection
 
 
@@ -225,6 +227,16 @@ class ResultStore:
     def _select_location_input(
         self, result_ref: str, input_name: str
     ) -> "Generator[InputRows]":
+        with self._location_input_metadata(result_ref, input_name) as (
+            connection,
+            selections,
+        ):
+            yield InputRows.prepare(self._store, connection, selections)
+
+    @contextmanager
+    def _location_input_metadata(
+        self, result_ref: str, input_name: str
+    ) -> "Generator[tuple[Connection, tuple[InputSelection, ...]]]":
         validate_retrieval_name(input_name)
         with (
             self._lookup(result_ref, None, input_name=input_name) as lookup,
@@ -234,20 +246,17 @@ class ResultStore:
             bindings = lookup.input_bindings_connection(connection, result_ref, inputs)
             if input_name not in bindings.names:
                 raise MissingValueError(input_name)
-            selections = tuple(
-                inputs.borrow_selection(connection, key)
-                for key in bindings.selections[input_name]
+            selections = inputs.borrow_selections(
+                connection, bindings.selections[input_name]
             )
             if selections[0].description.availability == "not_materialized":
-                inputs.descriptions(connection, bindings)
                 raise LocationInputUnavailableError(result_ref, input_name)
-            yield InputRows.prepare(self._store, connection, selections)
+            yield connection, selections
 
     def validate_location_input(self, result_ref: str, input_name: str) -> None:
-        """Verify that every selected batch can be encoded for download."""
-        with closing(self.stream_location_input(result_ref, input_name)) as chunks:
-            for _ in chunks:
-                pass
+        """Check the saved metadata to confirm that the location input is available."""
+        with self._location_input_metadata(result_ref, input_name):
+            pass
 
     @contextmanager
     def location_input_page_candidates(
@@ -299,10 +308,10 @@ class ResultStore:
             )
 
     def validate_table(self, result_ref: str, output_name: str) -> None:
-        """Verify that every selected output batch can be encoded for download."""
-        with closing(self.stream_table(result_ref, output_name)) as chunks:
-            for _ in chunks:
-                pass
+        """Check the saved metadata to confirm that the named output exists."""
+        validate_retrieval_name(output_name)
+        with self._lookup(result_ref, output_name) as lookup:
+            lookup.validate_output_metadata(result_ref, output_name)
 
     @contextmanager
     def page_candidates(

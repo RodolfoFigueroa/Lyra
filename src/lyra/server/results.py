@@ -156,7 +156,7 @@ class ResultService:
         )
 
     def validate_table(self, result_ref: str, output_name: str) -> None:
-        """Validate the selected output's Arrow stream before issuing its link.
+        """Validate the selected output metadata before issuing its link.
 
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.

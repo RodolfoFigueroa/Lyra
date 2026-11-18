@@ -166,7 +166,9 @@ Read these fields directly from `structuredContent`:
 
 Fetch `download_url` with your agent Bearer credential and save the response bytes unchanged. Read the saved Arrow stream with [PyArrow or GeoPandas](../rest-api/#download-a-retained-table), regardless of filename. You can download the table after job expiry while Lyra retains the result.
 
-The tool checks that the output exists without reading table values or changing stored data. MCP limits the link response to 65,536 bytes, including both response representations and the envelope.
+The tool checks that the output exists. MCP limits the link response to 65,536 bytes, including both response representations and the envelope.
+
+When you fetch the URL, Lyra checks the stored values before sending the Arrow stream. If a cell is corrupt, the download returns HTTP `500` with `result_integrity_error`.
 
 If `isError` is `true`, inspect `structuredContent.error.code`:
 
@@ -244,13 +246,13 @@ Call `lyra_get_location_input_rows` with `result_ref` and `input_name`. Set a po
 
 Pass `next_cursor` unchanged as `cursor` with the same result and input until it returns `null`. Continue after short pages when a cursor remains; output-table cursors aren’t valid here. For correspondence inputs, each row maps an immediate source record to a target record, preserving repeated targets under different sources.
 
-Call `lyra_download_location_input` with `result_ref` and `input_name` to validate the input and obtain an Arrow download URL. Read these fields directly from `structuredContent`:
+Call `lyra_download_location_input` with `result_ref` and `input_name`. If the input is available, the tool returns a download URL. Read these fields directly from `structuredContent`:
 
 - `result_ref`: the saved result
 - `input_name`: the selected location input
 - `download_url`: the absolute URL, including your deployment’s public path prefix
 
-Fetch `download_url` with your agent Bearer credential. The Arrow stream includes the declared schema and CRS even for empty selections.
+Fetch `download_url` with your agent Bearer credential. If Lyra finds a corrupt cell, it returns HTTP `500` with `result_integrity_error` before sending the Arrow stream. The stream includes the declared schema and CRS even for empty selections.
 
 When `isError` is `true`, inspect `structuredContent.error` using the [HTTP error codes and fields](../rest-api/#read-retained-location-inputs). Handle input-specific failures as follows:
 

@@ -317,6 +317,8 @@ interfaces:
 | Read input rows | `GET /results/{result_ref}/location-inputs/{input_name}/rows?limit=100&cursor=...` | `lyra_get_location_input_rows(result_ref, input_name, limit=100, cursor=None)` |
 | Download an input | `GET /results/{result_ref}/location-inputs/{input_name}/download` | `lyra_download_location_input(result_ref, input_name)` returns a download link. |
 
+The download tool resolves the selected input’s metadata and materialization status. The HTTP download checks the selected cells before sending Arrow bytes and returns a structured HTTP 500 for damaged data.
+
 The download tool returns `result_ref`, `input_name`, and `download_url`. URLs are
 absolute, use the deployment's public API base URL, and require ordinary
 authentication. Success uses HTTP `200`, with Arrow downloads served as

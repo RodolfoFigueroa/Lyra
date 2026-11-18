@@ -76,7 +76,9 @@ def transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Transport:
     return app, mcp, reference, service
 
 
-def test_authenticated_pages_links_and_streams(transport: Transport) -> None:
+def test_authenticated_pages_links_and_streams(
+    transport: Transport, database: Database
+) -> None:
     app, mcp, ref, _ = transport
 
     async def run() -> None:
@@ -138,6 +140,7 @@ def test_authenticated_pages_links_and_streams(transport: Transport) -> None:
                             "/", headers=mcp_headers("wrong"), json=payload
                         )
                     ).status_code == 403
+                database.connection.execute.reset_mock()
                 response = await tools.post(
                     "/",
                     headers=mcp_headers(),
@@ -145,6 +148,11 @@ def test_authenticated_pages_links_and_streams(transport: Transport) -> None:
                         "lyra_download_location_input",
                         {"result_ref": ref, "input_name": name},
                     ),
+                )
+                assert all(
+                    not source.name.startswith("data_")
+                    for call in database.connection.execute.call_args_list
+                    for source in call.args[0].get_final_froms()
                 )
                 link = tool_payload(response)
                 assert link == {

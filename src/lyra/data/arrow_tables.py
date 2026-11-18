@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import shapely
@@ -12,6 +13,7 @@ from pyproj import CRS
 
 from lyra.contracts.provider_scope import EffectiveScope
 from lyra.data.arrow_conversion import to_arrow
+from lyra.data.relational import checked_column
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -95,27 +97,15 @@ def table_batch(
     Returns:
         Declared scalar arrays and unchanged WKB cells in public column order.
     """
-    frame = pd.DataFrame(
-        {
-            name: pd.Series([row[i] for row in rows], dtype=dtype)
-            for i, (name, dtype) in enumerate(
-                zip(description.columns, description.pandas_dtypes, strict=True)
-            )
-            if dtype != "geometry"
-        },
-        index=pd.RangeIndex(len(rows)),
-    )
-    scalars = to_arrow(frame, description.properties)
     arrays = []
     for i, field in enumerate(schema):
+        values = checked_column(rows, i, description)
         if field.name == description.geometry:
-            cells = pa.array([row[i] for row in rows], type=pa.binary())
-            # Arrow binary accepts arbitrary bytes. Check the declared WKB encoding
-            # before delivering the original bytes and their GeoArrow metadata.
-            shapely.from_wkb(cells.to_numpy(zero_copy_only=False))
-            arrays.append(cells)
-        else:
-            arrays.append(scalars[field.name].combine_chunks())
+            shapely.from_wkb(np.asarray(values, dtype=object))
+        if pa.types.is_boolean(field.type):
+            values = [None if value is None else bool(value) for value in values]
+        arrays.append(pa.array(values, type=field.type))
     if not arrays:
-        return scalars.to_batches()[0].replace_schema_metadata(schema.metadata)
+        batch = pa.record_batch([pa.nulls(len(rows))], names=["_rows"]).select([])
+        return batch.replace_schema_metadata(schema.metadata)
     return pa.RecordBatch.from_arrays(arrays, schema=schema)

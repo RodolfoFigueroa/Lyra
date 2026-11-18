@@ -435,6 +435,8 @@ complete Arrow table:
 }
 ```
 
+The MCP table download tool checks the selected output’s retained metadata. The HTTP download validates and stages the selected cells before sending Arrow bytes. Damaged cells produce a structured HTTP 500 on GET.
+
 All returned `download_url` values are absolute URLs built from the deployment's
 public API base URL, including links in description previews, report previews, and
 oversized-row errors. They use the deployment's existing authentication. Example

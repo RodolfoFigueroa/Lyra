@@ -118,7 +118,9 @@ def encode_additions(
             msg = f"Column {column.name!r} requires {column.dtype}, got {values.dtype}"
             raise ValueError(msg)
     validate_serializable(frame)
-    layout = RowLayout(columns, dtypes)
+    layout = RowLayout(
+        columns, dtypes, tuple(column.nullable for column in metadata.columns)
+    )
     return [encode_row(row, layout) for row in rows_from_validated(frame, layout)]
 
 

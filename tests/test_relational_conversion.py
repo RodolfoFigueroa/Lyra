@@ -10,6 +10,7 @@ from pandera.typing import Series
 from shapely.geometry import Point, Polygon
 
 from lyra.contracts.errors import MetricResultError
+from lyra.data.arrow_tables import table_batch, table_schema
 from lyra.data.relational import frame_from_rows, rows_from_validated
 from lyra.sdk.storage_schema import describe, prepare_native
 from test_support.location_schema import column
@@ -185,5 +186,8 @@ def test_zero_column_row_cardinality() -> None:
     schema = pa.DataFrameSchema({}, strict=True)
     source = pd.DataFrame(index=range(3))
     owned, layout = prepare_native(source, schema)
-    assert rows_from_validated(owned, layout) == [(), (), ()]
+    rows = rows_from_validated(owned, layout)
+    assert rows == [(), (), ()]
+    batch = table_batch(rows, layout, table_schema(layout))
+    assert (batch.num_rows, batch.num_columns) == (3, 0)
     pd.testing.assert_frame_equal(frame_from_rows([(), (), ()], layout), source)

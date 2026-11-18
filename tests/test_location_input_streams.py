@@ -93,6 +93,36 @@ def test_arrow_types_geometry_and_multiple_batches(
         assert [row["location_id"] for row in rows] == native.location_id.tolist()
 
 
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("ratio", "NaN"),
+        ("ratio", float("inf")),
+        ("count", 1.5),
+        ("label", b"text"),
+        ("flag", 2),
+        ("geometry", None),
+        ("geometry", b"010100000000000000000000000000000000000000"),
+    ],
+)
+def test_corrupt_input_cells(
+    retained_input: RetainedInput, database: Database, column: str, value: object
+) -> None:
+    retained = retained_input
+    table = retained.store.layout.tables[retained.selection.registration.key].table
+    database.rows[table.name][0][column] = value
+    reader = ResultStore(retained.store)
+    builder = RowPageBuilder(reader, "https://lyra.test", http_response_budget())
+    for read in (
+        lambda: reader.read_location_input(retained.reference, "places"),
+        lambda: builder.build_location_input(retained.reference, "places"),
+        lambda: b"".join(retained.stream()),
+    ):
+        with pytest.raises(ResultIntegrityError) as error:
+            read()
+        assert error.value.input_name == "places"
+
+
 def test_json_logical_encodings(retained_input: RetainedInput) -> None:
     retained = retained_input
     builder = RowPageBuilder(

@@ -160,18 +160,8 @@ class InputRows:
         connection: sa.Connection,
         selections: tuple[InputSelection, ...],
     ) -> InputRows:
-        """Return a selection after checking captured descriptions and completion.
-
-        Raises:
-            DamagedDataError: If schemas or availability disagree across references.
-        """
+        """Return a batched row reader for selections with matching metadata."""
         first = selections[0]
-        if any(
-            s.description != first.description or s.registration != first.registration
-            for s in selections
-        ):
-            msg = "Combined input schemas or descriptions differ"
-            raise DamagedDataError(msg)
         return cls(
             store,
             connection,

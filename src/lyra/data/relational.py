@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from itertools import islice
 from typing import TYPE_CHECKING, TypeAlias, cast
 
 import geopandas as gpd
@@ -11,7 +13,7 @@ import pandas as pd
 import shapely
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     import pyarrow as pa
 
@@ -52,6 +54,7 @@ class RowLayout:
 
     columns: tuple[str, ...]
     pandas_dtypes: tuple[str, ...]
+    nullable: tuple[bool, ...]
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,6 @@ class StorageDescription(RowLayout):
 
     properties: pa.Schema
     sqlite_types: tuple[str, ...]
-    nullable: tuple[bool, ...]
     crs: str | None
     geometry: str | None
     descriptions: tuple[str | None, ...]
@@ -90,13 +92,46 @@ def rows_from_validated(
             # Extension-array conversion produces Python scalars without inferring
             # a logical type from populated, empty, or all-null data.
             columns.append(
-                pd.Series(values, dtype=dtype).array.to_numpy(
-                    dtype=object, na_value=None
-                )
+                pd.Series(
+                    values, dtype="Int64" if dtype == "boolean" else dtype
+                ).array.to_numpy(dtype=object, na_value=None)
             )
     if not columns:
         return [()] * len(frame)
     return list(zip(*columns, strict=True))
+
+
+_VALID_CELL: dict[str, Callable[[Cell], bool]] = {
+    "string": lambda v: type(v) is str,
+    "Int64": lambda v: type(v) is int and -(2**63) <= v < 2**63,
+    "boolean": lambda v: type(v) is int and v in {0, 1},
+    "Float64": lambda v: type(v) is float and math.isfinite(v),
+    "geometry": lambda v: isinstance(v, bytes) and v[:1] in {b"\x00", b"\x01"},
+}
+
+
+def checked_column(
+    rows: Iterable[tuple[Cell, ...]], index: int, layout: RowLayout
+) -> list[Cell]:
+    """Collect SQL cells in one pass, checking their physical representation.
+
+    Returns:
+        Values suitable for conversion to the declared dtype.
+
+    Raises:
+        ValueError: If a cell violates its declared type or nullability.
+    """
+    dtype = layout.pandas_dtypes[index]
+    valid = _VALID_CELL[dtype]
+    nullable = layout.nullable[index]
+    values = []
+    for row in rows:
+        value = row[index]
+        if not (nullable if value is None else valid(value)):
+            msg = f"Invalid stored {dtype} in column {layout.columns[index]!r}"
+            raise ValueError(msg)
+        values.append(value)
+    return values
 
 
 def frame_from_rows(
@@ -106,26 +141,31 @@ def frame_from_rows(
 
     Returns:
         Independent DataFrame or GeoDataFrame, including typed empty columns.
-
-    Raises:
-        ValueError: If a retained float column contains infinity.
     """
-    records = list(rows)
+    iterator = iter(rows)
+    frames = []
+    while batch := list(islice(iterator, 1024)):
+        frames.append(_frame_batch(batch, description))
+    if not frames:
+        return _frame_batch([], description)
+    return frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
+
+
+def _frame_batch(
+    records: list[tuple[Cell, ...]], description: StorageDescription
+) -> pd.DataFrame:
     data = {}
     for index, (name, dtype) in enumerate(
         zip(description.columns, description.pandas_dtypes, strict=True)
     ):
-        values = [row[index] for row in records]
+        values = checked_column(records, index, description)
         data[name] = (
-            gpd.GeoSeries.from_wkb(
-                np.asarray(values, dtype=object), crs=description.crs
+            gpd.GeoSeries(
+                shapely.from_wkb(np.asarray(values, dtype=object)), crs=description.crs
             )
             if dtype == "geometry"
             else pd.Series(values, dtype=dtype)
         )
-        if dtype == "Float64" and np.isinf(data[name]).any():
-            msg = f"Column {name!r} contains infinity"
-            raise ValueError(msg)
     frame = pd.DataFrame(data, index=pd.RangeIndex(len(records)))
     if description.geometry is not None:
         return gpd.GeoDataFrame(
@@ -148,11 +188,21 @@ def encode_row(
 
     Returns:
         Every declared column mapped to its fixed JSON cell representation.
+
+    Raises:
+        ValueError: If a cell violates its declared representation.
     """
     row: dict[str, str | float | bool | None] = {}
-    for name, dtype, value in zip(
-        description.columns, description.pandas_dtypes, cells, strict=True
+    for name, dtype, nullable, value in zip(
+        description.columns,
+        description.pandas_dtypes,
+        description.nullable,
+        cells,
+        strict=True,
     ):
+        if not (nullable if value is None else _VALID_CELL[dtype](value)):
+            msg = f"Invalid stored {dtype} in column {name!r}"
+            raise ValueError(msg)
         if value is None:
             row[name] = None
         elif dtype == "geometry":

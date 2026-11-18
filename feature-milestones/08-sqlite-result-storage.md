@@ -167,6 +167,7 @@ separately; equal values do not imply the same execution.
 
 ### Typed storage from Pandera schemas
 
+Require SQLite 3.37 or newer. Generate STRICT data tables with declared nullability and finite REAL bounds.
 Use SQLite native rows, SQLAlchemy Core schema construction and bulk statements,
 and the once-compiled descriptions derived from registered Pandera schemas.
 Registration performs no database access; initialization and writes occur during
@@ -187,7 +188,7 @@ come from runtime bindings or stored descriptions, never from frame attributes.
 | String | SQLite `TEXT`; pandas string |
 | Signed 64-bit integer | SQLite `INTEGER`, from `-2**63` through `2**63 - 1`; pandas nullable integer |
 | Finite 64-bit float | SQLite `REAL`; pandas nullable float |
-| Boolean | SQLAlchemy `Boolean` using integer 0/1; pandas nullable boolean |
+| Boolean | SQLite `INTEGER` constrained to 0/1; pandas nullable boolean |
 | Geometry | Standard WKB in a `BLOB` cell; Shapely/GeoPandas reconstruction with declared CRS |
 
 Missing values become SQL `NULL` subject to declared nullability and structural

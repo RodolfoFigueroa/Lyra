@@ -1,5 +1,6 @@
 """Offline relational definitions and retained logical schema registrations."""
 
+import sys
 from dataclasses import dataclass
 from string import ascii_lowercase, ascii_uppercase
 from typing import Literal
@@ -293,7 +294,7 @@ class Layout:
             "string": sa.Text,
             "Int64": sa.Integer,
             "Float64": sa.REAL,
-            "boolean": sa.Boolean,
+            "boolean": sa.Integer,
             "geometry": sa.LargeBinary,
         }
         columns = [sa.Column(value_column, sa.Text, primary_key=True)]
@@ -309,7 +310,17 @@ class Layout:
         )
         if registration.output_scope == "unpartitioned":
             columns.append(sa.Column(row_column, sa.Integer, primary_key=True))
-        table = sa.Table("data_" + key, self.metadata, *columns)
+        table = sa.Table("data_" + key, self.metadata, *columns, sqlite_strict=True)
+        for column in registration.columns:
+            field = table.c[column.name]
+            if column.dtype == "boolean":
+                table.append_constraint(sa.CheckConstraint(field.in_((0, 1))))
+            elif column.dtype == "Float64":
+                table.append_constraint(
+                    sa.CheckConstraint(
+                        field.between(-sys.float_info.max, sys.float_info.max)
+                    )
+                )
         if registration.output_scope == "location":
             owner = (
                 "source_location_id"

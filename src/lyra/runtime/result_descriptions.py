@@ -340,18 +340,42 @@ class ResultDescriptions:
         description = ResultDescription.model_validate_json(row["description"])
         return self._inputs(connection, description, inputs)
 
+    def validate_output_metadata(self, reference: str, name: str) -> None:
+        """Resolve a named output using only its retained metadata."""
+        with self.store.engine.connect() as connection:
+            row = self._description_record(connection, reference)
+            description = ResultDescription.model_validate_json(row["description"])
+            self._load_outputs(description, name)
+            self._check_output_metadata(connection, description, name)
+
+    def _check_output_metadata(
+        self, connection: sa.Connection, description: ResultDescription, name: str
+    ) -> None:
+        output = description.outputs[name]
+        registration = self._registration(description, name, output)
+        for selection in output.computations:
+            header = self._header(
+                connection, description, output, registration, selection
+            )
+            counts = (header.output_rows or {}).get(name)
+            if counts is None or (
+                selection.groups is not None
+                and (
+                    not isinstance(counts, dict)
+                    or not set(selection.groups) <= counts.keys()
+                )
+            ):
+                msg = "Missing retained output completion"
+                raise DamagedDataError(msg)
+
     def describe(self, reference: str) -> PublicResultDescription:
         """Return complete retained metadata without reading reports or value rows."""
         with self.store.engine.connect() as connection:
             row = self._description_record(connection, reference)
             description = ResultDescription.model_validate_json(row["description"])
             self._load_outputs(description, None)
-            for name, output in description.outputs.items():
-                registration = self._registration(description, name, output)
-                for selection in output.computations:
-                    self._header(
-                        connection, description, output, registration, selection
-                    )
+            for name in description.outputs:
+                self._check_output_metadata(connection, description, name)
             with _input_traversal(self.store, connection) as inputs:
                 return self._metadata(
                     connection, inputs, description, reference, row["execution_id"]

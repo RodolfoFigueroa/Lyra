@@ -182,8 +182,12 @@ def test_lookup_errors_before_stream_and_mcp(
                 ),
             )
             result = response.json()["result"]
-            assert result["isError"]
-            assert result["structuredContent"] == {"error": payload.model_dump()}
+            if damage == "rows":
+                assert not result["isError"]
+                assert result["structuredContent"]["download_url"] == retained.url
+            else:
+                assert result["isError"]
+                assert result["structuredContent"] == {"error": payload.model_dump()}
 
     asyncio.run(run())
 
@@ -392,7 +396,7 @@ def test_native_task_cancellation_joins_reader(
 @pytest.mark.parametrize("damaged", [0, -1])
 @pytest.mark.parametrize("retained", [(True, "large")], indirect=True)
 @pytest.mark.anyio
-async def test_mcp_download_link_rejects_damaged_geometry(
+async def test_mcp_download_link_defers_cell_integrity_to_get(
     retained: Retained, database: Database, damaged: int
 ) -> None:
     rows = next(
@@ -404,6 +408,7 @@ async def test_mcp_download_link_rejects_damaged_geometry(
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=retained.public)) as http,
     ):
+        database.connection.execute.reset_mock()
         response = await http.post(
             BASE + "/mcp/",
             json=tool_call_payload(
@@ -412,10 +417,19 @@ async def test_mcp_download_link_rejects_damaged_geometry(
             ),
             headers=mcp_headers(),
         )
-    result = response.json()["result"]
-    assert result["isError"]
+        result = response.json()["result"]
+        assert not result["isError"]
+        assert all(
+            not source.name.startswith("data_")
+            for call in database.connection.execute.call_args_list
+            for source in call.args[0].get_final_froms()
+        )
+        download = await http.get(
+            result["structuredContent"]["download_url"], headers=mcp_headers()
+        )
+    assert download.status_code == 500
     expected = error_payload(ResultIntegrityError(retained.reference, "rows"))
-    assert result["structuredContent"] == {"error": expected.model_dump()}
+    assert download.json() == {"detail": expected.model_dump()}
 
 
 @pytest.mark.parametrize("damaged", [0, -1])

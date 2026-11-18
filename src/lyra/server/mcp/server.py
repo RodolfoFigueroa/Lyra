@@ -452,10 +452,11 @@ def _register_retained_tools(
         result_ref: Annotated[str, DownloadTableInput.model_fields["result_ref"]],
         output_name: Annotated[str, DownloadTableInput.model_fields["output_name"]],
     ) -> TableDownload:
-        """Return an authenticated Arrow IPC stream link for one retained output.
+        """Get a download URL for one retained output.
 
-        The link remains usable independently of job expiry. Download with the
-        agent bearer credential and read using ordinary PyArrow/GeoPandas readers.
+        Fetch the URL with your agent bearer credential, even after the job
+        expires. Lyra checks the stored values before sending the Arrow IPC
+        stream. Read the stream with PyArrow or GeoPandas.
 
         Returns:
             Validated result_ref, output_name, and absolute download_url.
@@ -514,7 +515,10 @@ def _register_retained_tools(
             str, DownloadLocationInputInput.model_fields["input_name"]
         ],
     ) -> LocationInputDownload:
-        """Return an authenticated Arrow stream link after validating the input.
+        """Get a download URL for an available location input.
+
+        Fetch the URL with your agent bearer credential. Lyra checks the stored
+        values before sending the Arrow stream.
 
         Returns:
             Validated result_ref, input_name, and absolute download_url.

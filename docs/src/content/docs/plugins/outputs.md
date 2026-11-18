@@ -184,10 +184,12 @@ Use the same Pandera declaration for validation and SQLite storage; you don’t 
 | String | `TEXT`; pandas string |
 | Signed 64-bit integer | `INTEGER`, from `-2**63` to `2**63 - 1`; pandas nullable `Int64` |
 | Finite 64-bit float | `REAL`; pandas nullable `Float64` |
-| Boolean | Integer 0/1 through SQLAlchemy Boolean; pandas nullable boolean |
+| Boolean | SQLite stores `0` or `1` as `INTEGER`. Lyra reads the column with pandas’ nullable `boolean` dtype. |
 | Geometry | Well-known binary (WKB) in a `BLOB`; Shapely/GeoPandas with the declared CRS |
 
-SQLite stores missing cells as `NULL` where the declaration permits nulls. Lyra reconstructs empty and all-null columns from declared types rather than inferring types from rows. Storage preserves logical values, without preserving arbitrary dtype widths or backing arrays.
+Lyra stores outputs in [SQLite strict tables](https://www.sqlite.org/stricttables.html), which require SQLite 3.37 or newer. If your declaration allows missing values, SQLite stores them as `NULL`.
+
+When you read an output, Lyra uses the declared type for each column, including empty and all-null columns. Lyra preserves logical values even if the dtype width or backing array changes.
 
 You own returned frames and nested metadata; editing them doesn’t change retained values. Address columns by name and rows by declared identifiers. Sort explicitly when you need a presentation order.
 

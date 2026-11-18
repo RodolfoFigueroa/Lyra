@@ -254,6 +254,31 @@ class LocationInputs:
             raise DamagedDataError(msg)
         return selection
 
+    def borrow_selections(
+        self, connection: sa.Connection, keys: tuple[str, ...]
+    ) -> tuple[InputSelection, ...]:
+        """Load the compatible selections that make up one retained input.
+
+        Returns:
+            Selections sharing the same declared schema and availability.
+
+        Raises:
+            DamagedDataError: If the selections have conflicting metadata.
+        """
+        if not keys:
+            msg = "Missing retained input selections"
+            raise DamagedDataError(msg)
+        selections = tuple(self.borrow_selection(connection, key) for key in keys)
+        first = selections[0]
+        if any(
+            selection.description != first.description
+            or selection.registration != first.registration
+            for selection in selections[1:]
+        ):
+            msg = "Combined input schemas or descriptions differ"
+            raise DamagedDataError(msg)
+        return selections
+
     def _registration(
         self, connection: sa.Connection, key: str, *, derived: bool
     ) -> Registration:
@@ -267,21 +292,13 @@ class LocationInputs:
 
         Returns:
             Public named input descriptions.
-
-        Raises:
-            DamagedDataError: If combined selections disagree.
         """
         bindings = bindings.selected() if bindings.groups else bindings
         bindings.validate_inventory()
         result = {}
         for name, keys in bindings.selections.items():
-            descriptions = [
-                self.borrow_selection(connection, key).description for key in keys
-            ]
-            if any(desc != descriptions[0] for desc in descriptions):
-                msg = "Combined input descriptions differ"
-                raise DamagedDataError(msg)
-            result[name] = descriptions[0].model_copy(deep=True)
+            selections = self.borrow_selections(connection, keys)
+            result[name] = selections[0].description.model_copy(deep=True)
         return result
 
     def validate_bindings(
@@ -373,7 +390,7 @@ class LocationInputs:
         Returns:
             A geographic input without metric row identity.
         """
-        selections = tuple(self.load(connection, key) for key in dict.fromkeys(keys))
+        selections = self.borrow_selections(connection, tuple(dict.fromkeys(keys)))
         return cast(
             "gpd.GeoDataFrame",
             InputRows.prepare(self.store, connection, selections).frame(),
