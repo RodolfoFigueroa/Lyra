@@ -94,7 +94,7 @@ def test_describe_cli_reports_unknown_metrics(
 def test_manifest_generation_preserves_explicit_null_unit(tmp_path: Path) -> None:
     write_project(tmp_path)
     source = tmp_path / "example_plugin.py"
-    source.write_text(source.read_text().replace("Unit.COUNT", "None"))
+    source.write_text(source.read_text().replace('"unit": "count"', '"unit": None'))
     sys.modules.pop("example_plugin", None)
     manifest = json.loads(render_manifest(tmp_path))
     assert manifest["nodes"][0]["outputs"]["example"]["columns"][0]["unit"] is None

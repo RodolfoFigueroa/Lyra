@@ -3,10 +3,8 @@
 import pandera.pandas as pa
 from pandera.engines.geopandas_engine import Geometry
 
-from lyra.contracts.units import Unit
 
-
-def column(dtype: str, description: str, unit: Unit | None = None) -> pa.Column:
+def column(dtype: str, description: str, unit: str | None) -> pa.Column:
     """Declare a described column with an explicit unit.
 
     Returns:
@@ -44,14 +42,14 @@ def location_schema(attributes: dict[str, pa.Column]) -> pa.DataFrameSchema:
 STREET_SCHEMA = location_schema(
     {
         "condition_score": column(
-            "float64", "Synthetic condition: 0 is worst, 100 is best", Unit.SCORE
+            "float64", "Synthetic condition: 0 is worst, 100 is best", "dimensionless"
         ),
     }
 )
 BLOCK_SCHEMA = location_schema(
     {
-        "street_records": column("str", "Complete member street records as JSON"),
-        "allocations": column("str", "Street allocation weights as JSON"),
+        "street_records": column("str", "Complete member street records as JSON", None),
+        "allocations": column("str", "Street allocation weights as JSON", None),
     }
 )
 STREETS = "city_streets"
@@ -60,8 +58,8 @@ BLOCKS = "city_blocks"
 # docs:start lengths
 LENGTHS = pa.DataFrameSchema(
     {
-        "street_id": column("str", "Street identifier"),
-        "length_m": column("float64", "Centreline length in metres", Unit.METRE),
+        "street_id": column("str", "Street identifier", None),
+        "length_m": column("float64", "Centreline length in metres", "m"),
     },
     strict=True,
     metadata={"meaning": "Street lengths", "granularity": "One row per street"},
@@ -70,9 +68,9 @@ LENGTHS = pa.DataFrameSchema(
 
 CONDITIONS = pa.DataFrameSchema(
     {
-        "street_id": column("str", "Street identifier"),
+        "street_id": column("str", "Street identifier", None),
         "condition_score": column(
-            "float64", "Synthetic condition: 0 is worst, 100 is best", Unit.SCORE
+            "float64", "Synthetic condition: 0 is worst, 100 is best", "dimensionless"
         ),
     },
     strict=True,
@@ -81,11 +79,13 @@ MAINTENANCE = pa.DataFrameSchema(
     LENGTHS.columns
     | CONDITIONS.columns
     | {
-        "needs_maintenance": column("bool", "Condition is below the chosen threshold"),
+        "needs_maintenance": column(
+            "bool", "Condition is below the chosen threshold", None
+        ),
         "maintenance_length_m": column(
             "float64",
             "Full street length if maintenance is needed, otherwise zero",
-            Unit.METRE,
+            "m",
         ),
     },
     strict=True,
@@ -93,21 +93,19 @@ MAINTENANCE = pa.DataFrameSchema(
 )
 MEMBERSHIP = pa.DataFrameSchema(
     {
-        "block_id": column("str", "Receiving block identifier"),
-        "street_id": column("str", "Member street identifier"),
+        "block_id": column("str", "Receiving block identifier", None),
+        "street_id": column("str", "Member street identifier", None),
         "weight": column(
-            "float64", "Share of street length allocated to this block", Unit.RATIO
+            "float64", "Share of street length allocated to this block", "dimensionless"
         ),
     },
     strict=True,
 )
 SUMMARY = pa.DataFrameSchema(
     {
-        "block_id": column("str", "Block identifier"),
-        "allocated_length_m": column("float64", "Weighted street length", Unit.METRE),
-        "maintenance_length_m": column(
-            "float64", "Weighted maintenance workload", Unit.METRE
-        ),
+        "block_id": column("str", "Block identifier", None),
+        "allocated_length_m": column("float64", "Weighted street length", "m"),
+        "maintenance_length_m": column("float64", "Weighted maintenance workload", "m"),
     },
     strict=True,
     metadata={

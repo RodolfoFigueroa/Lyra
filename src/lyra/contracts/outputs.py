@@ -2,11 +2,11 @@
 
 from typing import Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonObject
-from lyra.contracts.units import Unit
+from lyra.contracts.units import ColumnUnit
 
 
 class CheckMetadata(StrictBaseModel):
@@ -22,13 +22,15 @@ class CheckMetadata(StrictBaseModel):
 class ColumnMetadata(StrictBaseModel):
     """Descriptive metadata for a declared table column."""
 
+    model_config = ConfigDict(validate_assignment=True)
+
     name: str = Field(min_length=1)
     dtype: str
     parameters: JsonObject = Field(default_factory=dict)
     unique: bool = False
     coerce: bool = False
     checks: list[CheckMetadata] = Field(default_factory=list)
-    unit: Unit | None
+    unit: ColumnUnit
     description: str = Field(min_length=1)
     nullable: bool = False
 

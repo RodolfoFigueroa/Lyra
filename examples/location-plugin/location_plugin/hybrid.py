@@ -5,7 +5,6 @@ import pandas as pd
 import pandera.pandas as pa
 from pydantic import Field
 
-from lyra.contracts.units import Unit
 from lyra.sdk import (
     Dependency,
     Input,
@@ -20,20 +19,18 @@ from .graph import BLOCKS, BlockProvider, StreetProvider, column, select_streets
 
 AREA = pa.DataFrameSchema(
     {
-        "location_id": column("str", "Owning block"),
-        "row_key": column("str", "Stable measurement key within the owner"),
-        "area_m2": column(
-            "float64", "Projected area in square metres", Unit.SQUARE_METRE
-        ),
+        "location_id": column("str", "Owning block", None),
+        "row_key": column("str", "Stable measurement key within the owner", None),
+        "area_m2": column("float64", "Projected area in square metres", "m**2"),
     },
     strict=True,
     unique=["location_id", "row_key"],
 )
 TOTAL = pa.DataFrameSchema(
-    {"value": column("float64", "Total projected area", Unit.SQUARE_METRE)}, strict=True
+    {"value": column("float64", "Total projected area", "m**2")}, strict=True
 )
 COUNT = pa.DataFrameSchema(
-    {"value": column("float64", "Qualifying block count", Unit.COUNT)}, strict=True
+    {"value": column("float64", "Qualifying block count", "count")}, strict=True
 )
 
 
@@ -152,11 +149,11 @@ def area_summary(
     outputs={
         "relationships": pa.DataFrameSchema(
             {
-                "location_id": column("str", "Owning street"),
-                "row_key": column("str", "Source block identifying the relationship"),
-                "length_m": column(
-                    "float64", "Projected street length in metres", Unit.METRE
+                "location_id": column("str", "Owning street", None),
+                "row_key": column(
+                    "str", "Source block identifying the relationship", None
                 ),
+                "length_m": column("float64", "Projected street length in metres", "m"),
             },
             strict=True,
             unique=["location_id", "row_key"],

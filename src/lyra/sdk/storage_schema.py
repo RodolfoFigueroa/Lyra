@@ -10,7 +10,9 @@ import pandas as pd
 import pandera.pandas as pandera
 import pyarrow  # ruff: ignore[unconventional-import-alias] - distinguish native and executable schemas
 from pandera.engines import geopandas_engine, pandas_engine
+from pydantic import TypeAdapter, ValidationError
 
+from lyra.contracts.units import ColumnUnit
 from lyra.data import arrow_conversion
 from lyra.data.relational import StorageDescription, logical_dtype
 from lyra.sdk.output_schema import compile_output
@@ -131,6 +133,29 @@ _SQLITE_TYPES = {
 }
 
 
+_COLUMN_UNIT = TypeAdapter(ColumnUnit)
+
+
+def _storage_units(
+    declaration: pandera.DataFrameSchema, metadata: OutputMetadata | None
+) -> tuple[str | None, ...]:
+    if metadata is not None:
+        by_name = {column.name: column.unit for column in metadata.columns}
+        return tuple(by_name[name] for name in declaration.columns)
+
+    units = []
+    for name, column in declaration.columns.items():
+        if "unit" not in (column.metadata or {}):
+            message = f"Column {name!r} requires metadata['unit']"
+            raise ValueError(message)
+        try:
+            units.append(_COLUMN_UNIT.validate_python(column.metadata["unit"]))
+        except ValidationError as error:
+            message = f"Column {name!r} has invalid unit metadata: {error}"
+            raise ValueError(message) from error
+    return tuple(units)
+
+
 def describe(
     declaration: OutputSchema, *, metadata: OutputMetadata | None = None
 ) -> StorageDescription:
@@ -179,12 +204,7 @@ def describe(
         descriptions=tuple(
             column.description for column in declaration.columns.values()
         ),
-        units=tuple(
-            None
-            if (column.metadata or {}).get("unit") is None
-            else str(column.metadata["unit"])
-            for column in declaration.columns.values()
-        ),
+        units=_storage_units(declaration, metadata),
     )
 
 

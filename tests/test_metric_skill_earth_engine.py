@@ -38,7 +38,6 @@ from pydantic import Field
 import pandera.pandas as pa
 import geopandas as gpd
 from lyra.sdk.plugin import PluginDefinition, metric
-from lyra.contracts.units import Unit
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.resources import BaseIO, Resource
 from lyra.contracts.resources import IOConfig
@@ -87,7 +86,7 @@ class EarthEngineIO(BaseIO[EarthEngineSettings]):
                     description=(
                         "Mean elevation; null when no source pixels are available."
                     ),
-                    metadata={"unit": Unit.METRE},
+                    metadata={"unit": "m"},
                     nullable=True,
                 )
             }
@@ -115,7 +114,7 @@ def acquire(
                     description=(
                         "Mean elevation; null when source pixels are unavailable."
                     ),
-                    metadata={"unit": Unit.METRE},
+                    metadata={"unit": "m"},
                     nullable=True,
                 )
             }

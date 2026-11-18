@@ -70,7 +70,10 @@ THIRD_PARTY = {
 # Native retained reads need PyArrow only in this lazily loaded adapter.
 # test_client_imports keeps basic JSON operations and file downloads independent
 # of optional table libraries; other API modules retain their existing boundary.
-MODULE_LIBS = {"lyra.api.client._arrow": {"pyarrow"}}
+MODULE_LIBS = {
+    "lyra.api.client._arrow": {"pyarrow"},
+    "lyra.contracts.units": {"pint"},
+}
 
 
 def _imports(tree: ast.Module, module: str, package: str) -> list[str]:

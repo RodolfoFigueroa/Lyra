@@ -11,7 +11,6 @@ import pandera.pandas as pa
 from pandera.engines.geopandas_engine import Geometry
 from pydantic import Field
 
-from lyra.contracts.units import Unit
 from lyra.sdk import (
     Dependency,
     Input,
@@ -30,7 +29,7 @@ POPULATION = pa.DataFrameSchema(
             "str", description="Source area identifier.", metadata={"unit": None}
         ),
         "population": pa.Column(
-            "int64", description="Resident count.", metadata={"unit": Unit.COUNT}
+            "int64", description="Resident count.", metadata={"unit": "count"}
         ),
     },
     strict=True,
@@ -52,7 +51,7 @@ TOTAL = pa.DataFrameSchema(
         "population": pa.Column(
             "int64",
             description="Total residents in selected source areas.",
-            metadata={"unit": Unit.COUNT},
+            metadata={"unit": "count"},
         )
     },
     strict=True,

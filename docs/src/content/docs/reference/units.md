@@ -1,46 +1,29 @@
 ---
-title: Output unit vocabulary
-description: Look up canonical column units and the meaning of an explicitly inapplicable unit.
+title: Choose units for output columns
+description: Choose a unit for each output column and look up how Lyra writes it in JSON.
 contentType: Reference
 contentPlan: reference/units
-sidebar: { label: "Output Unit Vocabulary" }
+sidebar: { label: "Output Column Units" }
 ---
 
-Every output column supplies a unit explicitly. Use a member of `Unit` from `lyra.contracts.units`, its exact canonical string, or `None` when no unit applies. JSON descriptions use canonical strings or null.
+Give every output column a `unit` entry in its Pandera metadata. Use a unit string for a measurement or `None` when no unit applies.
 
-## Supported units
+## Unit expressions in Python and JSON
 
-Use these exact canonical strings in JSON descriptions, or the corresponding `Unit` members in Python:
+Use a unit expression from [Pint’s default registry](https://pint.readthedocs.io/en/stable/getting/tutorial.html#initializing-a-registry). For example, declare a distance with `metadata={"unit": "km"}`. Lyra writes `"kilometer"` in JSON and keeps the column’s values and data type. A distance of 2.5 still means 2.5 kilometres.
 
-| Enum member | Value | Meaning |
+| Python unit | JSON unit | Example measurement |
 | --- | --- | --- |
-| `MILLIMETRE` | `mm` | Millimetres of length. |
-| `METRE` | `m` | Metres of length. |
-| `KILOMETRE` | `km` | Kilometres of length. |
-| `SQUARE_METRE` | `m2` | Square metres of area. |
-| `SQUARE_KILOMETRE` | `km2` | Square kilometres of area. |
-| `HECTARE` | `ha` | Hectares of area. |
-| `DEGREE_CELSIUS` | `degC` | Temperature in degrees Celsius. |
-| `KELVIN` | `K` | Temperature in kelvins. |
-| `SECOND` | `s` | Duration in seconds. |
-| `DAY` | `day` | Duration in days. |
-| `YEAR` | `year` | Duration in years; document the workflow’s year convention. |
-| `CALENDAR_YEAR` | `calendar_year` | Calendar-year value, not an elapsed duration. |
-| `COUNT_PER_SQUARE_KILOMETRE` | `count/km2` | Count per square kilometre; describe what is counted. |
-| `COUNT_PER_HECTARE` | `count/ha` | Count per hectare, such as dwellings per hectare; describe what is counted. |
-| `COUNT_PER_THOUSAND_INHABITANTS` | `count/1000inh` | Count per 1,000 inhabitants, such as establishments per 1,000 residents; describe what is counted. |
-| `COUNT` | `count` | Number of entities; describe what is counted. |
-| `RATIO` | `ratio` | Quotient; describe its numerator and denominator. |
-| `PERCENT` | `percent` | Value expressed per hundred (50 means 50%). |
-| `SCORE` | `score` | Workflow-defined scale; describe its meaning and interpretation. |
-| `DIMENSIONLESS` | `dimensionless` | Known unitless quantity without a more specific applicable unit. |
+| `"km"` | `"kilometer"` | Street length in kilometres |
+| `"m**2"` | `"meter ** 2"` | Plot area in square metres |
+| `"count/km**2"` | `"count / kilometer ** 2"` | Dwellings per square kilometre |
+| `"%"` | `"percent"` | A share of 50 percent |
+| `"degC"` | `"degree_Celsius"` | A temperature of 18 degrees Celsius |
 
-## Choose a meaningful value
+For counts and densities, name what you count in the column description. Lyra requires the `unit` key and rejects blank or invalid unit expressions. If you don’t know the measurement’s unit, confirm it before declaring the column.
 
-Use `None` for labels, identifiers, and booleans when their values have no unit. A numeric identifier can also have no applicable unit. `None` means not applicable; it does not mean that the scientific unit is unknown.
+## When to use `None` or `"dimensionless"`
 
-Units explain the meaning of values without converting them, imposing numeric ranges, or restricting column types. Describe a score’s scale explicitly, and validate any required range in your calculation rather than relying on its unit.
+Use `None` when the column identifies or labels something. For example, the street ID `1042` identifies a street and has no unit. Lyra writes `None` as `null` in JSON.
 
-Lyra rejects unknown strings, aliases, incorrect casing, and omitted units. Establish the unit from the workflow before choosing a value. If the vocabulary cannot express a required unit, discuss adding the unit to `lyra.contracts.units.Unit` before publishing the metric.
-
-For a worked output declaration, see [output tables](../../plugins/outputs/). Progress reporting uses separate human-readable unit labels.
+Use `"dimensionless"` for a quantity whose units cancel or that uses a unitless scale. An allocation weight of `0.25` means one quarter of a street’s length. For a unitless score, describe what higher and lower values mean. Enforce any required range with [Pandera column checks](../../plugins/outputs/#declare-a-model).

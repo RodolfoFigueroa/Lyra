@@ -93,8 +93,8 @@ Set up the resource explicitly before calling a calculation directly. Ask about 
 The example wraps `workflow.calculate_metric`. The existing workflow establishes this contract:
 
 - **Zones**: EPSG:4326 polygons or multipolygons with unique string IDs, a finite numeric `base_value`, and a string `category`
-- **Parameters**: an integer multiplier, a finite float offset in score units, and a list of selected categories
-- **Output**: one finite, nonnullable `score` per zone, in score units
+- **Parameters**: an integer multiplier, a finite float offset on the same scale as the score, and a list of selected categories
+- **Output**: one finite, nonnullable, dimensionless `score` per zone
 
 Supply all three parameters; the workflow specifies no further ranges.
 
@@ -110,7 +110,6 @@ from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import box
 from pydantic import Field
 
-from lyra.contracts.units import Unit
 from lyra.sdk import (
     LocationDependency,
     LocationProvider,
@@ -130,7 +129,7 @@ class Parameters(MetricParameters):
     parameter_1: int = Field(
         description="Multiplier applied to each zone's base value."
     )
-    parameter_2: float = Field(description="Additive offset in score units.")
+    parameter_2: float = Field(description="Offset to add after multiplying the base value.")
     parameter_3: list[str] = Field(
         description="Category labels included in the calculation."
     )
@@ -161,7 +160,7 @@ metric_outputs = {
                     "Synthetic score; zero can result from either the formula "
                     "or an unselected category."
                 ),
-                metadata={"unit": Unit.SCORE},
+                metadata={"unit": "dimensionless"},
                 nullable=False,
             )
         },
@@ -205,7 +204,7 @@ location_columns.update(
         "base_value": pa.Column(
             float,
             description="Base value multiplied by parameter_1.",
-            metadata={"unit": Unit.SCORE},
+            metadata={"unit": "dimensionless"},
         ),
         "category": pa.Column(
             str,
@@ -407,34 +406,11 @@ With an async client, await each method. While the job remains available, read J
 
 ### Output units
 
-Import `Unit` from `lyra.contracts.units` and declare, for example, `metadata={"unit": Unit.SQUARE_METRE}` on a Pandera column or field. Every column must explicitly supply `metadata["unit"]`: a `Unit` member, an exact canonical string, or `None` when no unit applies. JSON uses canonical strings or `null`. Labels, identifiers, and booleans normally use `None`; numeric identifiers can also have no applicable unit. Omission, unknown values, aliases, and incorrect casing are rejected.
+Set `metadata["unit"]` on every Pandera output column or field. Use an expression from [Pint’s default registry](https://pint.readthedocs.io/en/stable/getting/tutorial.html#initializing-a-registry). For dwelling density, declare `"count/km**2"` and describe the column as “Dwellings per square kilometre.” Lyra writes `"count / kilometer ** 2"` in JSON and keeps the column’s values and data type.
 
-| Enum member | Value | Meaning |
-| --- | --- | --- |
-| `MILLIMETRE` | `mm` | Millimetres of length. |
-| `METRE` | `m` | Metres of length. |
-| `KILOMETRE` | `km` | Kilometres of length. |
-| `SQUARE_METRE` | `m2` | Square metres of area. |
-| `SQUARE_KILOMETRE` | `km2` | Square kilometres of area. |
-| `HECTARE` | `ha` | Hectares of area. |
-| `DEGREE_CELSIUS` | `degC` | Temperature in degrees Celsius. |
-| `KELVIN` | `K` | Temperature in kelvins. |
-| `SECOND` | `s` | Duration in seconds. |
-| `DAY` | `day` | Duration in days. |
-| `YEAR` | `year` | Duration in years; document the workflow’s year convention. |
-| `CALENDAR_YEAR` | `calendar_year` | Calendar-year value, not an elapsed duration. |
-| `COUNT_PER_SQUARE_KILOMETRE` | `count/km2` | Count per square kilometre; describe what is counted. |
-| `COUNT_PER_HECTARE` | `count/ha` | Count per hectare; describe what is counted. |
-| `COUNT_PER_THOUSAND_INHABITANTS` | `count/1000inh` | Count per thousand inhabitants; describe what is counted. |
-| `COUNT` | `count` | Number of entities; describe what is counted. |
-| `RATIO` | `ratio` | Quotient; describe its numerator and denominator. |
-| `PERCENT` | `percent` | Value expressed per hundred (50 means 50%). |
-| `SCORE` | `score` | Workflow-defined scale; describe its meaning and interpretation. |
-| `DIMENSIONLESS` | `dimensionless` | Known unitless quantity without a more specific applicable unit. |
+Use `None` for a column such as a street ID where no unit applies. Lyra writes it as `null` in JSON. Use `"dimensionless"` for a known unitless quantity, such as a fractional share. Describe the scale of a unitless score and use column checks for any required bounds.
 
-Units describe what values mean. Declare data types and numeric bounds separately, including a range of 0 to 1 when it applies to a ratio. Progress reports use separate human-readable unit labels.
-
-Choose a unit based on the workflow’s evidence. Use `None` only when no unit applies. If the unit is unknown, ask the user to identify it. If the vocabulary lacks that unit, discuss adding it before you change the declaration or convert any values.
+If a measurement’s unit is unknown, ask for it. Lyra rejects omitted units, blank strings, and invalid unit expressions. Progress reports accept separate human-readable unit labels.
 
 ## Package and inspect the plugin
 
@@ -514,7 +490,7 @@ The diagram lists every declared output, including outputs with no consumers. Ed
 uv run lyra-plugin diagram --detailed --output graph.mmd
 ```
 
-Columns appear as bulleted items beneath each output and retain their declared order. Columns with units show only the bracketed unit after their name (for example `density: [count/km2]`). Columns whose unit is `None` show their type instead (for example `code: string`). Explicit `dimensionless` units remain visible.
+The diagram lists columns in declaration order. Brackets show the unit, as in `density: [count / kilometer ** 2]` or `weight: [dimensionless]`. For a column with `unit=None`, the diagram shows the data type, as in `code: string`.
 
 Detailed metric nodes also list dependency inputs as `input_name: producer_node.output_name` beneath an **Inputs** heading. When the supplied manifests omit the producer, the diagram shows only the output name. Nodes without dependency inputs omit this section. This section describes declared dependency bindings, not request parameters or spatial inputs. The diagram omits descriptions and nullability.
 

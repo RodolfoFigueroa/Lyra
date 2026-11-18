@@ -5,7 +5,6 @@ import pandas as pd
 import pandera.pandas as pa
 from pydantic import Field
 
-from lyra.contracts.units import Unit
 from lyra.sdk import (
     LocationDependency,
     MetricParameters,
@@ -30,7 +29,7 @@ def _value_output() -> pa.DataFrameSchema:
     return pa.DataFrameSchema(
         {
             "value": pa.Column(
-                "int64", description="Submitted value.", metadata={"unit": Unit.COUNT}
+                "int64", description="Submitted value.", metadata={"unit": "count"}
             )
         },
         strict=True,

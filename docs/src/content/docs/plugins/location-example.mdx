@@ -32,7 +32,6 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    Import the types and decorators for the provider and metrics. You’ll use `LocalRunner` to run the graph.
 
    ```python title="location_example.py"
-   from lyra.contracts.units import Unit
    from lyra.runtime.local import LocalRunner
    from lyra.sdk import (
        Dependency,
@@ -98,22 +97,24 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    }
    ```
 
-   Add a helper that combines these columns with each provider’s attributes:
+   Use those columns in both schemas. Pass each provider’s additional columns to `location_schema` with their descriptions and units.
 
    ```python title="location_example.py"
    def location_schema(**properties):
-       return pa.DataFrameSchema(
-           {
-               **structural_columns,
-               **{
-                   name: pa.Column(
-                       dtype, description=name, metadata={"unit": None},
-                   )
-                   for name, dtype in properties.items()
-               },
-           },
-           strict=True,
-       )
+       return pa.DataFrameSchema(structural_columns | properties, strict=True)
+   ```
+
+   Define the lot attributes. Each lot belongs to one block, and its population counts residents.
+
+   ```python title="location_example.py" {3,6}
+   lot_schema = location_schema(
+       parent_block_id=pa.Column(
+           str, description="Parent block ID.", metadata={"unit": None}
+       ),
+       population=pa.Column(
+           int, description="Residents in this lot.", metadata={"unit": "count"}
+       ),
+   )
    ```
 
    Declare one provider per dataset. Lyra validates every returned frame against the provider’s schema and checks that the IDs match the request exactly.
@@ -132,7 +133,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    class Lots(LocationProvider):
        id = "example_lots"
        code_revision = "1"
-       schema = location_schema(parent_block_id=str, population=int)
+       schema = lot_schema
 
        def resolve(self, ids):
            with self.operation("resolve"):
@@ -143,9 +144,9 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
 1. ## Declare the lot producer
 
-   A producer is a metric whose output another metric consumes. Append a table schema with explicit identifiers and units:
+   A producer is a metric whose output another metric uses. In `lot_output`, use `None` for the block ID and `"count"` for the number of residents.
 
-   ```python title="location_example.py"
+   ```python title="location_example.py" {7,12}
    lot_output = pa.DataFrameSchema(
        strict=True,
        columns={
@@ -156,8 +157,8 @@ To derive a dependency’s locations internally, follow [Derive locations inside
            ),
            "population": pa.Column(
                "int64",
-               description="Residents in the selected units.",
-               metadata={"unit": Unit.COUNT},
+               description="Number of residents in the selected lots.",
+               metadata={"unit": "count"},
            ),
        }
    )

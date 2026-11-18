@@ -27,7 +27,7 @@ Street length is the starting point for the maintenance report: it tells you how
 
    <CodeExample path="examples/city-plugin/city_example/schemas.py" region="lengths" lang="python" meta="{2-6}" />
 
-   The `column` helper records each column’s type, description, and unit for Pandera and Lyra to use. IDs have no unit; `length_m` uses `Unit.METRE`. Read [output declarations](../../outputs/) for the equivalent direct Pandera syntax.
+   Pass `None` to the `column` helper for `street_id` because an ID has no unit. Pass `"m"` for `length_m` because the calculation returns metres. You can also [declare these columns directly in Pandera](../../outputs/#declare-a-model).
 
 1. ## Register the adapter
 

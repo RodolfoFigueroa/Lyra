@@ -5,7 +5,6 @@ import pytest
 from lyra.contracts.dependencies import Input
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.plugins import PluginInspection
-from lyra.contracts.units import Unit
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.diagrams import render_mermaid
 from lyra.sdk.plugin_cli import main, render_manifest
@@ -179,14 +178,14 @@ def test_output_metadata() -> None:
                 ColumnMetadata(
                     name="population",
                     dtype="int64",
-                    unit=Unit.COUNT,
+                    unit="count",
                     description="Hidden description",
                     nullable=True,
                 ),
                 ColumnMetadata(
                     name="density",
                     dtype="float64",
-                    unit=Unit.COUNT_PER_SQUARE_KILOMETRE,
+                    unit="count/km**2",
                     description="Hidden description",
                 ),
                 ColumnMetadata(
@@ -198,7 +197,7 @@ def test_output_metadata() -> None:
                 ColumnMetadata(
                     name="ratio",
                     dtype="float64",
-                    unit=Unit.DIMENSIONLESS,
+                    unit="dimensionless",
                     description="Hidden description",
                 ),
                 ColumnMetadata(
@@ -222,7 +221,8 @@ def test_output_metadata() -> None:
     assert '    n0["<b>Metric: example</b><br/><br/>' in detailed
     assert (
         "#8226;#160;population:#160;#91;count#93;<br/>"
-        "#8226;#160;density:#160;#91;count#47;km2#93;<br/>#8226;#160;code:#160;str<br/>"
+        "#8226;#160;density:#160;#91;count #47; kilometer #42;#42; 2#93;<br/>"
+        "#8226;#160;code:#160;str<br/>"
         "#8226;#160;ratio:#160;#91;dimensionless#93;<br/>#8226;#160;Geometry:#160;shape"
         in detailed
     )

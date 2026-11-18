@@ -6,7 +6,6 @@ import pandas as pd
 import pandera.pandas as pa
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lyra.contracts.units import Unit
 from lyra.sdk import LocationDependency, MetricParameters, RunContext, metric
 from test_support.location_resolution import Provider
 
@@ -28,7 +27,7 @@ CAPACITY_OUTPUT = pa.DataFrameSchema(
         "capacity": pa.Column(
             "int64",
             description="Capacity of the selected feature.",
-            metadata={"unit": Unit.COUNT},
+            metadata={"unit": "count"},
         )
     },
     strict=True,
@@ -100,7 +99,7 @@ class SelectionParameters(MetricParameters):
                 "selected_count": pa.Column(
                     "int64",
                     description="Number of selected codes passing the threshold.",
-                    metadata={"unit": Unit.COUNT},
+                    metadata={"unit": "count"},
                 )
             },
             strict=True,
@@ -182,7 +181,7 @@ class IntervalParameters(MetricParameters):
                 "width": pa.Column(
                     "int64",
                     description="Difference between the upper and lower boundary.",
-                    metadata={"unit": Unit.DIMENSIONLESS},
+                    metadata={"unit": "dimensionless"},
                 )
             },
             strict=True,

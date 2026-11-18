@@ -330,7 +330,7 @@ def discover_street_schema(server: CityServer, name: str, proposal: dict) -> dic
     (addition,) = proposal["add"]
     assert set(addition) == columns.keys()
     assert columns[schema["geometry"]]["parameters"]["crs"] == "EPSG:32614"
-    assert columns["condition_score"]["unit"] == "score"
+    assert columns["condition_score"]["unit"] == "dimensionless"
     return schema
 
 

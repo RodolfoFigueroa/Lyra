@@ -160,6 +160,9 @@ def test_unpartitioned_export(tmp_path: Path, state: str, *, minimal: bool) -> N
         "rows"
     ].model_dump(mode="json")
     assert actual.attrs["lyra"]["description"]["owner_scope"] is None
+    if not minimal:
+        columns = actual.attrs["lyra"]["description"]["table_schema"]["columns"]
+        assert next(c["unit"] for c in columns if c["name"] == "ratio") == "meter"
 
 
 def ordered_by_geometry(frame: gpd.GeoDataFrame) -> gpd.GeoDataFrame:

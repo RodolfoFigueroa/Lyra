@@ -21,7 +21,7 @@ Select the interface or contract you need to inspect:
 | [MCP tools](./generated/mcp/) | Tool inputs, outputs, annotations, and schema downloads |
 | [Parameter and handler rules](./parameters/) | Supported models, value types, and signatures |
 | [Target selection](./target-selection/) | Ibis filter restrictions, callback examples, and correspondence rules |
-| [Output units](./units/) | Canonical unit names and meanings |
+| [Output column units](./units/) | Python declarations, JSON unit names, and when to use `None` or `"dimensionless"` |
 | [Native location tables](./locations/) | Native records and execution metadata |
 | [Native tables](./location-artifacts/) | Standalone file inspection and GIS exports |
 | [MCP payload examples](./mcp-payloads/) | Complete representative requests and responses |

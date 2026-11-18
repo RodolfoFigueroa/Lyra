@@ -23,7 +23,6 @@ import geopandas as gpd
 from lyra.sdk.dependencies import LocationDependency
 from tests.provider_helpers import FakeProvider
 from lyra.sdk.plugin import PluginDefinition, metric
-from lyra.contracts.units import Unit
 import pandera.pandas as pa
 
 
@@ -40,7 +39,7 @@ class Parameters(MetricParameters):
         "example": pa.DataFrameSchema(strict=True,
             columns={
                 "value": pa.Column(
-                    int, description="Example value.", metadata={"unit": Unit.COUNT}
+                    int, description="Example value.", metadata={"unit": "count"}
                 )
             }
         )

@@ -84,7 +84,10 @@ def capture_inputs(
                     "table_schema": value.description,
                     "columns": (
                         StoredColumn(
-                            name="source_location_id", dtype="string", nullable=False
+                            name="source_location_id",
+                            dtype="string",
+                            nullable=False,
+                            unit=None,
                         ),
                         *registration.columns,
                     ),
@@ -277,7 +280,10 @@ def capture_skipped_inputs(
                     "table_schema": schema,
                     "columns": (
                         StoredColumn(
-                            name="source_location_id", dtype="string", nullable=False
+                            name="source_location_id",
+                            dtype="string",
+                            nullable=False,
+                            unit=None,
                         ),
                         *registration.columns,
                     ),

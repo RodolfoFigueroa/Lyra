@@ -1,35 +1,40 @@
-"""Canonical output units shared by plugin declarations and result contracts."""
+"""Column unit validation shared by schema and retained metadata."""
 
-from enum import StrEnum
+from __future__ import annotations
+
+from functools import cache
+from importlib import import_module
+from threading import Lock
+from typing import TYPE_CHECKING, Annotated
+
+from pydantic import AfterValidator, StrictStr
+
+if TYPE_CHECKING:
+    from pint import UnitRegistry
 
 
-class Unit(StrEnum):
-    """Supported output units; values declare meaning without converting data.
+_REGISTRY_LOCK = Lock()
 
-    YEAR measures a duration, while CALENDAR_YEAR identifies a calendar year.
-    RATIO expresses a quotient and PERCENT expresses a value per hundred.
-    SCORE uses a workflow-defined scale explained in the column description.
-    DIMENSIONLESS denotes a known unitless quantity. Use explicit None when a
-    unit does not apply, never to stand for an unknown unit.
-    """
 
-    MILLIMETRE = "mm"
-    METRE = "m"
-    KILOMETRE = "km"
-    SQUARE_METRE = "m2"
-    SQUARE_KILOMETRE = "km2"
-    HECTARE = "ha"
-    DEGREE_CELSIUS = "degC"
-    KELVIN = "K"
-    SECOND = "s"
-    DAY = "day"
-    YEAR = "year"
-    CALENDAR_YEAR = "calendar_year"
-    COUNT = "count"
-    COUNT_PER_SQUARE_KILOMETRE = "count/km2"
-    COUNT_PER_HECTARE = "count/ha"
-    COUNT_PER_THOUSAND_INHABITANTS = "count/1000inh"
-    RATIO = "ratio"
-    PERCENT = "percent"
-    SCORE = "score"
-    DIMENSIONLESS = "dimensionless"
+@cache
+def _registry() -> UnitRegistry:
+    # Import Pint only when validating a non-null unit.
+    return import_module("pint").UnitRegistry()
+
+
+def _normalize(value: str) -> str:
+    if not value.strip():
+        message = "A unit expression must contain more than whitespace"
+        raise ValueError(message)
+    # Concurrent first declarations must share one registry.
+    with _REGISTRY_LOCK:
+        registry = _registry()
+    try:
+        return str(registry.parse_units(value))
+    except Exception as error:
+        # Pint's expression parser can also raise Python token and arithmetic errors.
+        message = f"Invalid unit expression: {value!r}"
+        raise ValueError(message) from error
+
+
+ColumnUnit = Annotated[StrictStr, AfterValidator(_normalize)] | None

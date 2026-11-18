@@ -50,7 +50,7 @@ def test_model_description_and_owned_metadata() -> None:
 
     class Table(pa.DataFrameModel):
         Config: type[BaseConfig] = StrictConfig
-        value: Series[pd.Int64Dtype]
+        value: Series[pd.Int64Dtype] = pa.Field(metadata={"unit": None})
 
     assert describe(Table).pandas_dtypes == ("Int64",)
     schema = declaration()

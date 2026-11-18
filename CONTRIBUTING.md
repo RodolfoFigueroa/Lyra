@@ -91,7 +91,7 @@ Each guide declares its `contentType` and `contentPlan` in frontmatter. Keep its
 - Update shared contracts, routes, clients, tests, and docs together when a public contract changes.
 - Keep one authoritative example or explanation and link to it elsewhere.
 - When SDK authoring contracts change, review `skills/lyra-metric/`, its bundled references, native authoring helper and tests, documented contract revision, and agent-assisted authoring guide together.
-- When unit vocabulary changes, review the `lyra.contracts.units.Unit` enum, authoring unit tables, generated schemas, and native authoring checks together. Keep essential guidance usable outside this checkout.
+- When you change column units, verify that the examples match the shared contracts, generated schemas, and authoring checks. Include the declaration rules in the bundled skill so plugin authors can use it outside this checkout.
 - Rerun the [skill evaluations](tests/fixtures/skill_workflows/scenarios/README.md) for calculation preservation, plugin extension, missing information, contract conflicts, and file outputs. Check that agents ask about ambiguous cases before implementing dependent behavior. Behavioral trials provide evidence of compliance, not a mechanical guarantee.
 - Use Conventional Commit titles so Release Please can determine the next Lyra version.
 

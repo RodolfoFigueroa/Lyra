@@ -9,7 +9,6 @@ from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import LineString, Point, box
 from typing_extensions import override
 
-from lyra.contracts.units import Unit
 from lyra.sdk import (
     Dependency,
     Input,
@@ -27,7 +26,7 @@ SITES_PROVIDER = "analysis_sites"
 BUFFERS = "analysis_buffers"
 
 
-def column(dtype: str, description: str, unit: Unit | None = None) -> pa.Column:
+def column(dtype: str, description: str, unit: str | None) -> pa.Column:
     """Return a described Pandera column with explicit unit metadata."""
     return pa.Column(dtype, description=description, metadata={"unit": unit})
 
@@ -60,32 +59,39 @@ def shape_schema(attributes: dict[str, pa.Column] | None = None) -> pa.DataFrame
 
 SHAPES = shape_schema()
 BLOCK_SCHEMA = shape_schema(
-    {"street_records": column("str", "Complete member streets as JSON")}
+    {"street_records": column("str", "Complete member streets as JSON", None)}
 )
 RELATIONSHIPS = pa.DataFrameSchema(
     {
-        "block_id": column("str", "Block ID"),
-        "street_id": column("str", "Street ID"),
-        "weight": column("float64", "Share attributed to this block"),
+        "block_id": column("str", "Block ID", None),
+        "street_id": column("str", "Street ID", None),
+        "weight": column("float64", "Share attributed to this block", "dimensionless"),
     },
     strict=True,
 )
 SCORES = pa.DataFrameSchema(
-    {"id": column("str", "Result entity ID"), "score": column("float64", "Score")},
+    {
+        "id": column("str", "Result entity ID", None),
+        "score": column(
+            "float64",
+            "Supporting street count, weighted by membership for block totals",
+            "count",
+        ),
+    },
     strict=True,
 )
 AREAS = pa.DataFrameSchema(
     {
-        "id": column("str", "Buffer ID"),
-        "area_m2": column("float64", "Projected buffer area", Unit.SQUARE_METRE),
+        "id": column("str", "Buffer ID", None),
+        "area_m2": column("float64", "Projected buffer area", "m**2"),
     },
     strict=True,
 )
 SITES = pa.DataFrameSchema(
     {
-        "id": column("str", "Site ID"),
-        "x": column("float64", "Projected easting", Unit.METRE),
-        "y": column("float64", "Projected northing", Unit.METRE),
+        "id": column("str", "Site ID", None),
+        "x": column("float64", "Projected easting", "m"),
+        "y": column("float64", "Projected northing", "m"),
     },
     strict=True,
 )

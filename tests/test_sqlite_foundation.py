@@ -39,9 +39,10 @@ def registration(kind: str = "metric", scope: str = "location") -> Registration:
             "kind": kind,
             "output_scope": scope,
             "columns": [
-                {"name": name, "dtype": "string", "nullable": False} for name in names
+                {"name": name, "dtype": "string", "nullable": False, "unit": None}
+                for name in names
             ]
-            + [{"name": "enabled", "dtype": "boolean", "nullable": True}],
+            + [{"name": "enabled", "dtype": "boolean", "nullable": True, "unit": None}],
         }
     )
 
@@ -88,12 +89,14 @@ def test_registration_metadata_and_collision() -> None:
     declaration = pa.DataFrameSchema(
         {
             "value_key": pa.Column(
-                "boolean",
+                "Float64",
                 nullable=True,
-                description="Enabled",
-                metadata={"unit": "flag"},
+                description="Distance",
+                metadata={"unit": "km"},
             ),
-            "row_index": pa.Column("Int64", nullable=True),
+            "row_index": pa.Column(
+                "Int64", nullable=True, description="Index", metadata={"unit": None}
+            ),
         },
         strict=True,
     )
@@ -102,8 +105,8 @@ def test_registration_metadata_and_collision() -> None:
     )
     restored = Registration.model_validate_json(definition.model_dump_json())
     assert restored == definition
-    assert restored.columns[0].description == "Enabled"
-    assert restored.columns[0].unit == "flag"
+    assert restored.columns[0].description == "Distance"
+    assert restored.columns[0].unit == "kilometer"
     layout = Layout()
     data = layout.register(restored)
     assert data.value_column not in declaration.columns
@@ -118,7 +121,7 @@ def test_invalid_structural_layouts() -> None:
     layout = Layout()
     with pytest.raises(ValueError, match="structural"):
         layout.register(definition.model_copy(update={"columns": ()}))
-    bad = StoredColumn(name="location_id", dtype="string", nullable=True)
+    bad = StoredColumn(name="location_id", dtype="string", nullable=True, unit=None)
     with pytest.raises(ValueError, match="structural"):
         layout.register(
             definition.model_copy(update={"columns": (bad, *definition.columns[1:])})

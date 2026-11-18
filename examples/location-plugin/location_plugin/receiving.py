@@ -6,7 +6,6 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 
-from lyra.contracts.units import Unit
 from lyra.runtime.local import LocalRunner
 from lyra.sdk import Dependency, Input, LocationDependency, PluginDefinition, metric
 
@@ -16,21 +15,17 @@ from .hybrid import AreaParameters, large_blocks
 
 LENGTHS = pa.DataFrameSchema(
     {
-        "location_id": column("str", "Owning street"),
-        "row_key": column("str", "Stable measurement key"),
-        "length_m": column("float64", "Projected street length", Unit.METRE),
+        "location_id": column("str", "Owning street", None),
+        "row_key": column("str", "Stable measurement key", None),
+        "length_m": column("float64", "Projected street length", "m"),
     },
     strict=True,
     unique=["location_id", "row_key"],
 )
 SUMMARY = pa.DataFrameSchema(
     {
-        "all_length_m": column(
-            "float64", "Length from all selected blocks", Unit.METRE
-        ),
-        "large_length_m": column(
-            "float64", "Length from qualifying blocks", Unit.METRE
-        ),
+        "all_length_m": column("float64", "Length from all selected blocks", "m"),
+        "large_length_m": column("float64", "Length from qualifying blocks", "m"),
     },
     strict=True,
 )

@@ -56,7 +56,7 @@ def test_description_round_trip_keeps_schema_and_scope_roles() -> None:
     assert (origin.id, origin.revision, origin.description) == ("survey", "1", "Survey")
     assert direct.provider_scope.code_revision == "survey"
     assert direct.table_schema.columns[1].nullable
-    assert direct.table_schema.columns[1].unit == "m"
+    assert direct.table_schema.columns[1].unit == "meter"
     assert direct.table_schema.columns[-1].parameters["crs"] == "EPSG:32614"
     assert restored.location_inputs["known_empty"].availability == "available"
     assert (

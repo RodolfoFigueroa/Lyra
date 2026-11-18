@@ -25,7 +25,7 @@ def operation_registration(node_id: str) -> Registration:
         kind="operation",
         output_scope="location",
         columns=tuple(
-            StoredColumn(name=name, dtype="string", nullable=False)
+            StoredColumn(name=name, dtype="string", nullable=False, unit=None)
             for name in ("source_location_id", "location_id")
         ),
     )

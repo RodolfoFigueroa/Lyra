@@ -72,7 +72,12 @@ Routine private helper names and layout choices can follow repository convention
 Build and register the adapter with these steps:
 
 1. Preserve the existing callable and its defaults. Put ordinary inputs in a compatible parameter model, and use the SDK’s resolved spatial arguments. Convert geometry for the existing callable without changing its CRS or attributes unless the workflow explicitly requires that transformation.
-2. Declare the evidenced output contract. Select output units from the reference using `Unit`; explicitly use `None` only when no unit applies. Ask when a unit is unknown or unavailable, and explain workflow-defined score scales in column descriptions. Never substitute a generic unit to bypass missing information. Table columns are fixed; if the calculation produces parameter-dependent columns, ask for a stable declared schema. Preserve producer-owned row identities; only ask for a mapping when the calculation actually needs one. Publish native tables. Use the job temporary directory for internal scratch work. Unsupported async or generator workflows need an agreed adaptation, not a silent algorithm rewrite. Include evidenced details in metric, parameter, and column descriptions only when they help consumers select the metric, choose inputs, or interpret results without its README. Methodology topics are possibilities, not required fields. Follow the reference’s [description guidance](references/authoring.md#descriptions-for-independent-consumers); source links supplement the explanation rather than replace it.
+2. Declare the output columns and their [units](references/authoring.md#output-units). If the measurement unit is unknown, ask for it. If parameters change which columns the calculation returns, ask for a fixed schema.
+
+   Preserve the producer’s row IDs. Ask for a mapping only if the calculation needs one. Publish native tables and use the job temporary directory for scratch files. Agree on an adaptation before wrapping an unsupported async or generator workflow.
+
+   Describe the metric so callers can choose inputs and interpret results without its README. Include methodology when it affects those decisions, and explain the scale of each score. Use source links to support the [metric, parameter, and column descriptions](references/authoring.md#descriptions-for-independent-consumers).
+
 3. Choose components by their role:
 
    - **Providers**: declare the record schema and identity, then register the provider as a resource. Managed providers support exact-ID reads and [base membership lookup](references/authoring.md#support-intervention-sets). For a custom provider, implement `resolve(ids)` and add `existing_ids(ids)` if you support interventions. Keep graph execution out of provider preparation.

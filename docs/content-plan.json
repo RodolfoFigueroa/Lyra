@@ -444,12 +444,12 @@
     },
     "reference/units": {
       "contentType": "Reference",
-      "overview": "Look up canonical column units and the meaning of an explicitly inapplicable unit.",
-      "goal": "Look up canonical column units and the meaning of an explicitly inapplicable unit",
-      "audience": "Developers looking up an interface contract",
+      "overview": "Choose a unit for each output column and look up how Lyra writes it in JSON.",
+      "goal": "Choose a unit and predict its spelling in JSON",
+      "audience": "Plugin authors declaring columns and developers reading output metadata",
       "contentPlan": [
-        "Supported units",
-        "Choose a meaningful value"
+        "Unit expressions in Python and JSON",
+        "When to use None or dimensionless"
       ],
       "openQuestions": []
     },

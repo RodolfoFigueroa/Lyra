@@ -1,7 +1,6 @@
 import pandas as pd
 import pandera.pandas as pa
 
-from lyra.contracts.units import Unit
 from lyra.data.results import serialize_outputs
 from lyra.sdk.results import normalize_native_result
 
@@ -11,10 +10,10 @@ def test_native_dataframe_accepts_pandas_and_preserves_column_types() -> None:
     output = pa.DataFrameSchema(
         {
             "integer": pa.Column(
-                "int64", description="Count.", metadata={"unit": Unit.COUNT}
+                "int64", description="Count.", metadata={"unit": "count"}
             ),
             "number": pa.Column(
-                "float64", description="Ratio.", metadata={"unit": Unit.RATIO}
+                "float64", description="Ratio.", metadata={"unit": "dimensionless"}
             ),
         },
         strict=True,

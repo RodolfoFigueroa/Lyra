@@ -129,7 +129,9 @@ def test_fixture_manifests_and_discovery_without_execution_dependencies() -> Non
     ]
     assert_fresh_imports(
         MODULES,
-        blocked=BLOCKED,
+        # Pint probes optional NumPy support during unit parsing.
+        blocked=tuple(module for module in BLOCKED if module != "numpy"),
+        unavailable=("numpy",),
         assertions=f"PAYLOADS = {payloads!r}\n"
         + dedent(
             """

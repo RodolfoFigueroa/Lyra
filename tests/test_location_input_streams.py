@@ -62,7 +62,7 @@ def test_arrow_types_geometry_and_multiple_batches(
         table.schema.field("geometry").metadata[b"ARROW:extension:name"]
         == b"geoarrow.wkb"
     )
-    assert table.schema.field("ratio").metadata[b"unit"] == b"m"
+    assert table.schema.field("ratio").metadata[b"unit"] == b"meter"
     assert table.schema.field("count").nullable
     assert not table.schema.field("location_id").nullable
     native = gpd.GeoDataFrame.from_arrow(table)

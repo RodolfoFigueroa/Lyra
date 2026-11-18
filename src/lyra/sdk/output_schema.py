@@ -13,7 +13,6 @@ import pandera.pandas as pa
 from pandera.engines import geopandas_engine, numpy_engine, pandas_engine
 
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
-from lyra.contracts.units import Unit
 
 if TYPE_CHECKING:
     from lyra.contracts.metric_scope import OutputScope
@@ -175,7 +174,6 @@ def compile_output(
         ):
             msg = f"Column {name!r} requires a description and metadata['unit']"
             raise ValueError(msg)
-        unit = column.metadata["unit"]
         data = _component(column)
         if data["dtype"] == "geometry":
             if geometry is not None:
@@ -183,14 +181,14 @@ def compile_output(
                 raise ValueError(msg)
             _validate_geometry(name, column)
             geometry = name
-        columns.append(
-            ColumnMetadata(
-                name=name,
-                description=column.description,
-                unit=None if unit is None else Unit(unit),
-                **data,
-            )
+        metadata = ColumnMetadata(
+            name=name,
+            description=column.description,
+            unit=column.metadata["unit"],
+            **data,
         )
+        column.metadata["unit"] = metadata.unit
+        columns.append(metadata)
     return schema, OutputMetadata(
         columns=columns,
         meaning=(schema.metadata or {}).get("meaning"),

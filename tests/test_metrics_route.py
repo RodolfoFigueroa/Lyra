@@ -127,11 +127,12 @@ def test_metric_route_returns_404_for_unknown_metric(
     assert exc_info.value.status_code == 404
 
 
-@pytest.mark.parametrize("unit", ["m2", None])
+@pytest.mark.parametrize(("unit", "normalized"), [("m**2", "meter ** 2"), (None, None)])
 def test_metric_catalog_preserves_unit(
     config: LyraConfig,
     tmp_path: Path,
     unit: str | None,
+    normalized: str | None,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -144,7 +145,7 @@ def test_metric_catalog_preserves_unit(
     metric = asyncio.run(metrics.get_metric("light_metric", catalog))
     assert (
         metric.model_dump(mode="json")["outputs"]["light_metric"]["columns"][0]["unit"]
-        == unit
+        == normalized
     )
 
 

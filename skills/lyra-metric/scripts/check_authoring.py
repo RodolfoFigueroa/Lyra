@@ -35,7 +35,6 @@ REQUIRED_IMPORTS = {
     "NodeImplementation": "lyra.sdk",
     "BoundPlugin": "lyra.runtime.invocation",
     "PluginDefinition": "lyra.sdk",
-    "Unit": "lyra.contracts.units",
     "Dependency": "lyra.sdk",
     "Input": "lyra.sdk",
     "RunContext": "lyra.sdk",
@@ -218,41 +217,19 @@ def _native_checks(modules: dict[str, ModuleType], result_store_path: Path) -> N
             raise ContractMismatchError(message)
 
 
-def unit_checks(modules: dict[str, ModuleType]) -> None:
-    """Check the unit vocabulary and required, nullable column declarations.
+def unit_checks() -> None:
+    """Check unit normalization and required, nullable column declarations.
 
     Raises:
         ContractMismatchError: An invalid or missing unit is accepted.
     """
-    expected = {
-        "mm",
-        "m",
-        "km",
-        "m2",
-        "km2",
-        "ha",
-        "degC",
-        "K",
-        "s",
-        "day",
-        "year",
-        "calendar_year",
-        "count",
-        "count/km2",
-        "count/ha",
-        "count/1000inh",
-        "ratio",
-        "percent",
-        "score",
-        "dimensionless",
-    }
-    require(
-        expected <= {item.value for item in modules["lyra.contracts.units"].Unit},
-        "units: expected the documented canonical vocabulary",
-    )
     pa = importlib.import_module("pandera.pandas")
     compiler = importlib.import_module("lyra.sdk.output_schema")
-    for unit in [*sorted(expected), None]:
+    for unit, normalized in (
+        ("m**2", "meter ** 2"),
+        ("dimensionless", "dimensionless"),
+        (None, None),
+    ):
         _, metadata = compiler.compile_output(
             pa.DataFrameSchema(
                 {
@@ -264,10 +241,10 @@ def unit_checks(modules: dict[str, ModuleType]) -> None:
             )
         )
         require(
-            metadata.model_dump(mode="json")["columns"][0]["unit"] == unit,
+            metadata.model_dump(mode="json")["columns"][0]["unit"] == normalized,
             "units: expected canonical strings and explicit null in output",
         )
-    for metadata in ({}, {"unit": "unrecognized_unit"}, {"unit": "M2"}):
+    for metadata in ({}, {"unit": "unrecognized_unit"}, {"unit": "  "}):
         try:
             compiler.compile_output(
                 pa.DataFrameSchema(
@@ -277,7 +254,7 @@ def unit_checks(modules: dict[str, ModuleType]) -> None:
             )
         except ValueError:
             continue
-        msg = "units: expected missing and noncanonical units to be rejected"
+        msg = "units: expected missing and invalid units to be rejected"
         raise ContractMismatchError(msg)
 
 
@@ -287,7 +264,7 @@ def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> No
     Raises:
         ContractMismatchError: Invalid parameters are accepted.
     """
-    unit_checks(modules)
+    unit_checks()
     graph_checks(modules, pydantic)
     parameters = pydantic.create_model(
         "CompatibilityParameters",
@@ -358,9 +335,7 @@ def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> No
                     "value": pa.Column(
                         int,
                         description="Synthetic check value.",
-                        metadata={
-                            "unit": modules["lyra.contracts.units"].Unit.DIMENSIONLESS
-                        },
+                        metadata={"unit": "dimensionless"},
                     )
                 },
                 strict=True,

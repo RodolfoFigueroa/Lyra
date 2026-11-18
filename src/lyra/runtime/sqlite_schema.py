@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict
 
 from lyra.contracts import outputs
+from lyra.contracts.units import ColumnUnit
 from lyra.contracts.value_identity import value_key
 from lyra.data.relational import StorageDescription
 
@@ -20,7 +21,7 @@ class StoredColumn(BaseModel):
     dtype: Literal["string", "Int64", "Float64", "boolean", "geometry"]
     nullable: bool
     description: str | None = None
-    unit: str | None = None
+    unit: ColumnUnit
 
 
 class Registration(BaseModel):

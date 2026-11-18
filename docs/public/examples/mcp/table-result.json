@@ -42,7 +42,7 @@
                 "unique": false,
                 "coerce": false,
                 "checks": [],
-                "unit": "m",
+                "unit": "meter",
                 "description": "Centreline length in metres",
                 "nullable": false
               },
@@ -53,7 +53,7 @@
                 "unique": false,
                 "coerce": false,
                 "checks": [],
-                "unit": "score",
+                "unit": "dimensionless",
                 "description": "Synthetic condition: 0 is worst, 100 is best",
                 "nullable": false
               },
@@ -75,7 +75,7 @@
                 "unique": false,
                 "coerce": false,
                 "checks": [],
-                "unit": "m",
+                "unit": "meter",
                 "description": "Full street length if maintenance is needed, otherwise zero",
                 "nullable": false
               }

@@ -8,7 +8,6 @@ import pytest
 from pydantic import Field
 from shapely.geometry import Point
 
-from lyra.contracts.units import Unit
 from lyra.runtime import RunResult
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
@@ -42,7 +41,7 @@ def test_local_result_descriptions(
     tmp_path: Path, *, spatial: bool, primary: bool, empty: bool, multiple: bool
 ) -> None:
     output_schema = schema(spatial=spatial).update_column(
-        "value", metadata={"unit": Unit.COUNT}
+        "value", metadata={"unit": "count"}
     )
     if not primary:
         output_schema = output_schema.rename_columns(

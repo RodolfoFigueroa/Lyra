@@ -80,7 +80,10 @@ def retained(store: SQLiteStore) -> tuple[InputSelection, InputSelection]:
                 "table_schema": metadata,
                 "columns": (
                     StoredColumn(
-                        name="source_location_id", dtype="string", nullable=False
+                        name="source_location_id",
+                        dtype="string",
+                        nullable=False,
+                        unit=None,
                     ),
                     *registration.columns,
                 ),

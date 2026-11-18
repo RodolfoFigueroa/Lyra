@@ -20,7 +20,6 @@ from lyra.contracts.plugins import (
     PluginManifest,
 )
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.contracts.units import Unit
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
@@ -206,7 +205,7 @@ def test_contract_projection_distinguishes_prose_from_semantics(change: str) -> 
         setattr(
             node.outputs["value"].columns[0],
             change,
-            "float64" if change == "dtype" else Unit.METRE,
+            "float64" if change == "dtype" else "m",
         )
     else:
         node.inputs["data"] = Dependency(

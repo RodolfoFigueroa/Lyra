@@ -35,7 +35,11 @@ class SQLiteFoundationSuite:
             output_name="value",
             kind="metric",
             output_scope="unpartitioned",
-            columns=(StoredColumn(name="enabled", dtype="boolean", nullable=False),),
+            columns=(
+                StoredColumn(
+                    name="enabled", dtype="boolean", nullable=False, unit=None
+                ),
+            ),
         )
         self.store.initialize((self.registration,))
         self.data = self.store.layout.tables[self.registration.key]

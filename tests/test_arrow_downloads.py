@@ -85,7 +85,7 @@ def test_http_ordinary_readers(
         assert all(field.nullable for field in table.schema)
         assert table.schema.field("ratio").metadata == {
             b"description": b"Declared ratio",
-            b"unit": b"m",
+            b"unit": b"meter",
         }
         assert table.schema.field("count").type == pa.int64()
         if isinstance(retained.frame, gpd.GeoDataFrame):

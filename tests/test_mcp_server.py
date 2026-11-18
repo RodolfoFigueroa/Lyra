@@ -51,7 +51,6 @@ from lyra.contracts.types import (
     validate_json_object,
     validate_json_value,
 )
-from lyra.contracts.units import Unit
 from lyra.runtime.planning.discovery import Discovery
 from lyra.server import main
 from lyra.server.job_store import InvalidJobResultError, JobObservation
@@ -357,7 +356,7 @@ def _table_metric(
                     ColumnMetadata(
                         name="value",
                         dtype="int64",
-                        unit=Unit.COUNT,
+                        unit="count",
                         description="Submitted value.",
                     )
                 ],
@@ -1642,7 +1641,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
         ColumnMetadata(
             name=f"v{i}",
             dtype="float64",
-            unit=Unit.COUNT,
+            unit="count",
             description="x" * 600,
             nullable=False,
         )
@@ -1877,7 +1876,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
                 {
                     "name": "area",
                     "dtype": "float64",
-                    "unit": "m2",
+                    "unit": "m**2",
                     "description": "Area",
                     "nullable": True,
                 }
@@ -2007,9 +2006,9 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
     ]
 
 
-@pytest.mark.parametrize("unit", [Unit.COUNT, None])
+@pytest.mark.parametrize("unit", ["count", None])
 def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
-    unit: Unit | None,
+    unit: str | None,
 ) -> None:
     metric = _table_metric("quantity", "Test quantity")
     metric.outputs[metric.name] = OutputMetadata(

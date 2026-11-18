@@ -12,10 +12,9 @@ Declare each output table in a nonempty `outputs` mapping using Pandera models o
 
 Use a Pandera `DataFrameModel` to name each column and define its validation rules. This model requires unique area codes and coverage fractions between zero and one:
 
-```python {9,14}
+```python {12,17}
 import pandera.pandas as pa
 from pandera.typing import Series
-from lyra.contracts.units import Unit
 from lyra.sdk import metric
 
 
@@ -30,7 +29,7 @@ class Coverage(pa.DataFrameModel):
     )
     coverage: Series[float] = pa.Field(
         description="Fraction of the source area covered.",
-        metadata={"unit": Unit.DIMENSIONLESS},
+        metadata={"unit": "dimensionless"},
         ge=0,
         le=1,
     )
@@ -63,7 +62,7 @@ coverage_schema = pa.DataFrameSchema(
             float,
             checks=[pa.Check.ge(0), pa.Check.le(1)],
             description="Fraction of the source area covered.",
-            metadata={"unit": Unit.DIMENSIONLESS},
+            metadata={"unit": "dimensionless"},
         ),
     },
     strict=True,
@@ -105,7 +104,7 @@ observations = pa.DataFrameSchema(
             nullable=True,
             coerce=True,
             description="Observed count.",
-            metadata={"unit": Unit.COUNT},
+            metadata={"unit": "count"},
         ),
     },
     strict=True,
@@ -166,7 +165,7 @@ Declare the expected CRS explicitly. Reproject producer frames before returning 
 
 ## Describe units and inspect metadata
 
-Units are descriptive metadata. Supply an existing `Unit` member, its canonical value, or `None`. Units do not convert numbers or enforce ranges. See the [unit vocabulary](../../reference/units/).
+Set `metadata["unit"]` on each column. In the coverage example, `area_code` uses `None` because it identifies an area. The coverage fraction uses `"dimensionless"` because it divides one area by another. For measurements such as length or temperature, see [unit expressions in Python and JSON](../../reference/units/).
 
 Lyra generates inspection and API metadata from the registered schema description. These descriptions include column constraints, units, and geometry.
 

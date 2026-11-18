@@ -8,7 +8,6 @@ import geopandas as gpd
 import pandera.pandas as pa
 import pytest
 
-from lyra.contracts.units import Unit
 from lyra.runtime.resources import ResourceScope
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.loading import (
@@ -24,7 +23,7 @@ def _output() -> pa.DataFrameSchema:
     return pa.DataFrameSchema(
         {
             "value": pa.Column(
-                int, description="Example value.", metadata={"unit": Unit.COUNT}
+                int, description="Example value.", metadata={"unit": "count"}
             )
         },
         strict=True,
