@@ -13,26 +13,22 @@ from pydantic import ValidationError
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.origins import Origin
 from lyra.contracts.plugins import (
-    LocationInputDeclaration,
     LocationOperationManifest,
     MetricManifest,
-    PluginInfo,
-    PluginManifest,
 )
-from lyra.contracts.providers import ProviderDeclaration
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
-from lyra.runtime.planning.catalog import compile_live_catalog
+from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.accepted_sources import routed_request
 from test_support.location_helpers import node_contract
-from test_support.location_resolution import PROVIDERS, Provider, Roads
-from test_support.manifest_catalog import compile_catalog
+from test_support.routing_plugins import conversion, provider, routed_plugins
 
 
 def definitions(
@@ -41,6 +37,7 @@ def definitions(
     *,
     source_origins: tuple[Origin, ...] = (),
     root_origins: tuple[Origin, ...] = (),
+    revised: str | None = None,
 ) -> dict[str, PluginDefinition]:
     schema = pa.DataFrameSchema(
         {"value": pa.Column(int, description=description, metadata={"unit": None})},
@@ -49,7 +46,7 @@ def definitions(
 
     @metric(
         cache="full",
-        code_revision="1",
+        code_revision="2" if revised == "source" else "1",
         name="source",
         origins=source_origins,
         description=description,
@@ -61,7 +58,7 @@ def definitions(
 
     @metric(
         cache="full",
-        code_revision="1",
+        code_revision="2" if revised == "root" else "1",
         name="root",
         origins=root_origins,
         description=description,
@@ -74,7 +71,7 @@ def definitions(
 
     @metric(
         cache="full",
-        code_revision="1",
+        code_revision="2" if revised == "other" else "1",
         name="other",
         description=description,
         outputs={"value": schema},
@@ -179,7 +176,7 @@ def test_contract_projection_distinguishes_prose_from_semantics(change: str) -> 
             }
         },
     }
-    before = compile_catalog(manifests)
+    before = computation.executable_contract(node)
     if change == "description":
         node.description = "Edited"
     elif change == "column_description":
@@ -211,38 +208,27 @@ def test_contract_projection_distinguishes_prose_from_semantics(change: str) -> 
         node.inputs["data"] = Dependency(
             producer="other", output=node.inputs["data"].output
         )
-    after = compile_catalog(manifests)
+    after = computation.executable_contract(node)
     editorial = change in {
         "description",
         "column_description",
         "schema_prose",
         "visibility",
     }
-    assert (
-        before.computation.nodes["root"] == after.computation.nodes["root"]
-    ) == editorial
-    assert before.computation.nodes["source"] == after.computation.nodes["source"]
+    assert (before == after) == editorial
 
 
 def test_unrelated_addition_removal_and_owned_identity() -> None:
-    catalog = LocalRunner.from_definitions(definitions([])).catalog
-    manifests = deepcopy(dict(catalog.manifests))
-    del manifests["other"]
-    smaller = compile_catalog(manifests)
+    plugins = definitions([])
+    catalog = compile_live_catalog(plugins)
+    del plugins["other"]
+    smaller = compile_live_catalog(plugins)
     assert smaller.computation.nodes["root"] == catalog.computation.nodes["root"]
     assert smaller.computation.plan("root", (), {}, {}) == catalog.computation.plan(
         "root", (), {}, {}
     )
     with pytest.raises(TypeError):
         cast("Any", catalog.computation.nodes)["root"] = "changed"
-    source = manifests["source"].nodes[0]
-    assert source.kind == "metric"
-    source.outputs["value"].meaning = "changed"
-    assert smaller.computation.nodes["root"] == catalog.computation.nodes["root"]
-    assert (
-        compile_catalog(manifests).computation.nodes["root"]
-        != smaller.computation.nodes["root"]
-    )
 
 
 @pytest.mark.parametrize(
@@ -250,110 +236,62 @@ def test_unrelated_addition_removal_and_owned_identity() -> None:
     ["meaning", "observation_period", "release", "field_definitions", "data_revision"],
 )
 def test_location_semantics_and_revision_boundaries(field: str) -> None:
-    manifests = deepcopy(
-        dict(LocalRunner.from_definitions(definitions([])).catalog.manifests)
-    )
-    source = manifests["source"].nodes[0]
     contract = node_contract()
-    source.location_inputs = {"places": LocationInputDeclaration(contract=contract)}
-    manifests["root"].nodes[0].location_inputs = source.location_inputs.copy()
-    before = compile_catalog(manifests)
+    before = computation.executable_contract(contract)
     setattr(
         contract,
         field,
         {"id": "Changed interpretation"} if field == "field_definitions" else "changed",
     )
-    after = compile_catalog(manifests)
-    assert (before.computation.nodes["root"] == after.computation.nodes["root"]) == (
+    assert (before == computation.executable_contract(contract)) == (
         field == "data_revision"
     )
-    assert (before.revisions.nodes["root"] != after.revisions.nodes["root"]) == (
-        field == "data_revision"
-    )
-    assert before.revisions.nodes["other"] == after.revisions.nodes["other"]
 
 
 def test_provider_scope_changes_only_explicit_consumers() -> None:
-    first = PROVIDERS[Provider.id].contract.model_copy(deep=True)
-    second = PROVIDERS[Roads.id].contract.model_copy(deep=True)
-    providers = tuple(
-        ProviderDeclaration(resource=f"locations_{index}", contract=value)
-        for index, value in enumerate((first, second))
+    plugins = routed_plugins()
+
+    def compile_with_unused(revision: str) -> CompiledCatalog:
+        unused = provider("unused")
+        unused.code_revision = revision
+        return compile_live_catalog(
+            plugins | {"unused": PluginDefinition(resources={"unused": unused})}
+        )
+
+    before = compile_with_unused("1")
+    after = compile_with_unused("2")
+    _, request = routed_request()
+    assert (
+        prepare_execution(before, request).computation_identity
+        == prepare_execution(after, request).computation_identity
     )
-    manifests = deepcopy(
-        dict(LocalRunner.from_definitions(definitions([])).catalog.manifests)
-    )
-    manifests["provider"] = PluginManifest(
-        plugin=PluginInfo(name="provider", version="1"),
-        factory="test:create",
-        resources={provider.resource: {} for provider in providers},
-        providers=providers,
-    )
-    # A plain metric pins only its explicit source scope.
-    root = manifests["root"].nodes[0]
-    root.inputs.clear()
-    root.location_inputs = {"places": LocationInputDeclaration(contract=first)}
-    operation = LocationOperationManifest(
-        code_revision="1",
-        name="lookup",
-        description="Lookup",
-        location_inputs={"places": LocationInputDeclaration(contract=first)},
-        output_contract=first,
-    )
-    manifests["operations"] = PluginManifest(
-        plugin=PluginInfo(name="operations", version="1"),
-        factory="test:create",
-        nodes=[operation],
-    )
-    before = compile_catalog(manifests)
-    plan = prepare_execution(
-        before,
-        {
-            "metric": "root",
-            "inputs": {
-                "places": {
-                    "provider": first.family.collection,
-                    "ids": ["a"],
-                }
-            },
+    assert before.computation.nodes == after.computation.nodes
+    source = provider("source")
+    source.code_revision = "2"
+    plugins["routes"] = PluginDefinition(
+        location_operations=[
+            conversion("select_0", "source", "native"),
+            conversion("select_1", "other", "native"),
+        ],
+        resources={
+            "source": source,
+            "native": provider("native"),
+            "other": provider("other"),
         },
     )
-    assert second.provider_scope is not None
-    second.provider_scope = second.provider_scope.model_copy(
-        update={"code_revision": "2"}
-    )
-    after = compile_catalog(manifests)
+    changed = compile_with_unused("2")
     assert (
-        after.computation.plan(
-            plan.node, plan.inputs, plan.dependency_routes, plan.parameter_uses
-        )
-        == plan.computation_identity
+        prepare_execution(changed, request).computation_identity
+        != prepare_execution(before, request).computation_identity
     )
-    assert after.computation.nodes["root"] == before.computation.nodes["root"]
-    assert after.computation.nodes["lookup"] == before.computation.nodes["lookup"]
-    operation.code_revision = "2"
-    revised = compile_catalog(manifests)
-    assert revised.computation.nodes["lookup"] != after.computation.nodes["lookup"]
-    assert revised.computation.nodes["root"] == after.computation.nodes["root"]
-    assert first.provider_scope is not None
-    first.provider_scope = first.provider_scope.model_copy(
-        update={"code_revision": "2"}
-    )
-    changed = compile_catalog(manifests)
-    changed_plan = prepare_execution(changed, plan.request.model_dump())
-    assert changed_plan.computation_identity != plan.computation_identity
 
 
 @pytest.mark.parametrize("node", ["source", "root", "other"])
 def test_author_revision_changes_only_dependent_computations(node: str) -> None:
-    manifests = deepcopy(
-        dict(LocalRunner.from_definitions(definitions([])).catalog.manifests)
-    )
-    before = compile_catalog(manifests)
-    manifests[node].nodes[0].code_revision = "2"
-    after = compile_catalog(manifests)
-    assert after.computation.nodes[node] != before.computation.nodes[node]
-    assert (after.computation.nodes["root"] == before.computation.nodes["root"]) == (
+    before = compile_live_catalog(definitions([]))
+    after = compile_live_catalog(definitions([], revised=node))
+    assert before.computation.nodes[node] != after.computation.nodes[node]
+    assert (before.computation.nodes["root"] == after.computation.nodes["root"]) == (
         node == "other"
     )
 

@@ -2,15 +2,17 @@
 
 from datetime import UTC, datetime
 
+import pandas as pd
+import pandera.pandas as pa
 from pydantic import Field, JsonValue, create_model
 
 from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.jobs import AcceptedJob, JobRunProvenance
-from lyra.contracts.plugins import MetricManifest, PluginManifest
+from lyra.contracts.plugins import PluginInfo
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
-from lyra.sdk.parameters import MetricParameters, build_parameter_schema
-from test_support.manifest_catalog import compile_catalog
-from test_support.parameter_catalog import with_models
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, metric
 
 
 def result_provenance(data: dict) -> JobRunProvenance:
@@ -22,18 +24,20 @@ def result_provenance(data: dict) -> JobRunProvenance:
         __base__=MetricParameters,
         **fields,
     )
-    node = MetricManifest(
-        code_revision="1",
+
+    def calculate(parameters: MetricParameters) -> pd.DataFrame:
+        del parameters
+        return pd.DataFrame()
+
+    calculate.__annotations__["parameters"] = model
+    decorated = metric(
         name=data["metric"],
+        code_revision="1",
         description="Result fixture",
-        parameters_schema=build_parameter_schema(data["metric"], model),
-        outputs=data["outputs"],
-    )
-    manifest = PluginManifest(
-        plugin=data["plugin"], factory="fixture:create", nodes=[node]
-    )
+        outputs={key: pa.DataFrameSchema(strict=True) for key in data["outputs"]},
+    )(calculate)
     plan = prepare_execution(
-        with_models(compile_catalog({"fixture": manifest}), {data["metric"]: model}),
+        compile_live_catalog({"fixture": PluginDefinition(metrics=[decorated])}),
         {
             "metric": data["metric"],
             "parameters": parameters,
@@ -43,7 +47,7 @@ def result_provenance(data: dict) -> JobRunProvenance:
         accepted=AcceptedJob(
             plan=WorkerRequest.from_plan(plan),
             catalog_fingerprint=data.get("catalog_fingerprint", "fixture"),
-            plugin=manifest.plugin,
+            plugin=PluginInfo.model_validate(data["plugin"]),
             created_at=data.get("created_at", datetime(2026, 1, 1, tzinfo=UTC)),
         )
     )

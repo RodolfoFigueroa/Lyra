@@ -11,7 +11,6 @@ from lyra.contracts.jobs import (
     JobProgress,
     ResultLifetime,
     ResultOutputMetadata,
-    ResultOutputStatistics,
 )
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.references import ExecutionID, ResultReference
@@ -49,14 +48,6 @@ class ActiveResultOutput(StrictBaseModel):
     progress: JobProgress | None = None
     poll_after_seconds: Literal[2] = 2
     truncation: TruncationOutput = Field(default_factory=TruncationOutput)
-
-
-class StoredOutputInspection(StrictBaseModel):
-    """Data-only inspection persisted with one named native output."""
-
-    metadata: ResultOutputStatistics | None
-    preview: list[dict[str, Any]] | dict[str, Any] | None
-    truncation: TruncationOutput
 
 
 class ResultOutputInspection(StrictBaseModel):

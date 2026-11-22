@@ -18,10 +18,10 @@ from lyra.contracts.plugins import (
 from lyra.runtime.arguments import prepare_dependency
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.native_inputs import NativeLocationInput
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.provider_registry import capture_provider
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
-from test_support.plugin_graph import graph
 from test_support.runtime_inputs import assert_records, native_inputs
 from tests.geometry_fixtures import projected_collection
 from tests.provider_helpers import FakeProvider
@@ -143,7 +143,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
     binding = BoundPlugin(plugin)
     assert binding.prepare_resolved_invocation("source", {}).arguments() == {}
     assert set(plugin.describe("consumer").manifest.location_inputs) == {"lots"}
-    registry = graph(*plugin.node_manifests)
+    registry = compile_live_catalog({"test": plugin}).graph
     lots = _locations("Point")
     invocation = binding.prepare_resolved_invocation(
         "consumer", native_inputs({"lots": lots})
@@ -208,7 +208,7 @@ def test_unsupported_location_annotations(annotation: object) -> None:
         )(handler)
 
 
-def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
+def test_manifest_rejects_colliding_location_names() -> None:
     @metric(
         code_revision="1",
         name="source",
@@ -224,10 +224,6 @@ def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
         .node_manifests[0]
         .model_dump()
     )
-    with pytest.raises(ValidationError, match="spatial_inputs"):
-        NODE_MANIFEST_ADAPTER.validate_python(
-            {**payload, "spatial_inputs": {"lots": "bounds"}}
-        )
     with pytest.raises(ValidationError, match="conflict"):
         NODE_MANIFEST_ADAPTER.validate_python(
             {**payload, "resources": {"lots": "database"}}

@@ -1,179 +1,120 @@
-"""Manifest-only graph validation and startup integration."""
+"""SDK dependency validation and startup integration."""
 
-import importlib
 from pathlib import Path
 
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 
+from lyra.contracts.config import InstalledPluginConfig
 from lyra.contracts.dependencies import Dependency, Input
-from lyra.contracts.plugins import (
-    MetricManifest,
-)
+from lyra.contracts.plugins import MetricManifest
+from lyra.runtime.planning.catalog import compile_live_catalog
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import registry
 from test_support.plugin_graph import (
     Defaulted,
     Nested,
     Renamed,
     Required,
-    graph,
     manifest,
     node,
 )
 from tests.config_helpers import load_test_config
-from tests.plugin_helpers import VERSIONS, plugin_config
+from tests.graph_arguments_helpers import parameter_edge
+from tests.live_graph_helpers import plugins
+from tests.plugin_helpers import DEFINITIONS, PATHS, VERSIONS
 
 
 def test_converging_graph_and_order_independence() -> None:
-    source = node("source", outputs=("first", "second"))
-    left = node("left", inputs={"table": Dependency("first", producer="source")})
-    right = node("right", inputs={"table": Dependency("second", producer="source")})
-    root = node(
-        "root",
-        inputs={
-            "a": Dependency("left", producer="left"),
-            "b": Dependency("right", producer="right"),
-        },
-    )
-    for nodes in [(root, right, source, left), (left, source, right, root)]:
-        result = graph(*nodes)
-        assert len(result.nodes) == 4
+    definitions = plugins()
+    first = compile_live_catalog(definitions)
+    second = compile_live_catalog(dict(reversed(definitions.items())))
+    for graph in (first.graph, second.graph):
+        deps = graph.dependencies["consumer"]
         assert (
-            result.outputs["source", "first"].producer
-            is result.outputs["source", "second"].producer
+            deps["first"].output.producer.node.name
+            == deps["second"].output.producer.node.name
+            == "producer"
         )
-        assert result.dependencies["root"]["a"].output.producer.node.name == "left"
+        assert deps["first"].output.declaration == deps["second"].output.declaration
+        assert graph.order.index("producer") < graph.order.index("consumer")
 
 
 @pytest.mark.parametrize(
-    "case", ["node", "output", "collision", "missing", "self", "cycle"]
-)
-def test_invalid_names_and_cycles(case: str) -> None:
-    source = node("source", outputs=("table",))
-    consumer = node("consumer", inputs={"data": Dependency("table", producer="source")})
-    expected = ""
-    if case == "node":
-        consumer = node("source", outputs=("different",))
-        expected = "Duplicate node"
-    elif case == "output":
-        consumer = node("consumer", outputs=("table",))
-        expected = "Duplicate output"
-    elif case == "collision":
-        consumer = node("table", outputs=("different",))
-        expected = "collides"
-    elif case == "missing":
-        consumer = node(
-            "consumer", inputs={"data": Dependency("source", producer="source")}
-        )
-        expected = "consumer.*data.*source.*no enabled producer"
-    elif case == "self":
-        source = node(
-            "source",
-            outputs=("table", "other"),
-            inputs={"loop": Dependency("other", producer="source")},
-        )
-        expected = "cycle.*source.*loop.*other.*source"
-    else:
-        source = node(
-            "source",
-            outputs=("table",),
-            inputs={"loop": Dependency("consumer", producer="consumer")},
-        )
-        expected = "cycle.*input.*output.*producer"
-    if case in {"output", "collision"}:
-        graph(source, consumer)
-        return
-    with pytest.raises(ValueError, match=expected):
-        graph(source, consumer)
-
-
-@pytest.mark.parametrize(
-    "case",
+    ("caller", "target", "overrides"),
     [
-        "required",
-        "default",
-        "matching",
-        "renamed",
-        "literal",
-        "target",
-        "reference",
-        "nested",
+        (Renamed, Defaulted, {}),
+        (Required, Required, {}),
+        (Renamed, Required, {"year": Input("parameters.vintage")}),
+        (Renamed, Required, {"year": "validate at invocation"}),
     ],
 )
-def test_parameter_supply_paths(case: str) -> None:
-    producer = node("source", parameters=Defaulted if case == "default" else Required)
-    parameters = Required if case == "matching" else Renamed
-    if case == "nested":
-        parameters = Nested
-    overrides: dict[str, object] = {}
-    if case == "renamed":
-        overrides = {"year": Input("parameters.vintage")}
-    elif case == "literal":
-        overrides = {"year": "runtime validation decides whether this is valid"}
-    elif case == "target":
-        overrides = {"unknown": 1}
-    elif case == "reference":
-        overrides = {"year": Input("parameters.missing")}
-    consumer = node(
+def test_parameter_supply_paths(
+    caller: type[MetricParameters], target: type[MetricParameters], overrides: dict
+) -> None:
+    edge = parameter_edge(
         "consumer",
-        parameters=parameters,
-        inputs={"data": Dependency("source", parameters=overrides, producer="source")},
+        caller,
+        Dependency("producer", producer="producer", parameters=overrides),
+        target,
     )
-    if case in {"required", "target", "reference", "nested"}:
-        with pytest.raises(ValueError, match=r"consumer.*data.*source.*producer"):
-            graph(producer, consumer)
-    else:
-        assert graph(producer, consumer).dependencies["consumer"]["data"]
+    assert edge.dependency.parameters == overrides
 
 
-def test_spatial_path_is_required_at_every_edge() -> None:
-    source = node("source", spatial={"location"})
-    middle = node("middle", inputs={"data": Dependency("source", producer="source")})
-    root = node(
-        "root",
-        spatial={"location"},
-        inputs={"data": Dependency("middle", producer="middle")},
-    )
-    with pytest.raises(ValueError, match=r"middle.*data.*source.*spatial"):
-        graph(root, middle, source)
-    middle = node(
-        "middle",
-        spatial={"location"},
-        inputs={"data": Dependency("source", producer="source")},
-    )
-    wrong = middle.model_copy(
-        update={"location_inputs": {"bounds": middle.location_inputs["location"]}}
-    )
-    with pytest.raises(ValueError, match=r"middle.*data.*source.*spatial"):
-        graph(source, wrong)
-    assert graph(root, middle, source)
+@pytest.mark.parametrize(
+    ("caller", "overrides", "reason"),
+    [
+        (Renamed, {}, "No parameter supply"),
+        (Nested, {}, "No parameter supply"),
+        (Renamed, {"unknown": 1}, "Unknown receiving parameter"),
+        (Renamed, {"year": Input("parameters.missing")}, "undeclared input reference"),
+    ],
+)
+def test_invalid_parameter_supply(
+    caller: type[MetricParameters], overrides: dict, reason: str
+) -> None:
+    with pytest.raises((ValueError, TypeError), match=reason):
+        parameter_edge(
+            "consumer",
+            caller,
+            Dependency("producer", producer="producer", parameters=overrides),
+            Required,
+        )
 
 
-def test_catalog_graph_is_atomic_and_manifest_only(
+def test_catalog_graph_visibility_and_enabled_dependencies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    producer = manifest("producer", node("source").model_copy(update={"private": True}))
-    consumer = manifest(
-        "consumer",
-        node(
-            "public",
-            outputs=("first", "second"),
-            inputs={"data": Dependency("source", producer="source")},
-        ),
+    schema = pa.DataFrameSchema(strict=True)
+
+    @metric(
+        name="source",
+        description="Source",
+        private=True,
+        code_revision="1",
+        outputs={"value": schema},
     )
-    paths = []
-    for item in [producer, consumer]:
-        directory = tmp_path / item.plugin.name
-        directory.mkdir()
-        (directory / "lyra.plugin.json").write_text(item.model_dump_json())
-        VERSIONS[item.plugin.name] = "1"
-        paths.append(directory)
+    def source() -> pd.DataFrame:
+        pytest.fail("Catalog compilation invoked source")
+
+    @metric(
+        name="public",
+        description="Public consumer",
+        code_revision="1",
+        inputs={"data": Dependency("value", producer="source")},
+        outputs={"first": schema, "second": schema},
+    )
+    def public(data: pd.DataFrame) -> dict[str, pd.DataFrame]:
+        return {"first": data, "second": data}
+
     config = load_test_config(tmp_path, plugins=[])
-    config.plugins.installed = [plugin_config(path) for path in paths]
-
-    def forbidden(*_: object, **__: object) -> None:
-        pytest.fail("Imported plugin implementation")
-
-    monkeypatch.setattr(importlib, "import_module", forbidden)
+    for name, handler in (("producer", source), ("consumer", public)):
+        monkeypatch.setitem(PATHS, name, tmp_path)
+        monkeypatch.setitem(VERSIONS, name, "1")
+        monkeypatch.setitem(DEFINITIONS, name, PluginDefinition(metrics=[handler]))
+        config.plugins.installed.append(InstalledPluginConfig(distribution=name))
     catalog = registry.Catalog.load(config.plugins)
     assert catalog.get_loaded_metric_names() == ["public"]
     assert "source" not in catalog.get_loaded_metric_names()
@@ -220,97 +161,6 @@ def test_parameter_contract_rejects_non_object_root() -> None:
         MetricManifest.model_validate(payload)
 
 
-@pytest.mark.parametrize("matching", [False, True])
-def test_explicit_location_bindings_and_parameter_overrides(*, matching: bool) -> None:
-    consumer = node(
-        "consumer",
-        spatial={"lots", "location"} if matching else {"lots"},
-        parameters=Required,
-        inputs={
-            "data": Dependency(
-                "source",
-                parameters={"year": 1990},
-                producer="source",
-            ).bind(location=Input("lots"))
-        },
-    )
-    source = node("source", spatial={"location"}, parameters=Required)
-    edge = graph(consumer, source).dependencies["consumer"]["data"]
-    assert edge.dependency.locations["location"] == Input("lots")
-    assert edge.dependency.parameters["year"] == 1990
-
-
-@pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [
-        ({}, "no supply path for required spatial input 'location'"),
-        ({"locations": {"missing": Input("lots")}}, "unknown location override"),
-        ({"locations": {"location": Input("missing")}}, "unknown consumer location"),
-        (
-            {"locations": {"location": Input("parameters.year")}},
-            "requires a location reference",
-        ),
-        ({"parameters": {"year": Input("lots")}}, "requires a parameter reference"),
-        ({"parameters": {"location": 1}}, "unknown parameter override"),
-        ({"locations": {"year": Input("lots")}}, "unknown location override"),
-    ],
-)
-def test_invalid_location_supply_paths(
-    arguments: dict[str, dict[str, object]], expected: str
-) -> None:
-    if expected.startswith("requires a"):
-        with pytest.raises(ValueError, match=expected):
-            Dependency(
-                "source", parameters=arguments.get("parameters", {}), producer="source"
-            ).bind(**arguments.get("locations", {}))
-        return
-    consumer = node(
-        "consumer",
-        parameters=Required,
-        spatial={"lots"},
-        inputs={
-            "data": Dependency(
-                "source", parameters=arguments.get("parameters", {}), producer="source"
-            ).bind(**arguments.get("locations", {}))
-        },
-    )
-    with pytest.raises(ValueError, match=expected) as error:
-        graph(consumer, node("source", spatial={"location"}, parameters=Defaulted))
-    assert "consumer" in str(error.value)
-    assert "input 'data'" in str(error.value)
-    assert "producer 'source'" in str(error.value)
-
-
-def test_invalid_explicit_bindings_do_not_fall_back_to_matching_names() -> None:
-    consumer = node(
-        "consumer",
-        parameters=Required,
-        spatial={"location"},
-        inputs={
-            "data": Dependency(
-                "source",
-                parameters={"year": Input("parameters.missing")},
-                producer="source",
-            ).bind(location=Input("missing"))
-        },
-    )
-    with pytest.raises(
-        ValueError, match=r"unknown consumer parameter.*unknown consumer location"
-    ):
-        graph(consumer, node("source", spatial={"location"}, parameters=Defaulted))
-
-
-def test_location_free_producer_with_forwarding_only_consumer() -> None:
-    assert graph(
-        node("source", parameters=Defaulted),
-        node(
-            "consumer",
-            spatial={"lots"},
-            inputs={"data": Dependency("source", producer="source")},
-        ),
-    )
-
-
 @pytest.mark.parametrize(
     "literal",
     [
@@ -337,41 +187,12 @@ def test_reference_looking_parameter_is_literal() -> None:
     assert dependency.parameters["settings"] == {"kind": "input", "path": "lots"}
 
 
-def test_concrete_producers_share_output_names() -> None:
-    first = node("first", outputs=("rows",))
-    second = node("second", outputs=("rows",))
-    consumer = node(
-        "consumer",
-        inputs={
-            "a": Dependency("rows", producer="first"),
-            "b": Dependency("rows", producer="second"),
-            "again": Dependency("rows", producer="first"),
-        },
-    )
-    result = graph(first, second, consumer)
-    edges = result.dependencies["consumer"]
-    assert edges["a"].output is edges["again"].output
-    assert edges["a"].output.producer.node.name == "first"
-    assert edges["b"].output.producer.node.name == "second"
-
-
 @pytest.mark.parametrize("explicit", [False, True])
-def test_incompatible_concrete_location_binding(*, explicit: bool) -> None:
-    producer = node("source", spatial={"location"})
-    consumer = node(
-        "consumer",
-        spatial={"location"},
-        inputs={
-            "data": Dependency(
-                "source",
-                producer="source",
-            ).bind(**{"location": Input("location")} if explicit else {})
-        },
-    )
-    consumer.location_inputs["location"].contract = consumer.location_inputs[
-        "location"
-    ].contract.model_copy(update={"source": "different"})
+def test_incompatible_provider_requires_a_route(*, explicit: bool) -> None:
+    dependency = Dependency("value", producer="producer")
+    if explicit:
+        dependency = dependency.bind(places=Input("seed"))
     with pytest.raises(
-        ValueError, match=r"consumer.*data.*incompatible location contract"
+        (ValueError, TypeError), match=r"No canonical route|No location supply"
     ):
-        graph(producer, consumer)
+        compile_live_catalog(plugins(dependency))

@@ -1,7 +1,7 @@
 """Selection queue boundaries use fake job storage and managed resources."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,13 +20,13 @@ from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
 from lyra.server import worker
 from test_support.location_resolution import Provider, location_value
-from test_support.manifest_catalog import compile_catalog
 from test_support.runtime_inputs import native_inputs
 from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
@@ -103,6 +103,40 @@ Queued = tuple[
 ]
 
 
+def queued_root(seen: list[tuple], *, nullable: bool = False) -> Callable:
+    @metric(
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES.update_column("value", nullable=nullable)},
+        inputs={
+            "blocks": LocationDependency(provider=Provider.id),
+            "lots": LocationDependency(provider=Provider.id),
+            "data": Dependency("source", producer="source").bind(
+                location=Input("lots")
+            ),
+        },
+    )
+    def root(
+        blocks: gpd.GeoDataFrame,
+        lots: gpd.GeoDataFrame,
+        parameters: Parameters,
+        data: pd.DataFrame,
+    ) -> pd.DataFrame:
+        seen.append(
+            (
+                "root",
+                tuple(blocks.location_id),
+                tuple(lots.location_id),
+                parameters.value,
+            )
+        )
+        return data
+
+    return root
+
+
 @pytest.fixture
 def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     seen = []
@@ -128,38 +162,10 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         seen.append(("source", tuple(location.location_id), parameters.value))
         return database.query_dataframe("SELECT value")
 
-    @metric(
-        cache="full",
-        code_revision="1",
-        name="root",
-        description="Root",
-        outputs={"answer": VALUES},
-        inputs={
-            "blocks": LocationDependency(provider=Provider.id),
-            "lots": LocationDependency(provider=Provider.id),
-            "data": Dependency("source", producer="source").bind(
-                location=Input("lots")
-            ),
-        },
-    )
-    def root(
-        blocks: gpd.GeoDataFrame,
-        lots: gpd.GeoDataFrame,
-        parameters: Parameters,
-        data: pd.DataFrame,
-    ) -> pd.DataFrame:
-        seen.append(
-            (
-                "root",
-                tuple(blocks.location_id),
-                tuple(lots.location_id),
-                parameters.value,
-            )
-        )
-        return data
-
     definitions = {
-        "plugin_0": PluginDefinition(metrics=[root], resources={"database": resource}),
+        "plugin_0": PluginDefinition(
+            metrics=[queued_root(seen)], resources={"database": resource}
+        ),
         "plugin_1": PluginDefinition(
             metrics=[source], resources={"database": resource}
         ),
@@ -283,22 +289,37 @@ def test_job_integrity_checks(queued: Queued, issue: str) -> None:
         case "queue":
             native.origin = "wrong"
         case "contract":
-            contract = entry.catalog.graph.nodes["root"].node
-            assert contract.kind == "metric"
-            contract.outputs["answer"].meaning = "changed"
-            worker.RUNNER_REGISTRY["root"] = replace(
-                entry, catalog=compile_catalog(entry.catalog.manifests)
+            definitions = {
+                name: plugin.definition
+                for name, plugin in entry.implementations.items()
+            }
+            definitions[entry.distribution] = PluginDefinition(
+                metrics=[queued_root(seen, nullable=True)],
+                resources=definitions[entry.distribution].resources,
             )
+            catalog = compile_live_catalog(definitions)
+            plan = envelope.accepted.plan
+            prepare_execution(
+                catalog,
+                plan.request.submission_payload(),
+                normalized_uses=plan.parameter_uses,
+            )
+            worker.RUNNER_REGISTRY["root"] = replace(entry, catalog=catalog)
         case "implementation":
             entry.implementations.pop(entry.distribution)
         case "provider":
             entry.implementations.pop("provider")
     expected_error = (
         GraphExecutionError
-        if issue in {"provider", "implementation"}
+        if issue in {"provider", "implementation", "contract"}
         else worker.BoundPlanError
     )
-    with pytest.raises(expected_error):
+    with pytest.raises(
+        expected_error,
+        match="Implementation differs from live declaration: root"
+        if issue == "contract"
+        else None,
+    ):
         run_and_read(
             worker.execute_job, envelope.model_dump(mode="json"), cast("Job", native)
         )

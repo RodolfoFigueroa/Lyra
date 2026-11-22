@@ -338,9 +338,9 @@ def test_config_contract_rejects_default_queue_outside_allowed_queues(
     _assert_invalid(raw, "plugins.default_queue")
 
 
-def test_config_contract_rejects_plugin_metric_queues_field(tmp_path: Path) -> None:
+def test_config_contract_rejects_unknown_plugin_field(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
-    raw["plugins"]["metric_queues"] = {"walkability_score": "interactive"}
+    raw["plugins"]["unrecognized"] = {"walkability_score": "interactive"}
 
     _assert_invalid(raw, "Extra inputs are not permitted")
 

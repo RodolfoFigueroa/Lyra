@@ -2,18 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated, TypeAlias
+from typing import TypeAlias
 
 from pydantic import TypeAdapter
 from typing_extensions import TypeAliasType
-
-from lyra.contracts.geometry import GeoJSON, SingleGeoJSON
-
-REQUIRE_EXPLICIT_TYPE = "REQUIRE_EXPLICIT_TYPE"
-REQUIRE_EXPLICIT_BOUNDS_TYPE = "REQUIRE_EXPLICIT_BOUNDS_TYPE"
-
-ExplicitLocationAPI = Annotated[GeoJSON, REQUIRE_EXPLICIT_TYPE]
-ExplicitBoundsAPI = Annotated[SingleGeoJSON, REQUIRE_EXPLICIT_BOUNDS_TYPE]
 
 JsonScalar: TypeAlias = bool | int | float | str | None
 JsonValue = TypeAliasType(

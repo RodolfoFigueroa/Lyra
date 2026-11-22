@@ -1,22 +1,26 @@
 """Reusable graph arguments fixtures."""
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+import pandas as pd
 import pandera.pandas as pa
 import pytest
 from geopandas import GeoDataFrame
 from pydantic import Field, field_validator
 
+from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.locations import LocationContract
 from lyra.runtime.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.runtime.invocation import BoundPlugin
-from lyra.sdk.dependencies import Dependency
+from lyra.runtime.native_inputs import NativeLocationInput
+from lyra.runtime.planning.catalog import compile_live_catalog
+from lyra.runtime.planning.graph import ResolvedDependency
+from lyra.runtime.planning.provider_registry import capture_provider
 from lyra.sdk.parameters import MetricParameters
-from test_support.declarations import PluginDefinition, metric
-from test_support.location_helpers import (
-    node_contract,
-)
-from test_support.plugin_graph import graph, node
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import node_contract
+from test_support.routing_plugins import provider
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -75,24 +79,120 @@ def plugin(
     if model is not None:
         handler = parameterized
         handler.__annotations__["parameters"] = model
+    provider_id = location_provider_id(location_contract or node_contract())
+    inputs = (
+        {
+            key: LocationDependency(provider=provider_id)
+            for key in ("location", "bounds")
+        }
+        if spatial and model is None
+        else {}
+    )
+    decorated = metric(
+        code_revision="1",
+        name=name,
+        description=name,
+        outputs={key: pa.DataFrameSchema(strict=True) for key in (name, "second")},
+        inputs=inputs,
+    )(handler)
     return BoundPlugin(
         PluginDefinition(
-            metrics=[
-                metric(
-                    code_revision="1",
-                    name=name,
-                    description=name,
-                    outputs={name: pa.DataFrameSchema({}, strict=True)},
-                    locations={
-                        key: location_contract or node_contract()
-                        for key in ("location", "bounds")
-                    }
-                    if spatial and model is None
-                    else {},
-                )(handler)
-            ]
+            metrics=[decorated],
+            resources={provider_id: provider(provider_id)} if inputs else {},
         )
     )
+
+
+def location_provider_id(contract: LocationContract) -> str:
+    return f"{contract.family.collection}_{contract.family.unit_type}"
+
+
+def scoped_inputs(values: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: scoped_frame(value, node_contract())
+        if isinstance(value, GeoDataFrame)
+        else value
+        for key, value in values.items()
+    }
+
+
+def scoped_frame(
+    frame: GeoDataFrame, contract: LocationContract
+) -> NativeLocationInput:
+    name = location_provider_id(contract)
+    registered = capture_provider(name, provider(name))
+    frame = frame.assign(count=1)
+    return NativeLocationInput(
+        frame.rename(columns={frame.columns[0]: "location_id"}),
+        registered.contract.reference,
+        "location_id",
+    )
+
+
+def parameter_edge(
+    owner: str,
+    model: type[MetricParameters] | None,
+    dependency: Dependency,
+    target: type[MetricParameters] | None,
+) -> ResolvedDependency:
+    def calculate(table: pd.DataFrame, parameters: MetricParameters) -> pd.DataFrame:
+        del parameters
+        return table
+
+    calculate.__annotations__["parameters"] = model or MetricParameters
+    handler = metric(
+        name=owner,
+        code_revision="1",
+        description=owner,
+        inputs={"table": dependency},
+        outputs={owner: pa.DataFrameSchema(strict=True)},
+    )(calculate)
+    catalog = compile_live_catalog(
+        {
+            "caller": PluginDefinition(metrics=[handler]),
+            "source": plugin(target, name=dependency.producer).definition,
+        }
+    )
+    return catalog.graph.dependencies[owner]["table"]
+
+
+def location_edge(
+    *, alias: bool = False, contract: LocationContract | None = None
+) -> ResolvedDependency:
+    provider_id = location_provider_id(contract or node_contract())
+
+    def consume(
+        location: GeoDataFrame,
+        bounds: GeoDataFrame,
+        alias: GeoDataFrame,
+        table: pd.DataFrame,
+    ) -> pd.DataFrame:
+        del location, bounds, alias
+        return table
+
+    dependency = Dependency("producer", producer="producer")
+    if alias:
+        dependency = dependency.bind(location=Input("alias"))
+    locations = {
+        key: LocationDependency(provider=provider_id)
+        for key in ("location", "bounds", "alias")
+    }
+    consumer = metric(
+        name="consumer",
+        description="Forward selected inputs",
+        code_revision="1",
+        inputs={**locations, "table": dependency},
+        outputs={"value": pa.DataFrameSchema(strict=True)},
+    )(consume)
+    catalog = compile_live_catalog(
+        {
+            "caller": PluginDefinition(metrics=[consumer]),
+            "upstream": plugin(
+                None, spatial=True, location_contract=contract
+            ).definition,
+        }
+    )
+    return catalog.graph.dependencies["consumer"]["table"]
 
 
 def resolve(
@@ -105,21 +205,13 @@ def resolve(
     parameters = consumer.inspect_parameters()
     assert parameters is None or isinstance(parameters, MetricParameters)
     source_model = type(parameters) if parameters is not None else None
-    registry = graph(
-        node(
-            "consumer",
-            parameters=source_model,
-            inputs={
-                "table": Dependency(
-                    output, parameters=overrides or {}, producer="producer"
-                )
-            },
-        ),
-        node("producer", parameters=model, outputs=("producer", "second")),
+    edge = parameter_edge(
+        "consumer",
+        source_model,
+        Dependency(output, producer="producer", parameters=overrides or {}),
+        model,
     )
-    return prepare_dependency(
-        consumer, registry.dependencies["consumer"]["table"], plugin(model)
-    )
+    return prepare_dependency(consumer, edge, plugin(model))
 
 
 def invocation(

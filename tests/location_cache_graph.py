@@ -156,5 +156,5 @@ def setup_graph(
     invocation = replace(
         invocation, parameters=invocation.inspect_parameters(), bound_use=operation
     )
-    key = executor.persistent_key(invocation.identity)
+    key = invocation.identity
     return runner, cache, key, events, seen, broken

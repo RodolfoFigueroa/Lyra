@@ -15,10 +15,10 @@ from lyra.sdk.dependencies import (
     LocationDependency,
 )
 from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.plugin import metric as native_metric
-from test_support.declarations import PluginDefinition, location_operation, metric
-from test_support.location_helpers import node_contract
-from test_support.location_schema import column, contract, declaration
+from test_support.location_operations import Places
+from test_support.location_schema import column
 from test_support.plugin_graph import node
 
 
@@ -43,8 +43,7 @@ def nested_binding(path: str = "lots") -> LocationDependency:
     )
 
 
-@pytest.mark.parametrize("kind", ["metric", "location_operation"])
-def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
+def test_nested_bindings_roundtrip_and_public_boundary() -> None:
     binding = nested_binding()
     inputs = {
         "table": Dependency("street_records", producer="street_records").bind(
@@ -57,31 +56,14 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
     ) -> None:
         pytest.fail(f"Handler executed: {lots}, {parameters}, {table}")
 
-    if kind == "metric":
-        decorated = metric(
-            locations={"lots": node_contract()},
-            code_revision="1",
-            name="owner",
-            description="Owner",
-            outputs={
-                "records": pa.DataFrameSchema({"value": column(int)}, strict=True)
-            },
-            inputs=inputs,
-        )(handler)
-        plugin = PluginDefinition(metrics=[decorated])
-    else:
-        decorated = location_operation(
-            locations={
-                "lots": node_contract("test:units", "lot", contract(declaration()))
-            },
-            output_contract=node_contract("test:units", "lot", contract(declaration())),
-            code_revision="1",
-            name="owner",
-            description="Owner",
-            output=contract(declaration()),
-            inputs=inputs,
-        )(handler)
-        plugin = PluginDefinition(location_operations=[decorated])
+    decorated = metric(
+        code_revision="1",
+        name="owner",
+        description="Owner",
+        outputs={"records": pa.DataFrameSchema({"value": column(int)}, strict=True)},
+        inputs={"lots": LocationDependency(provider=Places.id), **inputs},
+    )(handler)
+    plugin = PluginDefinition(metrics=[decorated], resources={"places": Places})
     manifest = plugin.manifest(
         plugin=PluginInfo(name="bindings", version="0.0.0"), factory="example:plugin"
     )

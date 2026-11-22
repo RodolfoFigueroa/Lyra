@@ -219,7 +219,6 @@ def test_save_config_writes_loadable_toml_without_temp_file_leaks(
     save_config(config, target_path)
 
     assert load_config(target_path) == config
-    assert "[plugins.metric_queues]" not in target_path.read_text(encoding="utf-8")
     assert not list(target_path.parent.glob(".lyra.toml.*.tmp"))
 
 

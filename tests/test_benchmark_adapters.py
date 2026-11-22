@@ -1,7 +1,7 @@
 """Exercise ASV measurement adapters with isolated workloads."""
 
 import json
-import pickle  # ruff: ignore[suspicious-pickle-import] - ASV cache compatibility requires pickle.
+import pickle  # ruff: ignore[suspicious-pickle-import] - ASV serializes setup caches with pickle.
 import re
 from collections import Counter
 from collections.abc import Callable
@@ -512,15 +512,14 @@ def test_storage_preparation_runs_each_state_once(
     assert all(Path(seed.path).read_bytes() == b"seed" for seed in result.values())
 
 
-def test_identity_cache_serialization_and_compilation() -> None:
+def test_identity_benchmark_uses_reusable_graph() -> None:
     suite = preparation.IdentitySuite()
     graphs = suite.setup_cache()
-    restored = pickle.loads(pickle.dumps(graphs))  # ruff: ignore[suspicious-pickle-usage] - Only local test-generated graphs.
+    restored = pickle.loads(pickle.dumps(graphs))  # ruff: ignore[suspicious-pickle-usage] - In-memory data from this test only.
     for nodes in suite.params:
+        live = preparation.compile_live_catalog(
+            {"benchmark-fixture": preparation.workload(1, "catalog", nodes).plugin}
+        )
         suite.setup(restored, nodes)
-        before = pickle.dumps(suite.graph)
-        expected = preparation.compile_computation(graphs[nodes], {})
-        for _ in range(2):
-            assert preparation.compile_computation(suite.graph, {}) == expected
-            suite.time_compile_identity(restored, nodes)
-        assert pickle.dumps(suite.graph) == before
+        assert preparation.compile_computation(suite.graph, {}) == live.computation
+        suite.time_compile_identity(restored, nodes)

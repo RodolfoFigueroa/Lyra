@@ -4,9 +4,11 @@ import json
 from typing import ClassVar
 
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.graph import build_graph
-from test_support.edition_catalog import discovery, edition_manifests
-from test_support.manifest_catalog import compile_catalog
+from lyra.sdk.plugin import PluginDefinition
+from test_support.edition_catalog import discovery
+from test_support.routing_plugins import conversion, provider, score_plugin
 from test_support.workloads import catalog, installed, workload
 
 
@@ -75,22 +77,33 @@ class RunnerSuite:
 class AcceptedSourcesSuite:
     """Compile native source selections across concrete edition families."""
 
-    version = "1"
-    params: ClassVar[list[int]] = [10, 100]
-    param_names: ClassVar[list[str]] = ["editions"]
+    version = "2"
+    params: ClassVar[list[list[int]]] = [[10, 100], [10, 100]]
+    param_names: ClassVar[list[str]] = ["providers", "metrics"]
 
-    def setup(self, editions: int) -> None:
-        """Build edition declarations with distinct concrete source identities."""
-        self.manifests = edition_manifests(editions)
+    def setup(self, providers: int, metrics: int) -> None:
+        """Register sources sharing a target and metrics requiring that target."""
+        names = ["native", "other", *(f"source_{i}" for i in range(providers - 2))]
+        self.definitions = {
+            f"measure_{i}": score_plugin(name=f"measure_{i}") for i in range(metrics)
+        }
+        self.definitions["routes"] = PluginDefinition(
+            resources={name: provider(name) for name in names},
+            location_operations=[
+                conversion(f"select_{i}", name, "native")
+                for i, name in enumerate(names[2:])
+            ],
+        )
 
-    def time_compile(self, _editions: int) -> None:
-        """Measure full catalog compilation including accepted source projection."""
-        compile_catalog(self.manifests)
+    def time_compile(self, _providers: int, _metrics: int) -> None:
+        """Compile live definitions and project every accepted selection."""
+        compile_live_catalog(self.definitions)
 
 
 class DiscoverySuite:
     """Shared family projections across representative edition counts."""
 
+    version = "2"
     params: ClassVar[list[int]] = [10, 100]
     param_names: ClassVar[list[str]] = ["editions"]
 

@@ -5,18 +5,22 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock
 
+import geopandas as gpd
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 from pydantic import ValidationError
 
 from lyra.contracts.config import LyraConfig
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.contracts.plugins import NODE_MANIFEST_ADAPTER, PluginManifest
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import registry
 from lyra.server.job_submission import submit_job
-from test_support.manifest_catalog import compile_catalog
-from test_support.parameter_catalog import with_models
+from test_support.routing_plugins import provider
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import (
@@ -426,7 +430,7 @@ def test_catalog_captures_and_validates_routing(
 
 
 def test_empty_catalog() -> None:
-    catalog = registry.Catalog(compile_catalog({}), {})
+    catalog = registry.Catalog(compile_live_catalog({}), {})
     assert catalog.discovery.search() == []
     assert catalog.get_loaded_metric_names() == []
     assert catalog.get_loaded_metric_queues() == {}
@@ -434,27 +438,28 @@ def test_empty_catalog() -> None:
 
 @pytest.mark.parametrize("edition", ["one", "two"])
 def test_submission_routes_concrete_editions(edition: str) -> None:
-    base = NODE_MANIFEST_ADAPTER.validate_python(_metric())
-    manifests = {
-        name: PluginManifest.model_validate(
-            {
-                **_manifest(plugin_name=name),
-                "nodes": [
-                    base.model_copy(
-                        update={
-                            "name": f"metric_{name}",
-                        }
-                    )
-                ],
-            }
+    def definition(name: str, description: str) -> PluginDefinition:
+        @metric(
+            name=f"metric_{name}",
+            code_revision="1",
+            description=description,
+            inputs={"location": LocationDependency(provider="test_units")},
+            outputs={"value": pa.DataFrameSchema(strict=True)},
         )
-        for name in ("one", "two")
-    }
+        def calculate(
+            location: gpd.GeoDataFrame, parameters: ValueParameters
+        ) -> pd.DataFrame:
+            del location, parameters
+            pytest.fail("Submission invoked a handler")
+
+        return PluginDefinition(metrics=[calculate])
+
+    definitions = {name: definition(name, "Edition metric") for name in ("one", "two")}
+    definitions["providers"] = PluginDefinition(
+        resources={"test_units": provider("test_units")}
+    )
     catalog = registry.Catalog(
-        with_models(
-            compile_catalog(manifests),
-            {"metric_one": ValueParameters, "metric_two": ValueParameters},
-        ),
+        compile_live_catalog(definitions),
         {"metric_one": "interactive", "metric_two": "batch"},
     )
     jobs = Mock()
@@ -479,7 +484,6 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
     assert envelope.accepted.plan.metric == f"metric_{edition}"
     assert provenance.plan.metric == f"metric_{edition}"
     assert provenance.plugin.name == edition
-    assert base.kind == "metric"
     assert provenance.catalog_fingerprint == catalog.discovery.fingerprint
     assert jobs.enqueue.call_args.kwargs == {
         "queue": catalog.metric_queues[envelope.accepted.plan.metric]
@@ -489,8 +493,6 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
         "metric_one",
         "metric_two",
     ]
-    updated_metric = manifests[edition].nodes[0]
-    assert updated_metric.kind == "metric"
-    updated_metric.description = "Updated description"
-    updated = registry.Catalog(compile_catalog(manifests), catalog.metric_queues)
+    definitions[edition] = definition(edition, "Updated description")
+    updated = registry.Catalog(compile_live_catalog(definitions), catalog.metric_queues)
     assert updated.discovery.fingerprint != catalog.discovery.fingerprint

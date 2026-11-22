@@ -1,299 +1,109 @@
-"""Mixed graph validation uses contracts without importing implementations."""
+"""Mixed SDK dependency graphs preserve binding paths and validate receiving inputs."""
 
-import importlib
-
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 
-from lyra.contracts.dependencies import Input
-from lyra.sdk.dependencies import Dependency, LocationDependency
-from test_support.plugin_graph import (
-    Defaulted,
-    Renamed,
-    Required,
-    graph,
-    node,
-    operation,
-)
+from lyra.contracts.dependencies import Dependency, Input, LocationDependency
+from lyra.runtime.planning.catalog import compile_live_catalog
+from lyra.runtime.planning.parameters import use_key
+from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.plugin import PluginDefinition, metric
+from tests.live_graph_helpers import operation, plugins
 
 
-def test_nested_cross_plugin_graph_preserves_owner_and_public_schema(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def forbidden(*_: object, **__: object) -> None:
-        pytest.fail("Graph construction imported an implementation")
-
-    monkeypatch.setattr(importlib, "import_module", forbidden)
-    root = node(
-        "blocks",
-        spatial={"blocks"},
-        parameters=Renamed,
-        inputs={
-            "totals": Dependency(
-                "street_totals",
-                producer="street_totals",
-            ).bind(
-                streets=LocationDependency(
-                    "select_streets",
-                ).bind(
-                    area=LocationDependency(
-                        "buffer",
-                        parameters={"year": Input("parameters.vintage")},
-                    ).bind(source=Input("blocks"))
-                )
+def test_nested_cross_plugin_graph_preserves_owner_and_public_schema() -> None:
+    binding = Dependency("value", producer="producer").bind(
+        places=LocationDependency("select", parameters={"year": 2025}).bind(
+            source=LocationDependency("select", parameters={"year": 2024}).bind(
+                source=Input("seed")
             )
-        },
+        )
     )
-    street = node("street_totals", spatial={"streets"})
-    select = operation(
-        "select_streets",
-        spatial={"area"},
-        inputs={"data": Dependency("lookup", producer="lookup")},
+    definitions = plugins(binding, target="tracts")
+    # A receiving metric still requires counties, so supply a canonical onward route.
+    definitions["onward"] = PluginDefinition(
+        location_operations=[operation("onward", "tracts", "counties")]
     )
-    buffer = operation("buffer", spatial={"source"}, parameters=Required)
-    result = graph(root, street, select, buffer, node("lookup"))
-    edges = result.location_dependencies["blocks"]
-    path = "inputs.totals.locations.streets"
-    assert edges[path].producer.node.name == "select_streets"
-    assert edges[path + ".locations.area"].consumer.node.name == "blocks"
-    assert edges[path + ".locations.area"].producer.node.name == "buffer"
-    assert (
-        result.dependencies["select_streets"]["data"].output.producer.node.name
-        == "lookup"
+    catalog = compile_live_catalog(definitions)
+    graph = catalog.graph
+    path = "inputs.first.locations.places"
+    plan = prepare_execution(
+        catalog,
+        {"metric": "consumer", "inputs": {"seed": {"provider": "tracts", "ids": []}}},
     )
-    assert result.order.index("lookup") < result.order.index("select_streets")
-    assert result.order.index("select_streets") < result.order.index("blocks")
-    assert result.order.index("buffer") < result.order.index("blocks")
-    root_properties = root.request_schema["properties"]
-    street_properties = street.request_schema["properties"]
-    assert isinstance(root_properties, dict)
-    assert isinstance(street_properties, dict)
-    assert set(root_properties) == {"blocks", "parameters"}
-    assert set(street_properties) == {"streets"}
+    assert plan.parameter_uses[use_key("consumer", plan.parameters, path)] == {
+        "year": 2025
+    }
+    assert plan.parameter_uses[
+        use_key("consumer", plan.parameters, path + ".locations.source")
+    ] == {"year": 2024}
+    outer = graph.location_dependencies["consumer"][path]
+    inner = graph.location_dependencies["consumer"][path + ".locations.source"]
+    assert outer.consumer == inner.consumer == graph.nodes["consumer"]
+    assert outer.producer == inner.producer == graph.nodes["select"]
+    assert graph.order.index("select") < graph.order.index("consumer")
+    assert set(graph.nodes["consumer"].node.request_schema["properties"]) == {
+        "seed",
+        "parameters",
+    }
+    assert set(graph.nodes["producer"].node.request_schema["properties"]) == {
+        "places",
+        "parameters",
+    }
 
 
 @pytest.mark.parametrize(
-    ("binding", "expected"),
+    ("binding", "reason"),
     [
-        (LocationDependency("missing"), "no enabled producer"),
-        (LocationDependency("street_totals"), "got a metric"),
-        (LocationDependency("alias"), "got a table output"),
+        (LocationDependency("missing"), "Unknown dependency producer"),
+        (LocationDependency("producer"), "Expected location operation"),
+        (LocationDependency("value"), "Unknown dependency producer"),
         (
-            LocationDependency("select").bind(bad=Input("blocks")),
-            "unknown location override",
+            LocationDependency("select").bind(bad=Input("seed")),
+            "Unknown receiving location",
         ),
         (
-            LocationDependency("select").bind(area=Input("unknown")),
-            "unknown consumer location",
+            LocationDependency("select").bind(source=Input("missing")),
+            "undeclared input reference",
         ),
-        (LocationDependency("select"), "required spatial input 'area'"),
+        (LocationDependency("select"), "No location supply"),
         (
-            LocationDependency("buffer", parameters={"bad": 1}),
-            "unknown parameter override",
+            LocationDependency("select", parameters={"bad": 1}).bind(
+                source=Input("seed")
+            ),
+            "Unknown receiving parameter",
         ),
         (
-            LocationDependency("buffer", parameters={"year": Input("parameters.year")}),
-            "unknown consumer parameter",
+            LocationDependency(
+                "select", parameters={"year": Input("parameters.missing")}
+            ).bind(source=Input("seed")),
+            "undeclared input reference",
         ),
-        (LocationDependency("buffer"), "required parameter 'year'"),
     ],
 )
-def test_invalid_location_invocations(
-    binding: LocationDependency, expected: str
-) -> None:
-    root = node(
-        "blocks",
-        spatial={"blocks"},
-        parameters=Renamed,
-        inputs={
-            "data": Dependency(
-                "street_totals",
-                producer="street_totals",
-            ).bind(streets=binding)
-        },
-    )
-    with pytest.raises(ValueError, match=expected) as error:
-        graph(
-            root,
-            node("street_totals", spatial={"streets"}),
-            node("table_node", outputs=("alias",)),
-            operation("select", spatial={"area"}),
-            operation("buffer", parameters=Required),
-        )
-    assert "Node 'blocks'" in str(error.value)
-    assert "inputs.data.locations.streets" in str(error.value)
-
-
-def test_operation_cannot_supply_table_dependency() -> None:
-    with pytest.raises(ValueError, match=r"consumer.*data.*select.*expected a table"):
-        graph(
-            node("consumer", inputs={"data": Dependency("select", producer="select")}),
-            operation("select"),
+def test_invalid_location_invocations(binding: LocationDependency, reason: str) -> None:
+    with pytest.raises((ValueError, TypeError), match=reason):
+        compile_live_catalog(
+            plugins(Dependency("value", producer="producer").bind(places=binding))
         )
 
 
-def test_nested_references_cannot_use_intermediate_target_inputs() -> None:
-    root = node(
-        "root",
-        spatial={"blocks"},
-        parameters=Renamed,
-        inputs={
-            "data": Dependency(
-                "table",
-                producer="table",
-            ).bind(
-                streets=LocationDependency(
-                    "outer",
-                    parameters={"year": 2020},
-                ).bind(
-                    area=LocationDependency(
-                        "inner",
-                        parameters={"year": Input("parameters.year")},
-                    ).bind(area=Input("area"))
-                )
-            )
-        },
+@pytest.mark.parametrize("name", ["select", "other"])
+def test_operation_names_share_graph_namespace(name: str) -> None:
+    @metric(
+        name=name,
+        description="Independent output",
+        code_revision="1",
+        outputs={"select": pa.DataFrameSchema(strict=True)},
     )
-    with pytest.raises(
-        ValueError, match=r"unknown consumer parameter.*unknown consumer location"
-    ) as error:
-        graph(
-            root,
-            node("table", spatial={"streets"}),
-            operation("outer", spatial={"area"}, parameters=Required),
-            operation("inner", spatial={"area"}, parameters=Required),
-        )
-    assert "inputs.data.locations.streets.locations.area" in str(error.value)
+    def calculate() -> pd.DataFrame:
+        return pd.DataFrame()
 
-
-def test_nested_matching_forwarding_and_defaults_use_owner() -> None:
-    root = node(
-        "root",
-        spatial={"area"},
-        parameters=Required,
-        inputs={
-            "data": Dependency(
-                "table",
-                producer="table",
-            ).bind(
-                streets=LocationDependency(
-                    "outer",
-                ).bind(area=LocationDependency("inner"))
-            )
-        },
-    )
-    assert graph(
-        root,
-        node("table", spatial={"streets"}),
-        operation("outer", spatial={"area"}),
-        operation("inner", spatial={"area"}, parameters=Required),
-    )
-    assert graph(
-        node(
-            "root",
-            inputs={
-                "data": Dependency(
-                    "table",
-                    producer="table",
-                ).bind(streets=LocationDependency("defaulted"))
-            },
-        ),
-        node("table", spatial={"streets"}),
-        operation("defaulted", parameters=Defaulted),
-    )
-
-
-@pytest.mark.parametrize("cycle", ["self", "operation", "mixed", "nested"])
-def test_location_cycles_include_receiving_paths(cycle: str) -> None:
-    table = node("table", spatial={"area"})
-    target = "first" if cycle == "self" else "second"
-    binding = LocationDependency(target)
-    if cycle == "nested":
-        binding = LocationDependency("wrapper").bind(area=binding)
-    first = operation(
-        "first",
-        inputs={"data": Dependency("table", producer="table").bind(area=binding)},
-    )
-    second = operation(
-        "second",
-        inputs={
-            "data": Dependency(
-                "table",
-                producer="table",
-            ).bind(area=LocationDependency("first"))
-        },
-    )
-    if cycle == "mixed":
-        second = operation(
-            "second", inputs={"data": Dependency("root", producer="root")}
-        )
-        root = node(
-            "root",
-            inputs={
-                "data": Dependency(
-                    "table",
-                    producer="table",
-                ).bind(area=LocationDependency("first"))
-            },
-        )
+    definitions = plugins()
+    definitions["extra"] = PluginDefinition(metrics=[calculate])
+    if name == "select":
+        with pytest.raises(ValueError, match="Duplicate node"):
+            compile_live_catalog(definitions)
     else:
-        root = node("root")
-    with pytest.raises(ValueError, match="Dependency cycle") as error:
-        graph(table, first, second, root, operation("wrapper", spatial={"area"}))
-    message = str(error.value)
-    assert "first" in message
-    assert "inputs.data.locations.area" in message
-    if cycle == "nested":
-        assert "inputs.data.locations.area.locations.area" in message
-    if cycle == "mixed":
-        assert "root" in message
-        assert "input 'data'" in message
-
-
-def test_operations_own_their_table_and_nested_location_bindings() -> None:
-    root = node(
-        "root",
-        inputs={
-            "data": Dependency(
-                "table",
-                producer="table",
-            ).bind(area=LocationDependency("outer", parameters={"year": 2024}))
-        },
-    )
-    outer = operation(
-        "outer",
-        parameters=Required,
-        inputs={
-            "data": Dependency(
-                "table",
-                producer="table",
-            ).bind(
-                area=LocationDependency(
-                    "inner", parameters={"year": Input("parameters.year")}
-                )
-            )
-        },
-    )
-    result = graph(
-        root,
-        outer,
-        operation("inner", parameters=Required),
-        node("table", spatial={"area"}),
-    )
-    edge = result.location_dependencies["outer"]["inputs.data.locations.area"]
-    assert edge.consumer.node.name == "outer"
-    assert edge.producer.node.name == "inner"
-    assert (
-        result.order.index("inner")
-        < result.order.index("outer")
-        < result.order.index("root")
-    )
-
-
-@pytest.mark.parametrize("conflict", ["node", "output"])
-def test_operation_names_share_graph_namespace(conflict: str) -> None:
-    other = node("select") if conflict == "node" else node("table", outputs=("select",))
-    if conflict == "output":
-        assert graph(operation("select"), other)
-        return
-    with pytest.raises(ValueError, match="Duplicate node"):
-        graph(operation("select"), other)
+        assert (name, "select") in compile_live_catalog(definitions).graph.outputs

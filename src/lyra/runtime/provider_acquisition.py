@@ -13,12 +13,10 @@ from lyra.contracts.errors import (
     LocationSelectionError,
     ResourceConfigurationError,
 )
+from lyra.contracts.locations import LocationSelection
 from lyra.contracts.provider_scope import DatasetScope, RecordReferences
 from lyra.runtime.native_inputs import copy_frame
-from lyra.runtime.planning.provider_preparation import (
-    PreparedProviderInput,
-    ProviderSelection,
-)
+from lyra.runtime.planning.provider_preparation import PreparedProviderInput
 from lyra.runtime.planning.provider_registry import RegisteredProvider
 from lyra.runtime.resources import ResourceScope
 
@@ -80,7 +78,7 @@ def acquire_provider_membership(
             f"Provider {registered.scope.provider_id!r} does not support existing_ids",
         )
     try:
-        parsed = ProviderSelection(provider=registered.scope.provider_id, ids=list(ids))
+        parsed = LocationSelection(provider=registered.scope.provider_id, ids=list(ids))
     except ValueError as exc:
         raise LocationSelectionError(name, "Invalid membership IDs") from exc
     requested = list(dict.fromkeys(parsed.ids))
@@ -200,7 +198,7 @@ def acquire_provider_input(
     """
     registered = selection.provider
     try:
-        parsed = ProviderSelection(
+        parsed = LocationSelection(
             provider=registered.scope.provider_id,
             ids=list(needed_ids) if needed_ids is not None else sorted(selection.ids),
         )

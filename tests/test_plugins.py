@@ -96,14 +96,3 @@ def test_unknown_queue_rejected(config: LyraConfig) -> None:
     raw["plugins"]["installed"][0]["routing"] = {"smoke_table_metric": "unknown"}
     with pytest.raises(ValidationError, match="allowed_queues"):
         type(config).model_validate(raw)
-
-
-def test_old_configuration_fields_are_rejected(config: LyraConfig) -> None:
-    raw = config.model_dump()
-    raw["schema_version"] = 2
-    with pytest.raises(ValidationError):
-        type(config).model_validate(raw)
-    raw["schema_version"] = 3
-    raw["plugins"]["repos"] = []
-    with pytest.raises(ValidationError, match="Extra inputs"):
-        type(config).model_validate(raw)

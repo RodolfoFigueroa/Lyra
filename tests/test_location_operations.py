@@ -28,7 +28,6 @@ from test_support.location_operations import (
     definition,
     select_places,
 )
-from test_support.manifest_graph import build_graph
 from test_support.runtime_inputs import native_inputs
 
 
@@ -112,9 +111,6 @@ def test_operation_only_catalog_and_metric_boundaries(
 ) -> None:
     plugin = definition()
     binding = BoundPlugin(plugin)
-    manifest = plugin.manifest(
-        plugin=PluginInfo(name="places", version="1"), factory="places:create"
-    )
     installed = InstalledPlugin("places", plugin, {})
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
     catalog = registry.Catalog.load(Mock())
@@ -123,7 +119,7 @@ def test_operation_only_catalog_and_metric_boundaries(
     assert (
         catalog.compiled.graph.nodes["select_places"].node.kind == "location_operation"
     )
-    assert build_graph({"places": manifest.nodes}).outputs == {}
+    assert catalog.compiled.graph.outputs == {}
     runner = LocalRunner.from_definitions({"places": plugin})
     with pytest.raises(PreparationError, match="Unknown public metric"):
         runner.run("select_places", inputs={})
@@ -136,6 +132,7 @@ def test_operation_only_catalog_and_metric_boundaries(
             {},
             Mock(),
         )
+    manifest = catalog.compiled.manifests["places"]
     for updates in [{"location_output": None}, {"kind": "metric"}]:
         with pytest.raises(ValidationError):
             PluginManifest.model_validate(

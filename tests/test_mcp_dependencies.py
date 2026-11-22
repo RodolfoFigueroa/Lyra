@@ -1,36 +1,56 @@
 """Direct relationship inspection remains bounded and edition-specific."""
 
 import asyncio
+from collections.abc import Callable
 from unittest.mock import Mock
 
+import geopandas as gpd
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server.mcp.dependencies import inspect_dependencies
 from lyra.server.mcp.models import GetMetricInput
 from lyra.server.mcp.tools import InProcessLyraBackend
-from test_support.accepted_sources import declarations
-from test_support.edition_catalog import edition_manifests
-from test_support.manifest_catalog import compile_catalog
+from test_support.accepted_sources import routed_request
 from test_support.mcp import call_tool
-from test_support.plugin_graph import manifest, node, operation
+from tests.live_graph_helpers import Parameters, plugins
 
 
 def fixture(count: int = 3, *, private: bool = True) -> Discovery:
-    manifests = edition_manifests(count)
-    nodes = manifests["benchmark"].nodes
-    for declaration in nodes:
-        declaration.location_inputs = nodes[0].location_inputs.copy()
-    assert nodes[0].kind == "metric"
-    output = next(iter(nodes[0].outputs))
-    for index, declaration in enumerate(nodes[1:], 1):
-        declaration.inputs = {
-            f"input_{index}": Dependency(producer=nodes[0].name, output=output)
-        }
-    assert nodes[0].kind == "metric"
-    nodes[0].private = private
-    return Discovery(compile_catalog(manifests))
+    @metric(
+        name="measure_0",
+        code_revision="1",
+        description="Base",
+        private=private,
+        outputs={"value": pa.DataFrameSchema(strict=True)},
+    )
+    def base() -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def consumer_factory() -> Callable:
+        def consumer(table: pd.DataFrame) -> pd.DataFrame:
+            return table
+
+        return consumer
+
+    metrics = [
+        metric(
+            name=f"measure_{index}",
+            code_revision="1",
+            description="Consume measurement",
+            inputs={"table": Dependency("value", producer="measure_0")},
+            outputs={"value": pa.DataFrameSchema(strict=True)},
+        )(consumer_factory())
+        for index in range(1, count)
+    ]
+    return Discovery(
+        compile_live_catalog({"metrics": PluginDefinition(metrics=[base, *metrics])})
+    )
 
 
 def test_direct_and_private() -> None:
@@ -41,7 +61,7 @@ def test_direct_and_private() -> None:
     assert edge.direction == "dependency"
     assert edge.producer.private
     assert edge.producer.name == "measure_0"
-    assert edge.consumer_input == "input_1"
+    assert edge.consumer_input == "table"
     assert edge.producer_output is not None
     with pytest.raises(KeyError):
         inspect_dependencies(view, GetMetricInput(metric="measure_0"))
@@ -62,42 +82,60 @@ def test_consumers_empty_and_truncation(count: int) -> None:
 
 def test_declared_operations_and_second_hop() -> None:
 
-    source = node("source")
-    middle = node("middle", inputs={"first": Dependency("source", producer="source")})
-    leaf = node("leaf", spatial={"places"})
-    root = node(
-        "root",
+    definitions = plugins()
+    schema = pa.DataFrameSchema(strict=True)
+
+    @metric(
+        name="upstream",
+        code_revision="1",
+        description="Upstream",
+        outputs={"rows": schema},
+    )
+    def upstream() -> pd.DataFrame:
+        return pd.DataFrame()
+
+    @metric(
+        name="producer",
+        private=True,
+        description="Producer",
+        code_revision="1",
         inputs={
-            "a": Dependency("middle", producer="middle"),
-            "b": Dependency(
-                "leaf",
-                producer="leaf",
-            ).bind(places=LocationDependency("select")),
+            "places": LocationDependency(provider="counties"),
+            "rows": Dependency("rows", producer="upstream"),
         },
+        outputs={"value": schema},
     )
-    view = Discovery(
-        compile_catalog(
-            {"test": manifest("test", source, middle, leaf, root, operation("select"))}
-        )
+    def producer(
+        places: gpd.GeoDataFrame, rows: pd.DataFrame, parameters: Parameters
+    ) -> pd.DataFrame:
+        del places, parameters
+        return rows
+
+    operations = [
+        node.function
+        for node in definitions["upstream"].declarations
+        if node.kind == "location_operation"
+    ]
+    definitions["upstream"] = PluginDefinition(
+        metrics=[upstream, producer], location_operations=operations
     )
-    result = inspect_dependencies(view, GetMetricInput(metric="root"))
-    assert {edge.producer.name for edge in result.relationships} == {
-        "middle",
-        "leaf",
-        "select",
-    }
-    location = next(
-        edge for edge in result.relationships if edge.producer.name == "select"
-    )
-    assert location.producer_output is None
-    assert location.consumer_input == "inputs.b.locations.places"
+    view = Discovery(compile_live_catalog(definitions))
+    result = inspect_dependencies(view, GetMetricInput(metric="consumer"))
+    assert sorted(
+        (edge.producer.name, edge.consumer_input, edge.producer_output)
+        for edge in result.relationships
+    ) == [
+        ("producer", "first", "value"),
+        ("producer", "second", "value"),
+        ("select", "inputs.first.locations.places", None),
+        ("select", "inputs.second.locations.places", None),
+    ]
 
 
 def test_available_routes_are_not_dependencies() -> None:
 
-    metric, source, _, operations = declarations()
-    metric.location_inputs["places"].source_bindings = (source.reference,)
-    view = Discovery(compile_catalog({"test": manifest("test", metric, *operations)}))
+    catalog, _ = routed_request()
+    view = Discovery(catalog)
     assert not inspect_dependencies(view, GetMetricInput(metric="score")).relationships
 
 
@@ -120,25 +158,50 @@ def test_tool_dispatch() -> None:
 
 
 def test_named_outputs_and_registration_order() -> None:
-    producer = node("producer", outputs=("first", "second"))
-    target = node(
-        "target",
+    schema = pa.DataFrameSchema(strict=True)
+
+    @metric(
+        name="producer",
+        code_revision="1",
+        description="Two outputs",
+        outputs={"first": schema, "second": schema},
+    )
+    def producer() -> dict[str, pd.DataFrame]:
+        return {"first": pd.DataFrame(), "second": pd.DataFrame()}
+
+    @metric(
+        name="target",
+        code_revision="1",
+        description="Paired outputs",
         inputs={
             "z": Dependency("first", producer="producer"),
             "a": Dependency("second", producer="producer"),
         },
+        outputs={"target": schema},
     )
-    consumer = node(
-        "consumer", inputs={"value": Dependency("target", producer="target")}
+    def target(z: pd.DataFrame, a: pd.DataFrame) -> pd.DataFrame:
+        return pd.concat([z, a])
+
+    @metric(
+        name="consumer",
+        private=True,
+        code_revision="1",
+        description="Private consumer",
+        inputs={"value": Dependency("target", producer="target")},
+        outputs={"result": schema},
     )
-    consumer.private = True
+    def consumer(value: pd.DataFrame) -> pd.DataFrame:
+        return value
+
     expected = [
         ("dependency", "producer", "second", "target", "a"),
         ("dependency", "producer", "first", "target", "z"),
         ("consumer", "target", "target", "consumer", "value"),
     ]
     for ordered_nodes in ((producer, target, consumer), (consumer, target, producer)):
-        view = Discovery(compile_catalog({"test": manifest("test", *ordered_nodes)}))
+        view = Discovery(
+            compile_live_catalog({"test": PluginDefinition(metrics=ordered_nodes)})
+        )
         result = inspect_dependencies(view, GetMetricInput(metric="target"))
         assert [
             (

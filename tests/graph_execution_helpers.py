@@ -9,14 +9,16 @@ from pydantic import Field, field_validator
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
+from lyra.sdk.locations import LocationProvider
 from lyra.sdk.parameters import MetricParameters
-from test_support.declarations import PluginDefinition
+from lyra.sdk.plugin import PluginDefinition
 
 TABLE = pa.DataFrameSchema({}, strict=True)
 
 
 def executor(
     *handlers: Callable[..., object],
+    resources: dict[str, type[LocationProvider]] | None = None,
 ) -> tuple[GraphExecutor, BoundPlugin]:
     # Separate registrations exercise cross-plugin resolution without imports.
     plugins = {
@@ -24,10 +26,12 @@ def executor(
         for index, handler in enumerate(handlers)
     }
     factory = Mock(side_effect=AssertionError("unexpected context creation"))
-    bindings = {key: BoundPlugin(plugin) for key, plugin in plugins.items()}
+    if resources:
+        plugins["locations"] = PluginDefinition(resources=resources)
+    catalog = LocalRunner.from_definitions(plugins).catalog
     return GraphExecutor(
-        LocalRunner.from_definitions(plugins).catalog, bindings, factory
-    ), bindings["plugin_0"]
+        catalog, catalog.implementations, factory
+    ), catalog.implementations["plugin_0"]
 
 
 class Label(MetricParameters):

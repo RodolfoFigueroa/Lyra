@@ -1,15 +1,13 @@
 """Public input preparation and persistent identity scaling."""
 
+from copy import deepcopy
 from typing import ClassVar
 
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.computation import compile_computation
+from lyra.runtime.planning.graph import PluginGraph
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
-from test_support.accepted_sources import declarations
-from test_support.location_operations import Parameters
-from test_support.manifest_catalog import compile_catalog
-from test_support.manifest_graph import PluginGraph, build_graph
-from test_support.parameter_catalog import with_models
-from test_support.plugin_graph import manifest
+from test_support.accepted_sources import routed_request
 from test_support.preparation_workload import preparation_workload
 from test_support.workloads import workload
 
@@ -49,62 +47,47 @@ class IdentitySuite:
     params: ClassVar[list[int]] = [10, 1000]
 
     def setup_cache(self) -> dict[int, PluginGraph]:
-        """Build metadata graphs once in the ASV cache process.
+        """Compile each live graph once.
 
         Returns:
-            Metadata graphs indexed by node count.
+            Serializable identity inputs indexed by node count.
         """
-        return {
-            nodes: build_graph(
-                {
-                    "benchmark-fixture": workload(
-                        1, "catalog", nodes
-                    ).plugin.node_manifests
-                }
-            )
-            for nodes in self.params
-        }
+        graphs = {}
+        for nodes in self.params:
+            graph = compile_live_catalog(
+                {"benchmark-fixture": workload(1, "catalog", nodes).plugin}
+            ).graph
+            # Edges share node entries. Omit executable handlers throughout the copy.
+            handlers = {
+                id(entry.implementation): None
+                for entry in graph.nodes.values()
+                if entry.implementation is not None
+            }
+            graphs[nodes] = deepcopy(graph, handlers)
+        return graphs
 
     def setup(self, graphs: dict[int, PluginGraph], nodes: int) -> None:
-        """Select a prepared graph outside timing."""
+        """Select the cached graph for this size."""
         self.graph = graphs[nodes]
 
     def time_compile_identity(
         self, _graphs: dict[int, PluginGraph], _nodes: int
     ) -> None:
-        """Compile the production computation and revision identities."""
+        """Compile computation identities over a live graph."""
         compile_computation(self.graph, {})
 
 
 class CatalogPreparationSuite:
     """Measure shared acceptance independently of acquisition and execution."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[str]] = ["native", "routed", "rejected"]
 
     def setup(self, scenario: str) -> None:
         """Compile a two-input catalog before timing acceptance."""
-        node, source, other, operations = declarations()
-        node.location_inputs["places"].source_bindings = (source.reference,)
-        self.catalog = compile_catalog(
-            {"benchmark": manifest("benchmark", node, *operations)}
-        )
-        self.catalog = with_models(
-            self.catalog, {op.name: Parameters for op in operations}
-        )
-        selected = (
-            node.location_inputs["places"].contract if scenario == "native" else source
-        )
-        self.request = {
-            "metric": "score",
-            "inputs": {
-                name: {
-                    "provider": binding.family.collection,
-                    "ids": ["1"],
-                }
-                for name, binding in (("places", selected), ("reference", other))
-            },
-        }
+        self.catalog, self.request = routed_request()
+        if scenario == "native":
+            self.request["inputs"]["places"]["provider"] = "native"
         if scenario == "rejected":
             self.request["metric"] = "missing"
 
@@ -113,9 +96,14 @@ class CatalogPreparationSuite:
 
         Raises:
             PreparationError: If a valid workload is rejected.
+            RuntimeError: If the rejected scenario is accepted.
         """
         try:
             prepare_execution(self.catalog, self.request)
         except PreparationError:
             if scenario != "rejected":
                 raise
+        else:
+            if scenario == "rejected":
+                msg = "Invalid benchmark input was accepted"
+                raise RuntimeError(msg)

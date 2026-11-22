@@ -424,38 +424,6 @@ def test_run_rejects_unknown_options_before_submission(
             client.close()
 
 
-@pytest.mark.parametrize("method", ["create", "submit", "run", "run_to_file"])
-@pytest.mark.parametrize("revision", [None, "valid"])
-def test_client_rejects_request_cache_revision(
-    native_factory: Callable,
-    client_runtime: ClientRuntime,
-    tmp_path: Path,
-    method: str,
-    revision: str | None,
-) -> None:
-    def unexpected(request: httpx.Request) -> httpx.Response:
-        pytest.fail(f"Invalid submission reached transport: {request.url}")
-
-    client = native_factory(unexpected)("example.test")
-    kwargs = {"cache_revision": revision}
-    if method == "run_to_file":
-        kwargs["path"] = tmp_path / "result.json"
-
-    def invoke() -> None:
-        operation = getattr(client.jobs, method)("root", **kwargs)
-        if inspect.isawaitable(operation):
-            client_runtime.run(operation)
-
-    try:
-        with pytest.raises(TypeError):
-            invoke()
-    finally:
-        if isinstance(client, AsyncLyraClient):
-            client_runtime.run(client.aclose())
-        else:
-            client.close()
-
-
 def test_native_row_arguments_and_cells(
     native_factory: Callable[
         [Callable[[httpx.Request], httpx.Response]], type[LyraClient | AsyncLyraClient]

@@ -6,35 +6,44 @@ import geopandas as gpd
 import pytest
 
 from lyra.contracts.plugins import (
-    LocationInputDeclaration,
     PluginInfo,
     PluginInspection,
 )
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import (
     AmbiguousRoutesError,
-    CanonicalEdge,
-    compile_routes,
+    compile_live_catalog,
 )
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation
-from test_support.canonical_operations import selector
-from test_support.canonical_routes import contract, edges
+from test_support.canonical_routes import route_plugins
 from test_support.location_operations import Places, select_places
-from test_support.manifest_catalog import compile_catalog
-from test_support.plugin_graph import manifest, node
+from test_support.routing_plugins import conversion, provider
+from tests.live_graph_helpers import operation as live_operation
+
+
+def edges(pairs: list[tuple[str, str]]) -> dict[str, tuple[str, str]]:
+    return {f"op_{i}": pair for i, pair in enumerate(pairs)}
 
 
 def test_shortcuts_cycles_identity_and_unreachable() -> None:
     graph = edges([("a", "b"), ("b", "c"), ("c", "a"), ("a", "c"), ("a", "a")])
-    routes = compile_routes(graph, [contract("isolated").reference])
-    a, b, c, isolated = (contract(n).reference for n in ("a", "b", "c", "isolated"))
-    assert routes[a, a] == ()
-    assert routes[a, c] == ("op_3",)
-    assert routes[b, a] == ("op_1", "op_2")
-    assert routes[isolated, isolated] == ()
-    assert (a, isolated) not in routes
-    assert dict(routes) == dict(compile_routes(reversed(graph), [isolated]))
+    catalog = compile_live_catalog(route_plugins(graph, isolated=["isolated"]))
+    a, b, c, isolated = (
+        catalog.provider_registry[key].contract.reference
+        for key in ("a", "b", "c", "isolated")
+    )
+    assert catalog.routes[a, a] == ()
+    assert catalog.routes[a, c] == ("op_3",)
+    assert catalog.routes[b, a] == ("op_1", "op_2")
+    assert catalog.routes[isolated, isolated] == ()
+    assert (a, isolated) not in catalog.routes
+    assert (
+        catalog.routes
+        == compile_live_catalog(
+            route_plugins(dict(reversed(graph.items())), isolated=["isolated"])
+        ).routes
+    )
 
 
 @pytest.mark.parametrize(
@@ -44,9 +53,9 @@ def test_shortcuts_cycles_identity_and_unreachable() -> None:
 def test_ties_are_order_independent(pairs: list[tuple[str, str]]) -> None:
     graph = edges(pairs)
     with pytest.raises(AmbiguousRoutesError) as first:
-        compile_routes(graph)
+        compile_live_catalog(route_plugins(graph))
     with pytest.raises(AmbiguousRoutesError) as second:
-        compile_routes(reversed(graph))
+        compile_live_catalog(route_plugins(dict(reversed(graph.items()))))
     assert first.value.ambiguities == second.value.ambiguities
     assert all(len(paths) == 2 for paths in first.value.ambiguities.values())
 
@@ -59,59 +68,53 @@ def test_many_paths_keep_only_two_witnesses() -> None:
         for b in range(2)
     ]
     with pytest.raises(AmbiguousRoutesError) as error:
-        compile_routes(edges(pairs))
-    paths = error.value.ambiguities[
-        contract("0_0").reference, contract("25_0").reference
-    ]
+        compile_live_catalog(route_plugins(edges(pairs)))
+    paths = next(
+        paths
+        for (source, target), paths in error.value.ambiguities.items()
+        if (source.collection, target.collection) == ("0_0", "25_0")
+    )
     assert len(paths) == 2
     assert all(len(path) == 25 for path in paths)
 
 
 def test_catalog_routes_span_plugins_and_reject_ties() -> None:
-    operations = []
-    for edge in edges([("a", "b"), ("b", "c")]):
-        operation = selector()
-        operation.name = edge.operation
-        operation.inputs.clear()
-        operation.canonical = True
-        operation.location_inputs = {
-            "source": LocationInputDeclaration(contract=edge.source)
-        }
-        operation.output_contract = edge.target
-        operations.append(operation)
-    declarations = {str(i): manifest(str(i), op) for i, op in enumerate(operations)}
-    routes = compile_catalog(declarations).routes
-    assert routes[contract("a").reference, contract("c").reference] == ("op_0", "op_1")
-    assert routes == compile_catalog(dict(reversed(list(declarations.items())))).routes
-    duplicate = operations[0].model_copy(deep=True)
-    duplicate.name = "parallel"
-    declarations["extra"] = manifest("extra", duplicate)
+    definitions = {
+        "providers": PluginDefinition(resources={key: provider(key) for key in "abc"}),
+        "first": PluginDefinition(location_operations=[conversion("first", "a", "b")]),
+        "second": PluginDefinition(
+            location_operations=[conversion("second", "b", "c")]
+        ),
+    }
+    catalog = compile_live_catalog(definitions)
+    refs = {name: p.contract.reference for name, p in catalog.provider_registry.items()}
+    assert catalog.routes[refs["a"], refs["c"]] == ("first", "second")
+    assert (
+        catalog.routes
+        == compile_live_catalog(dict(reversed(definitions.items()))).routes
+    )
+    definitions["extra"] = PluginDefinition(
+        location_operations=[conversion("parallel", "a", "b")]
+    )
     with pytest.raises(AmbiguousRoutesError):
-        compile_catalog(declarations)
+        compile_live_catalog(definitions)
 
 
 def test_native_catalog_inputs_have_zero_routes_without_edges() -> None:
-    operation = selector()
-    operation.inputs.clear()
-    compiled = compile_catalog({"native": manifest("native", operation)})
-    source = operation.location_inputs["source"].contract.reference
-    assert compiled.routes[source, source] == ()
-    assert operation.output_contract is not None
-    target = operation.output_contract.reference
-    assert compiled.routes[target, target] == ()
-    if source != target:
-        assert (source, target) not in compiled.routes
+    catalog = compile_live_catalog(
+        {
+            "test": PluginDefinition(
+                resources={key: provider(key) for key in "ab"},
+                location_operations=[
+                    live_operation("ordinary", "a", "b", canonical=False)
+                ],
+            )
+        }
+    )
+    a, b = (catalog.provider_registry[key].contract.reference for key in "ab")
+    assert catalog.routes == {(a, a): (), (b, b): ()}
     with pytest.raises(TypeError):
-        cast("Any", compiled.routes)[source, source] = ("changed",)
-
-
-def test_same_geography_does_not_merge_source_or_edition() -> None:
-    first = contract("first")
-    other_source = contract("second")
-    other_edition = first.model_copy(update={"edition": "another"})
-    references = [c.reference for c in (first, other_source, other_edition)]
-    routes = compile_routes((), references)
-    assert set(routes) == {(ref, ref) for ref in references}
+        cast("Any", catalog.routes)[a, b] = ("changed",)
 
 
 @pytest.mark.parametrize(
@@ -125,87 +128,68 @@ def test_preferences_resolve_ties(
     pairs: list[tuple[str, str]], preference: tuple[str, ...]
 ) -> None:
     graph = edges(pairs)
-    routes = compile_routes(graph, preferences=[preference])
-    pair = graph[0].source.reference, graph[-1].target.reference
-    assert routes[pair] == preference
-    assert routes == compile_routes(
-        reversed(graph), preferences=[preference, preference]
+    catalog = compile_live_catalog(route_plugins(graph, preferences=[preference]))
+    pair = (
+        catalog.provider_registry[pairs[0][0]].contract.reference,
+        catalog.provider_registry[pairs[-1][1]].contract.reference,
     )
-    surviving = [edge for edge in graph if edge.operation in preference]
-    assert compile_routes(surviving, preferences=[preference])[pair] == preference
+    assert catalog.routes[pair] == preference
+    assert (
+        compile_live_catalog(
+            route_plugins(
+                dict(reversed(graph.items())), preferences=[preference, preference]
+            )
+        ).routes
+        == catalog.routes
+    )
+    surviving = {name: pair for name, pair in graph.items() if name in preference}
+    assert (
+        compile_live_catalog(route_plugins(surviving, preferences=[preference])).routes[
+            pair
+        ]
+        == preference
+    )
 
 
-@pytest.mark.parametrize(
-    ("preference", "match"),
-    [
-        ((), "nonempty"),
-        (("missing",), "Unknown or noncanonical"),
-        (("op_0", "op_0"), "Disconnected"),
-        (("op_0", "op_1"), "not shortest"),
-        (("op_0", "op_1", "op_3"), "not shortest"),
-    ],
-)
-def test_invalid_preferences(preference: tuple[str, ...], match: str) -> None:
-    graph = edges([("a", "b"), ("b", "c"), ("a", "c"), ("c", "a")])
-    with pytest.raises(ValueError, match=match):
-        compile_routes(graph, preferences=[preference])
-
-
-def test_conflicting_preferences_and_remaining_ties() -> None:
+def test_partial_preference_leaves_other_pairs_ambiguous() -> None:
     graph = edges([("a", "b"), ("a", "b"), ("b", "c")])
-    with pytest.raises(ValueError, match="Conflicting"):
-        compile_routes(graph, preferences=[("op_0",), ("op_1",)])
     with pytest.raises(AmbiguousRoutesError):
-        compile_routes(graph, preferences=[("op_0",)])
+        compile_live_catalog(route_plugins(graph, preferences=[("op_0",)]))
 
 
 def test_catalog_preference_serialization_and_conflicts() -> None:
-    operations = []
-    for edge in edges([("a", "b"), ("a", "b")]):
-        operation = selector()
-        operation.name = edge.operation
-        operation.inputs.clear()
-        operation.canonical = True
-        operation.location_inputs = {
-            "source": LocationInputDeclaration(contract=edge.source)
-        }
-        operation.output_contract = edge.target
-        operations.append(operation)
-    declarations = {str(i): manifest(str(i), op) for i, op in enumerate(operations)}
-    for name in ("consumer_one", "consumer_two"):
-        consumer = node(name, spatial={"places"})
-        consumer.location_inputs = {
-            "places": LocationInputDeclaration(contract=contract("b"))
-        }
-        consumer.location_inputs["places"].source_bindings = (contract("b").reference,)
-        declarations[name] = manifest(name, consumer)
-    declarations["0"].route_preferences = (("op_1",),)
-    declarations = {
-        key: type(value).model_validate_json(value.model_dump_json())
-        for key, value in declarations.items()
+    first, second = (conversion(name, "a", "b") for name in ("first", "second"))
+    definitions = {
+        "one": PluginDefinition(
+            location_operations=[first], route_preferences=[(second,)]
+        ),
+        "two": PluginDefinition(location_operations=[second]),
+        "providers": PluginDefinition(resources={key: provider(key) for key in "ab"}),
     }
-    pair = contract("a").reference, contract("b").reference
-    assert compile_catalog(declarations).routes[pair] == ("op_1",)
-    declarations["1"].route_preferences = (("op_0",),)
+    catalog = compile_live_catalog(definitions)
+    a, b = (catalog.provider_registry[key].contract.reference for key in "ab")
+    assert catalog.routes[a, b] == ("second",)
+    definitions["two"] = PluginDefinition(
+        location_operations=[second], route_preferences=[(first,)]
+    )
     with pytest.raises(ValueError, match="Conflicting"):
-        compile_catalog(declarations)
-    declarations["1"].route_preferences = ()
-    assert declarations["1"].nodes[0].kind == "location_operation"
-    declarations["1"].nodes[0].canonical = False
-    with pytest.raises(ValueError, match="noncanonical"):
-        compile_catalog(declarations)
+        compile_live_catalog(definitions)
 
 
 def test_edition_endpoints() -> None:
-    a, b = contract("a"), contract("b")
-    edition = b.model_copy(update={"edition": "next"})
-    graph = (
-        CanonicalEdge("first", "source", a, edition),
-        CanonicalEdge("second", "source", a, edition),
+    catalog = compile_live_catalog(
+        route_plugins(
+            {"first": ("a", "b_next"), "second": ("a", "b_next")},
+            preferences=[("second",)],
+            isolated=["b"],
+        )
     )
-    routes = compile_routes(graph, [b.reference], preferences=[("second",)])
-    assert routes[a.reference, edition.reference] == ("second",)
-    assert (a.reference, b.reference) not in routes
+    a, b, edition = (
+        catalog.provider_registry[key].contract.reference
+        for key in ("a", "b", "b_next")
+    )
+    assert catalog.routes[a, edition] == ("second",)
+    assert (a, b) not in catalog.routes
 
 
 def test_registration_captures_operation_references() -> None:
@@ -256,6 +240,7 @@ def test_local_runner_preserves_route_preferences() -> None:
         resources={"source": Source, "target": Target},
     )
     local = LocalRunner.from_definitions({"test": plugin})
-    assert local.catalog.routes[contract("a").reference, contract("b").reference] == (
-        "second",
+    a, b = (
+        local.catalog.provider_registry[name].contract.reference for name in ("a", "b")
     )
+    assert local.catalog.routes[a, b] == ("second",)

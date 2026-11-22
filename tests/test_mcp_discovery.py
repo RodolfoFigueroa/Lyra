@@ -5,17 +5,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from lyra.runtime.planning.discovery import Discovery
 from lyra.server.mcp.tools import InProcessLyraBackend
-from test_support.edition_catalog import edition_manifests
-from test_support.manifest_catalog import compile_catalog
+from test_support.edition_catalog import discovery
 from test_support.mcp import call_tool
 
 
 @pytest.mark.parametrize("count", [1, 2])
 def test_direct_metric_dispatch(count: int) -> None:
-    manifests = edition_manifests(count)
-    view = Discovery(compile_catalog(manifests))
+    view = discovery(count)
     backend = InProcessLyraBackend(lambda: Mock(catalog=Mock(discovery=view)))
 
     def call(name: str, **arguments: str) -> dict:
@@ -35,9 +32,7 @@ def test_direct_metric_dispatch(count: int) -> None:
         assert call("lyra_get_metric", metric=name) == view.inspect(name).model_dump(
             mode="json"
         )
-    assert manifests["benchmark"].nodes[0].kind == "metric"
-    manifests["benchmark"].nodes[0].private = True
-    view = Discovery(compile_catalog(manifests))
+    view = discovery(count, private=0)
     assert call("lyra_list_metrics")["total_count"] == count - 1
     for arguments in (
         {"metric": "measure_0"},

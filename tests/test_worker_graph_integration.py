@@ -19,10 +19,11 @@ from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, LocationDependency
-from lyra.sdk.plugin import metric
+from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
 from lyra.server import job_store, job_submission, registry, worker
 from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError
@@ -30,7 +31,6 @@ from lyra.server.plugins import InstalledPlugin
 from lyra.server.routes.metrics import get_metric
 from test_support.canonical_execution import canonical_workload
 from test_support.location_resolution import Provider, selection
-from test_support.manifest_catalog import compile_catalog
 from test_support.worker_workloads import canonical_worker_entry
 from tests.config_helpers import load_test_config
 from tests.provider_execution_helpers import provider_execution_definitions
@@ -691,20 +691,23 @@ def test_serialized_worker_plan(
 
     calls = []
 
-    @metric(
-        cache="full",
-        code_revision="1",
-        name="root",
-        description="Root",
-        outputs={"answer": VALUES},
-    )
-    def root() -> pd.DataFrame:
-        calls.append("root")
-        if change == "failure":
-            raise RuntimeError
-        return pd.DataFrame({"value": [7]})
+    def root_metric(*, nullable: bool = False) -> "Callable":
+        @metric(
+            cache="full",
+            code_revision="1",
+            name="root",
+            description="Root",
+            outputs={"answer": VALUES.update_column("value", nullable=nullable)},
+        )
+        def root() -> pd.DataFrame:
+            calls.append("root")
+            if change == "failure":
+                raise RuntimeError
+            return pd.DataFrame({"value": [7]})
 
-    _, runtime = install(tmp_path, monkeypatch, [root])
+        return root
+
+    _, runtime = install(tmp_path, monkeypatch, [root_metric()])
     runtime.config.result_store_path = tmp_path / "cache"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     enqueue = Mock()
@@ -726,17 +729,28 @@ def test_serialized_worker_plan(
     native.args = (envelope.model_dump(mode="json"),)
     if change == "contract":
         entry = worker.RUNNER_REGISTRY["root"]
-        assert entry.contract.kind == "metric"
-        entry.contract.outputs["answer"].meaning = "changed"
-        worker.RUNNER_REGISTRY["root"] = replace(
-            entry, catalog=compile_catalog(entry.catalog.manifests)
+        catalog = compile_live_catalog(
+            {entry.distribution: PluginDefinition(metrics=[root_metric(nullable=True)])}
         )
+        prepare_execution(
+            catalog,
+            payload.request.submission_payload(),
+            normalized_uses=payload.parameter_uses,
+        )
+        worker.RUNNER_REGISTRY["root"] = replace(entry, catalog=catalog)
     elif change == "missing":
         worker.RUNNER_REGISTRY["root"].implementations.clear()
     if change is not None:
-        with pytest.raises((ValueError, GraphExecutionError)):
+        with pytest.raises(
+            (ValueError, GraphExecutionError),
+            match="Implementation differs from live declaration: root"
+            if change == "contract"
+            else None,
+        ):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert "failure" in native.meta
+        if change == "contract":
+            assert native.meta["failure"]["error"]["type"] == "bound_plan"
         assert native.args[0]["accepted"]["plan"] == payload.model_dump(mode="json")
         assert calls == (["root"] if change == "failure" else [])
         return
@@ -799,35 +813,8 @@ def test_worker_normalized_route(
     (envelope,) = jobs.enqueue.call_args.args
     native.args = (envelope.model_dump(mode="json"),)
     if changed:
-        operation = entry.graph.nodes["select"].node
-        assert operation.kind == "location_operation"
-        assert operation.output_contract is not None
-        assert operation.kind == "location_operation"
-        reference = operation.output_contract.reference
-        for node in entry.graph.nodes.values():
-            for contract in (
-                *(item.contract for item in node.node.location_inputs.values()),
-                *(
-                    (node.node.output_contract,)
-                    if node.node.kind == "location_operation"
-                    else ()
-                ),
-            ):
-                if contract.reference == reference:
-                    contract.data_revision = "new"
-        for provider in entry.catalog.providers.values():
-            if provider.declaration.contract.reference == reference:
-                provider.declaration.contract.data_revision = "new"
-        descriptions = dict(entry.catalog.manifests)
-        for owner, description in descriptions.items():
-            description.nodes = [
-                node.node.model_copy(deep=True)
-                for node in entry.graph.nodes.values()
-                if node.distribution == owner
-            ]
-        worker.RUNNER_REGISTRY["two"] = replace(
-            entry, catalog=compile_catalog(descriptions)
-        )
+        revised = canonical_workload("routed", 2, 2, revision="target")
+        worker.RUNNER_REGISTRY["two"] = canonical_worker_entry(revised)
         with pytest.raises((ValueError, GraphExecutionError)):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert "failure" in native.meta

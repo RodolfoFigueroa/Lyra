@@ -14,19 +14,27 @@ from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.bindings import BoundLocation, bind_resolved
 from lyra.runtime.planning.parameters import prepare_parameter_uses
 from lyra.runtime.sqlite_store import Header, SQLiteStore
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
-from test_support.declarations import metric
+from lyra.sdk.plugin import metric
 from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
     scoped_payload,
 )
-from test_support.plugin_graph import graph, node
-from test_support.runtime_inputs import assert_records, native_inputs
+from test_support.routing_plugins import provider
+from test_support.runtime_inputs import assert_records
 from tests.frame_assertions import assert_logical_equal
-from tests.graph_arguments_helpers import Consumer, Producer, geometry, plugin
+from tests.graph_arguments_helpers import (
+    Consumer,
+    Producer,
+    geometry,
+    location_edge,
+    plugin,
+    scoped_frame,
+    scoped_inputs,
+)
 from tests.graph_execution_helpers import TABLE, executor
 from tests.sqlite_helpers import database
 
@@ -63,12 +71,12 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
         case "parameters":
             parameters = Producer(year=1990)
     before = PreparedResolvedInvocation(
-        "source", Producer(), native_inputs({"location": first})
+        "source", Producer(), scoped_inputs({"location": first})
     )
     after = PreparedResolvedInvocation(
         "source",
         parameters,
-        native_inputs(
+        scoped_inputs(
             {
                 "location": records(
                     scoped_payload(payload), schema=output_schema(label=str)
@@ -84,7 +92,7 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
         == PreparedResolvedInvocation(
             "source",
             Producer(),
-            native_inputs(
+            scoped_inputs(
                 {"location": records(raw_records(), schema=output_schema(label=str))}
             ),
         ).identity
@@ -98,7 +106,7 @@ def test_scoped_preparation_rejects_unscoped_and_missing_inputs() -> None:
     with pytest.raises(MetricInputError, match="location"):
         implementation.prepare_resolved_invocation(
             "producer",
-            native_inputs(
+            scoped_inputs(
                 {
                     "location": {
                         k: v for k, v in geometry().items() if k != "collection"
@@ -109,7 +117,7 @@ def test_scoped_preparation_rejects_unscoped_and_missing_inputs() -> None:
         )
     with pytest.raises(MetricInputError, match="expected fields"):
         implementation.prepare_resolved_invocation(
-            "producer", native_inputs({"location": resolved()})
+            "producer", scoped_inputs({"location": resolved()})
         )
 
 
@@ -120,18 +128,27 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     received: list[tuple[gpd.GeoDataFrame, int]] = []
     free_calls: list[str] = []
 
-    @metric(code_revision="1", name="free", description="Free", outputs={"free": TABLE})
+    @metric(
+        cache="full",
+        code_revision="1",
+        name="free",
+        description="Free",
+        outputs={"free": TABLE},
+    )
     def free() -> pd.DataFrame:
         free_calls.append("free")
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
-        locations={"location": node_contract("example:areas", "block")},
+        inputs={
+            "location": LocationDependency(provider="example:areas_block"),
+            "support": Dependency("free", producer="free"),
+        },
         name="source",
         description="Source",
         outputs={"source": TABLE},
-        inputs={"support": Dependency("free", producer="free")},
     )
     def source(
         location: gpd.GeoDataFrame, parameters: Producer, support: pd.DataFrame
@@ -142,15 +159,11 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return support
 
     @metric(
+        cache="full",
         code_revision="1",
-        locations={
-            "lots": node_contract("example:areas", "block"),
-            "ignored": node_contract("example:areas", "block"),
-        },
-        name="middle",
-        description="Middle",
-        outputs={"middle": TABLE},
         inputs={
+            "lots": LocationDependency(provider="example:areas_block"),
+            "ignored": LocationDependency(provider="example:areas_block"),
             "data": Dependency("source", producer="source").bind(
                 location=Input("lots")
             ),
@@ -158,6 +171,9 @@ def test_bindings_retain_scope_through_chain_and_reuse(
                 location=Input("ignored")
             ),
         },
+        name="middle",
+        description="Middle",
+        outputs={"middle": TABLE},
     )
     def middle(
         lots: gpd.GeoDataFrame,
@@ -173,12 +189,15 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return data
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source_lot",
         description="Lot source",
         outputs={"source_lot": TABLE},
-        locations={"location": node_contract("example:areas", "lot")},
-        inputs={"support": Dependency("free", producer="free")},
+        inputs={
+            "location": LocationDependency(provider="example:areas_lot"),
+            "support": Dependency("free", producer="free"),
+        },
     )
     def source_lot(
         location: gpd.GeoDataFrame, parameters: Producer, support: pd.DataFrame
@@ -186,22 +205,20 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return source(location, parameters, support)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="middle_other",
         description="Mixed inputs",
         outputs={"middle_other": TABLE},
-        locations={
-            "lots": node_contract("example:areas", "block"),
-            "ignored": node_contract("example:areas", "lot"),
-        },
         inputs={
+            "lots": LocationDependency(provider="example:areas_block"),
+            "ignored": LocationDependency(provider="example:areas_lot"),
             "data": Dependency("source", producer="source").bind(
                 location=Input("lots")
             ),
-            "other": Dependency(
-                "source_lot",
-                producer="source_lot",
-            ).bind(location=Input("ignored")),
+            "other": Dependency("source_lot", producer="source_lot").bind(
+                location=Input("ignored")
+            ),
         },
     )
     def middle_other(
@@ -214,15 +231,11 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return middle(lots, ignored, parameters, data, other)
 
     @metric(
+        cache="full",
         code_revision="1",
-        locations={
-            "blocks": node_contract("example:areas", "block"),
-            "different": node_contract("example:areas", "lot"),
-        },
-        name="root",
-        description="Root",
-        outputs={"root": TABLE},
         inputs={
+            "blocks": LocationDependency(provider="example:areas_block"),
+            "different": LocationDependency(provider="example:areas_lot"),
             "a": Dependency(
                 "middle",
                 parameters={
@@ -233,13 +246,13 @@ def test_bindings_retain_scope_through_chain_and_reuse(
             ).bind(lots=Input("blocks"), ignored=Input("blocks")),
             "b": Dependency(
                 "middle_other",
-                parameters={
-                    "year": Input("parameters.baseline"),
-                    "unrelated": "b",
-                },
+                parameters={"year": Input("parameters.baseline"), "unrelated": "b"},
                 producer="middle_other",
             ).bind(lots=Input("blocks"), ignored=Input("different")),
         },
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
     )
     def root(
         *,
@@ -256,7 +269,15 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return a
 
     runner, implementation = executor(
-        root, middle, source, free, middle_other, source_lot
+        root,
+        middle,
+        source,
+        free,
+        middle_other,
+        source_lot,
+        resources={
+            key: provider(key) for key in ("example:areas_block", "example:areas_lot")
+        },
     )
     if persistent:
         runner.store = SQLiteStore(tmp_path / "values.sqlite")
@@ -271,7 +292,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         "parameters": {},
     }
     invocation = implementation.prepare_resolved_invocation(
-        "root", native_inputs(inputs)
+        "root", scoped_inputs(inputs)
     )
     edge = runner.graph.dependencies["root"]["a"]
     middle_input = prepare_dependency(invocation, edge, runner.plugins["plugin_1"])
@@ -294,7 +315,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     # Root and middle miss cache on consumer-only data; source inputs stay equal.
     inputs["parameters"] = {"unrelated": "next job"}
     runner.execute(
-        implementation.prepare_resolved_invocation("root", native_inputs(inputs))
+        implementation.prepare_resolved_invocation("root", scoped_inputs(inputs))
     )
     assert len(received) == (2 if persistent else 4)
     assert len(free_calls) == (1 if persistent else 2)
@@ -328,8 +349,11 @@ def test_bindings_retain_scope_through_chain_and_reuse(
 
 def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
     @metric(
+        cache="full",
         code_revision="1",
-        locations={"location": node_contract("example:areas", "block")},
+        inputs={
+            "location": LocationDependency(provider="example:areas_block"),
+        },
         name="source",
         description="Source",
         outputs={"source": TABLE},
@@ -340,21 +364,26 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
-        locations={"location": node_contract("example:areas", "block")},
+        inputs={
+            "location": LocationDependency(provider="example:areas_block"),
+            "data": Dependency("source", producer="source"),
+        },
         name="root",
         description="Root",
         outputs={"root": TABLE},
-        inputs={"data": Dependency("source", producer="source")},
     )
     def root(location: gpd.GeoDataFrame, data: pd.DataFrame) -> pd.DataFrame:
         assert isinstance(location, gpd.GeoDataFrame)
         return data
 
-    runner, implementation = executor(root, source)
+    runner, implementation = executor(
+        root, source, resources={"example:areas_block": provider("example:areas_block")}
+    )
     location = resolved()
     invocation = implementation.prepare_resolved_invocation(
-        "root", native_inputs({"location": location})
+        "root", scoped_inputs({"location": location})
     )
     prepared = prepare_dependency(
         invocation,
@@ -367,19 +396,6 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
 
 
 def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> None:
-    registry = graph(
-        node(
-            "consumer",
-            spatial={"location", "bounds", "alias"},
-            inputs={
-                "data": Dependency(
-                    "producer",
-                    producer="producer",
-                ).bind(location=Input("alias"))
-            },
-        ),
-        node("producer", spatial={"location", "bounds"}),
-    )
     selected = resolved()
     other = records(
         raw_records() | {"collection": "other:areas"},
@@ -388,21 +404,21 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
     consumer = PreparedResolvedInvocation(
         "consumer",
         None,
-        native_inputs({"location": other, "bounds": selected, "alias": selected}),
+        scoped_inputs({"location": other, "bounds": selected, "alias": selected}),
     )
     implementation = plugin(
         None, spatial=True, location_contract=node_contract("example:areas", "block")
     )
-    edge = registry.dependencies["consumer"]["data"]
+    edge = location_edge(alias=True, contract=node_contract("example:areas", "block"))
     prepared = prepare_dependency(consumer, edge, implementation)
     direct = implementation.prepare_resolved_invocation(
-        "producer", native_inputs({"location": selected, "bounds": selected})
+        "producer", scoped_inputs({"location": selected, "bounds": selected})
     )
     assert prepared.identity == direct.identity
     assert_records(prepared.locations["location"], selected)
     assert_records(consumer.locations["location"], other)
     missing = PreparedResolvedInvocation(
-        "consumer", None, native_inputs({"location": other, "bounds": selected})
+        "consumer", None, scoped_inputs({"location": other, "bounds": selected})
     )
     with pytest.raises(MetricInputError, match="missing spatial input") as error:
         prepare_dependency(missing, edge, implementation)
@@ -420,10 +436,8 @@ def raw_records() -> dict:
 
 def records(payload: dict, *, schema: LocationOutputSchema) -> NativeLocationInput:
     frame = fixture_locations(payload, schema=schema)
-    return NativeLocationInput(
-        frame,
-        node_contract(payload["collection"], payload["unit_type"]).reference,
-        "id",
+    return scoped_frame(
+        frame, node_contract(payload["collection"], payload["unit_type"])
     )
 
 

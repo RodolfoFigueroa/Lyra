@@ -1,25 +1,28 @@
-"""Reusable canonical routes fixtures."""
+"""Register canonical conversions and preferences for routing workloads."""
 
-from lyra.contracts.locations import LocationContract
-from lyra.runtime.planning.catalog import (
-    CanonicalEdge,
-)
-from test_support.canonical_operations import selector
+from collections.abc import Iterable, Mapping, Sequence
 
-
-def contract(name: str) -> LocationContract:
-    result = selector().location_inputs["source"].contract.model_copy(deep=True)
-    result.family = result.family.model_copy(update={"collection": name})
-    result.source = name
-    assert result.provider_scope is not None
-    result.provider_scope = result.provider_scope.model_copy(
-        update={"provider_id": name}
-    )
-    return result
+from lyra.sdk.plugin import PluginDefinition
+from test_support.routing_plugins import conversion, provider
 
 
-def edges(pairs: list[tuple[str, str]]) -> tuple[CanonicalEdge, ...]:
-    return tuple(
-        CanonicalEdge(f"op_{i}", "source", contract(a), contract(b))
-        for i, (a, b) in enumerate(pairs)
-    )
+def route_plugins(
+    edges: Mapping[str, tuple[str, str]],
+    *,
+    preferences: Iterable[Sequence[str]] = (),
+    isolated: Sequence[str] = (),
+) -> dict[str, PluginDefinition]:
+    providers = {name for pair in edges.values() for name in pair}.union(isolated)
+    operations = {
+        name: conversion(name, source, target)
+        for name, (source, target) in edges.items()
+    }
+    return {
+        "routes": PluginDefinition(
+            resources={name: provider(name) for name in sorted(providers)},
+            location_operations=list(operations.values()),
+            route_preferences=[
+                tuple(operations[name] for name in route) for route in preferences
+            ],
+        )
+    }

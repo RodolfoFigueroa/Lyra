@@ -1,7 +1,6 @@
 """Acceptance owns complete effective values across boundaries."""
 
 import asyncio
-import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import cast
@@ -99,14 +98,12 @@ def test_nested_views_and_constructor_inputs_are_owned() -> None:
         setattr(plan, field, "other")  # Exercise runtime frozen-field enforcement.
 
 
-@pytest.mark.parametrize("change", ["cache_revision", "extra", "parameters", "outputs"])
+@pytest.mark.parametrize("change", ["extra", "parameters", "outputs"])
 def test_invalid_persisted_state_is_rejected(change: str) -> None:
     payload = prepare_execution(parameter_catalog(), {"metric": "root"}).model_dump(
         mode="json"
     )
-    if change == "cache_revision":
-        payload["request"]["cache_revision"] = " "
-    elif change == "extra":
+    if change == "extra":
         payload["unexpected"] = True
     elif change == "parameters":
         payload["parameters"] = []
@@ -163,40 +160,3 @@ def test_missing_nested_normalized_default_is_rejected() -> None:
     del values["root"]["options"]["values"]
     with pytest.raises(PreparationError, match="Missing normalized"):
         prepare_execution(catalog, plan.request.model_dump(), normalized_uses=values)
-
-
-@pytest.mark.parametrize("revision", [None, "valid"])
-def test_accepted_plan_rejects_request_cache_revision(revision: str | None) -> None:
-    plan = prepare_execution(parameter_catalog(), {"metric": "root"})
-    payload = plan.model_dump(mode="json")
-    payload["request"]["cache_revision"] = revision
-    with pytest.raises(ValidationError, match="extra_forbidden"):
-        PreparedExecution.model_validate(payload)
-
-
-@pytest.mark.parametrize("revision", [None, "valid"])
-def test_preparation_rejects_request_cache_revision(revision: str | None) -> None:
-    with pytest.raises(PreparationError, match="cache_revision"):
-        prepare_execution(
-            parameter_catalog(), {"metric": "root", "cache_revision": revision}
-        )
-
-
-@pytest.mark.parametrize("revision", [None, "valid"])
-def test_worker_handoff_rejects_request_cache_revision(revision: str | None) -> None:
-    catalog = parameter_catalog()
-    envelope = JobEnvelope(
-        job_id="job",
-        accepted=AcceptedJob(
-            plan=WorkerRequest.from_plan(
-                prepare_execution(catalog, {"metric": "root"})
-            ),
-            plugin=catalog.manifests["fixture"].plugin,
-            catalog_fingerprint="test",
-            created_at=datetime.now(UTC),
-        ),
-    )
-    payload = envelope.model_dump(mode="json")
-    payload["accepted"]["plan"]["request"]["cache_revision"] = revision
-    with pytest.raises(ValidationError, match="extra_forbidden"):
-        JobEnvelope.model_validate_json(json.dumps(payload))

@@ -9,15 +9,19 @@ from datetime import UTC, datetime
 from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, create_autospec
 from urllib.parse import quote
 
+import geopandas as gpd
 import httpx
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 from fastapi import Request
 from jsonschema import validate
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from pydantic import Field
 from redis.exceptions import ConnectionError as RedisConnectionError
 from rq.job import JobStatus
 from starlette.applications import Starlette
@@ -38,20 +42,19 @@ from lyra.contracts.jobs import (
     ResultLifetime,
     TableJobResult,
 )
-from lyra.contracts.locations import LocationSelection
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
-from lyra.contracts.plugins import (
-    LocationInputDeclaration,
-    MetricManifest,
-    PluginManifest,
-)
 from lyra.contracts.types import (
     JsonObject,
     JsonValue,
     validate_json_object,
     validate_json_value,
 )
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
+from lyra.sdk.dependencies import LocationDependency
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition
+from lyra.sdk.plugin import metric as declare_metric
 from lyra.server import main
 from lyra.server.job_store import InvalidJobResultError, JobObservation
 from lyra.server.mcp import SERVER_INSTRUCTIONS, tools
@@ -65,18 +68,14 @@ from lyra.server.mcp.models import (
     SearchMetricsInput,
 )
 from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError
+from lyra.server.plugins import InstalledPlugin
 from lyra.server.results import ResultService
 from lyra.server.runtime import get_runtime
-from test_support.location_helpers import node_contract
-from test_support.location_resolution import SELECTED, selection
-from test_support.manifest_catalog import compile_catalog
+from test_support.location_operations import Places
+from test_support.location_resolution import Provider, selection
 from test_support.mcp import call_tool
 from tests.config_helpers import api_credentials, load_test_config
-from tests.contract_helpers import (
-    NestedDefaultParameters,
-    metric_manifest,
-    plugin_manifest,
-)
+from tests.contract_helpers import NestedDefaultParameters
 from tests.mcp_helpers import (
     ManagedTestClient,
     mcp_headers,
@@ -98,7 +97,7 @@ create_mcp_app = partial(
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from lyra.contracts.config import LyraConfig
@@ -201,7 +200,7 @@ class FakeMCPBackend:
         self.observed.append(result_ref)
         raise ResultNotFoundError(result_ref)
 
-    def __init__(self, metrics: list[MetricManifest]) -> None:
+    def __init__(self, metrics: list[PluginDefinition]) -> None:
         self.catalog = SimpleNamespace(
             client_schema_version=4,
             json_schema_dialect="https://json-schema.org/draft/2020-12/schema",
@@ -215,24 +214,8 @@ class FakeMCPBackend:
         self.job_status_sequence: list[JobLifecycleStatus] = ["succeeded"]
 
     async def get_discovery(self) -> Discovery:
-        if not self.catalog.metrics:
-            view = Discovery(compile_catalog({}))
-            view.fingerprint = self.catalog.catalog_fingerprint
-            return view
-        nodes = self.catalog.metrics
-        view = Discovery(
-            compile_catalog(
-                {
-                    "fake": PluginManifest.model_validate(
-                        {
-                            "plugin": {"name": "fake", "version": "1"},
-                            "factory": "fake:create",
-                            "nodes": nodes,
-                        }
-                    )
-                }
-            )
-        )
+        definitions = {item.metric_names[0]: item for item in self.catalog.metrics}
+        view = Discovery(compile_live_catalog(definitions))
         view.fingerprint = self.catalog.catalog_fingerprint
         return view
 
@@ -251,7 +234,7 @@ class FakeMCPBackend:
                 ),
             },
         )
-        if not any(item.name == metric for item in self.catalog.metrics):
+        if not any(metric in item.metric_names for item in self.catalog.metrics):
             code = "unknown_metric"
             raise ToolCallError(code, f"Unknown metric: {metric}")
         if request.parameters.get("value") == "invalid":
@@ -316,65 +299,89 @@ class FakeMCPBackend:
         return ToolCallError(code, message, details)
 
 
+class MCPPlaces(Places):
+    id = "test:units"
+
+
+class Value(MetricParameters):
+    value: int = Field(description="Value copied into each output row.")
+
+
+def _table_handler(
+    locations: tuple[str, ...], model: type[MetricParameters]
+) -> Callable:
+    def located(
+        location: gpd.GeoDataFrame, parameters: MetricParameters
+    ) -> pd.DataFrame:
+        del location, parameters
+        return pd.DataFrame()
+
+    def bounded(bounds: gpd.GeoDataFrame, parameters: MetricParameters) -> pd.DataFrame:
+        del bounds, parameters
+        return pd.DataFrame()
+
+    def paired(
+        location: gpd.GeoDataFrame,
+        bounds: gpd.GeoDataFrame,
+        parameters: MetricParameters,
+    ) -> pd.DataFrame:
+        del location, bounds, parameters
+        return pd.DataFrame()
+
+    handler = {
+        ("location",): located,
+        ("bounds",): bounded,
+        ("location", "bounds"): paired,
+    }[locations]
+    handler.__annotations__.update(
+        dict.fromkeys(locations, gpd.GeoDataFrame), parameters=model
+    )
+    return handler
+
+
 def _table_metric(
     name: str,
     description: str,
     *,
-    spatial_inputs: dict[str, str] | None = None,
-    value_type: str = "integer",
-) -> MetricManifest:
-    spatial = spatial_inputs or {"location": "location"}
-    properties: dict[str, Any] = {
-        field: LocationSelection.model_json_schema() for field in spatial
-    }
-    properties["parameters"] = {
-        "type": "object",
-        "properties": {
-            "value": {
-                "type": value_type,
-                "description": "Value copied into each output row.",
-            }
-        },
-        "required": ["value"],
-        "additionalProperties": False,
-    }
-    return MetricManifest(
-        code_revision="1",
+    locations: tuple[str, ...] = ("location",),
+    model: type[MetricParameters] = Value,
+    output: pa.DataFrameSchema | None = None,
+) -> PluginDefinition:
+    schema = (
+        output
+        if output is not None
+        else pa.DataFrameSchema(
+            {
+                "value": pa.Column(
+                    int, description="Submitted value.", metadata={"unit": "count"}
+                )
+            },
+            strict=True,
+        )
+    )
+    node = declare_metric(
         name=name,
         description=description,
-        parameters_schema={
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            **properties["parameters"],
-        },
-        location_inputs={
-            key: LocationInputDeclaration(contract=node_contract()) for key in spatial
-        },
-        outputs={
-            name: OutputMetadata(
-                kind="table",
-                columns=[
-                    ColumnMetadata(
-                        name="value",
-                        dtype="int64",
-                        unit="count",
-                        description="Submitted value.",
-                    )
-                ],
-            )
-        },
-    )
-
-
-def _parameterless_metric(name: str, description: str) -> MetricManifest:
-    return MetricManifest(
         code_revision="1",
+        inputs={key: LocationDependency(provider=MCPPlaces.id) for key in locations},
+        outputs={name: schema},
+    )(_table_handler(locations, model))
+    return PluginDefinition(metrics=[node], resources={"places": MCPPlaces})
+
+
+def _parameterless_metric(name: str, description: str) -> PluginDefinition:
+    @declare_metric(
         name=name,
         description=description,
-        location_inputs={
-            "location": LocationInputDeclaration(contract=node_contract())
-        },
-        outputs={name: OutputMetadata(columns=[])},
+        code_revision="1",
+        inputs={"location": LocationDependency(provider=MCPPlaces.id)},
+        outputs={name: pa.DataFrameSchema(strict=True)},
     )
+    def calculate(location: gpd.GeoDataFrame) -> pd.DataFrame:
+        del location
+        return pd.DataFrame()
+
+    return PluginDefinition(metrics=[calculate], resources={"places": MCPPlaces})
 
 
 def test_mcp_package_initializes_with_bearer_auth() -> None:
@@ -481,9 +488,6 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
     }
     run_tool = next(tool for tool in tools.tools if tool.name == "lyra_run_metric")
     assert "Submit once" in (run_tool.description or "")
-    assert all(
-        "wait_seconds" not in tool.inputSchema["properties"] for tool in tools.tools
-    )
     for tool in tools.tools:
         assert tool.inputSchema["type"] == "object"
         assert tool.outputSchema is not None
@@ -947,21 +951,28 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
         "Interpret each row independently: summing rows repeats the same "
         "supplied count rather than measuring a combined total."
     )
-    metric = _table_metric("observation_count", description)
     parameter_description = (
         "Observation count to repeat for each polygon.\n"
         "Zero represents an observed count of zero."
     )
     column_description = "Supplied count per polygon.\nZero does not mean missing."
-    value_schema = metric.parameters_schema
-    assert value_schema is not None
-    for key in ("properties", "value"):
-        nested = value_schema[key]
-        assert isinstance(nested, dict)
-        value_schema = nested
-    value_schema["description"] = parameter_description
-    assert isinstance(metric.outputs[metric.name], OutputMetadata)
-    metric.outputs[metric.name].columns[0].description = column_description
+
+    class Observations(MetricParameters):
+        value: int = Field(description=parameter_description)
+
+    metric = _table_metric(
+        "observation_count",
+        description,
+        model=Observations,
+        output=pa.DataFrameSchema(
+            {
+                "value": pa.Column(
+                    int, description=column_description, metadata={"unit": "count"}
+                )
+            },
+            strict=True,
+        ),
+    )
     client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([metric]))
     )
@@ -979,13 +990,15 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
     detail = tool_payload(
         client.post(
             "/",
-            json=tool_call_payload("lyra_get_metric", {"metric": metric.name}),
+            json=tool_call_payload(
+                "lyra_get_metric", {"metric": metric.metric_names[0]}
+            ),
             headers=mcp_headers(),
         )
     )
     assert detail["metric"]["description"] == description
     assert (
-        detail["outputs"][metric.name]["columns"][0]["description"]
+        detail["outputs"][metric.metric_names[0]]["columns"][0]["description"]
         == column_description
     )
     assert (
@@ -1000,7 +1013,9 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
             headers=mcp_headers(),
         )
     )
-    assert [candidate["name"] for candidate in search["candidates"]] == [metric.name]
+    assert [candidate["name"] for candidate in search["candidates"]] == [
+        metric.metric_names[0]
+    ]
     assert search["candidates"][0]["description"] == compact
 
 
@@ -1046,7 +1061,7 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
             _table_metric(
                 "smoke_bounds_metric",
                 "Return a bounds table.",
-                spatial_inputs={"bounds": "location"},
+                locations=("bounds",),
             )
         ]
     )
@@ -1192,9 +1207,7 @@ def test_mcp_run_metric_surfaces_unknown_metric_as_tool_error() -> None:
 
 
 def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
-    backend = FakeMCPBackend(
-        [_table_metric("smoke_table_metric", "Return a table.", value_type="integer")]
-    )
+    backend = FakeMCPBackend([_table_metric("smoke_table_metric", "Return a table.")])
     client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
@@ -1231,7 +1244,7 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
             _table_metric(
                 "multi_spatial_metric",
                 "Needs multiple shapes.",
-                spatial_inputs={"location": "location", "bounds": "location"},
+                locations=("location", "bounds"),
             )
         ]
     )
@@ -1430,33 +1443,20 @@ def test_unknown_or_expired_job(tool: str) -> None:
 @pytest.mark.parametrize(
     "tool",
     [
-        "lyra_get_result_metadata",
-        "lyra_get_result_preview",
+        "unknown_tool",
         "lyra_get_job_result",
         "lyra_run_metric",
     ],
 )
-def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
+def test_unknown_tool_or_unexpected_argument_is_rejected(tool: str) -> None:
     backend = FakeMCPBackend([])
     client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     arguments = (
-        {"job_id": "job-1", "wait_seconds": 0}
-        if tool != "lyra_run_metric"
-        else {
-            "metric": "metric",
-            "wait_seconds": 0,
-            "inputs": {
-                "location": {
-                    "collection": "test:units",
-                    "unit_type": "lot",
-                    "ids": ["09.01"],
-                }
-            },
-            "parameters": {},
-        }
+        {"metric": "metric"} if tool == "lyra_run_metric" else {"job_id": "job-1"}
     )
+    arguments["unexpected"] = "value"
     response = client.post(
         "/", json=tool_call_payload(tool, arguments), headers=mcp_headers()
     )
@@ -1868,20 +1868,17 @@ def test_job_id_validation(tool: str, job_id: object) -> None:
 
 
 def test_discovery_preserves_nullable_date_metadata() -> None:
-    metric = _table_metric("area", "Area measurement")
-    metric.outputs[metric.name] = OutputMetadata.model_validate(
-        {
-            "kind": "table",
-            "columns": [
-                {
-                    "name": "area",
-                    "dtype": "float64",
-                    "unit": "m**2",
-                    "description": "Area",
-                    "nullable": True,
-                }
-            ],
-        }
+    metric = _table_metric(
+        "area",
+        "Area measurement",
+        output=pa.DataFrameSchema(
+            {
+                "area": pa.Column(
+                    float, description="Area", nullable=True, metadata={"unit": "m**2"}
+                )
+            },
+            strict=True,
+        ),
     )
     backend = FakeMCPBackend([metric])
     client = managed_client(
@@ -1897,7 +1894,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
         payload = tool_payload(response)
         validate(payload, advertised_tools()[name].outputSchema)
         columns = (
-            payload["outputs"][metric.name]["columns"]
+            payload["outputs"][metric.metric_names[0]]["columns"]
             if name == "lyra_get_metric"
             else payload["candidates"][0]["relevant_columns"]
         )
@@ -1909,7 +1906,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
             "plugin": {"name": "plugin", "version": "1"},
             "created_at": _COMPLETED_AT,
             "input": {},
-            "outputs": {"result": metric.outputs[metric.name]},
+            "outputs": {"result": payload["outputs"][metric.metric_names[0]]},
         }
     )
     backend.observations["job-1"] = result_observation(
@@ -1961,12 +1958,10 @@ def test_mcp_parameterless_metric_preserves_input() -> None:
 
 @pytest.mark.parametrize("parameters", [{}, {"location": "an ordinary parameter"}])
 def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> None:
-    metric = _table_metric("nested_metric", "Return a table.")
-    metric.parameters_schema = {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {"location": {"type": "string"}},
-    }
+    class Nested(MetricParameters):
+        location: str = Field(default="", description="Location label")
+
+    metric = _table_metric("nested_metric", "Return a table.", model=Nested)
     backend = FakeMCPBackend([metric])
     client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
@@ -2006,16 +2001,17 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
 def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
     unit: str | None,
 ) -> None:
-    metric = _table_metric("quantity", "Test quantity")
-    metric.outputs[metric.name] = OutputMetadata(
-        columns=[
-            ColumnMetadata(
-                name="value",
-                dtype="int64",
-                unit=unit,
-                description="Test quantity.",
-            )
-        ]
+    metric = _table_metric(
+        "quantity",
+        "Test quantity",
+        output=pa.DataFrameSchema(
+            {
+                "value": pa.Column(
+                    int, description="Test quantity.", metadata={"unit": unit}
+                )
+            },
+            strict=True,
+        ),
     )
     backend = FakeMCPBackend([metric])
     client = managed_client(
@@ -2032,7 +2028,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
         payload = tool_payload(response)
         validate(payload, advertised_tools()[name].outputSchema)
         columns = (
-            payload["outputs"][metric.name]["columns"]
+            payload["outputs"][metric.metric_names[0]]["columns"]
             if name == "lyra_get_metric"
             else payload["candidates"][0]["relevant_columns"]
         )
@@ -2046,7 +2042,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
                 "plugin": {"name": "plugin", "version": "1"},
                 "created_at": _COMPLETED_AT,
                 "input": {},
-                "outputs": {"result": metric.outputs[metric.name]},
+                "outputs": {"result": payload["outputs"][metric.metric_names[0]]},
             }
         ),
         result=TableJobResult.model_validate(
@@ -2104,32 +2100,50 @@ def test_submission_envelope_validation(arguments: dict[str, Any]) -> None:
 
 
 def _submission_fixture(
-    tmp_path: Path, scenario: str
+    tmp_path: Path, scenario: str, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[LyraConfig, dict[str, Any]]:
-    spatial = {"location", "bounds"} if scenario == "both" else {"location"}
-    declaration = metric_manifest(name="report", spatial=spatial)
-    if scenario == "private_root":
-        declaration["private"] = True
+    locations = ("location", "bounds") if scenario == "both" else ("location",)
     payload: dict[str, Any] = {
         "parameters": {"value": 7},
-        **{field: selection("area-1").model_dump(mode="json") for field in spatial},
+        **{name: selection("area-1").model_dump(mode="json") for name in locations},
     }
     if scenario in {"empty", "extra_parameters", "omitted"}:
-        declaration["location_inputs"] = {}
-        declaration["parameters_schema"] = None
-        payload = (
-            {}
-            if scenario in {"empty", "omitted"}
-            else {"parameters": {"unexpected": 1}}
+
+        @declare_metric(
+            name="report",
+            code_revision="1",
+            description="Report",
+            outputs={"report": pa.DataFrameSchema(strict=True)},
         )
-    elif scenario in {"defaults", "nested"}:
-        declaration["parameters_schema"] = metric_manifest(
-            parameters=NestedDefaultParameters
-        )["parameters_schema"]
+        def report() -> pd.DataFrame:
+            pytest.fail("Submission invoked a handler")
+
+        plugin = PluginDefinition(metrics=[report])
+        payload = (
+            {"parameters": {"unexpected": 1}} if scenario == "extra_parameters" else {}
+        )
+    else:
+        model = NestedDefaultParameters if scenario in {"defaults", "nested"} else Value
+        handler = declare_metric(
+            name="report",
+            description="Report",
+            code_revision="1",
+            outputs={"report": pa.DataFrameSchema(strict=True)},
+            inputs={
+                name: LocationDependency(provider=Provider.id) for name in locations
+            },
+            private=scenario == "private_root",
+        )(_table_handler(locations, model))
+        plugin = PluginDefinition(metrics=[handler], resources={"locations": Provider})
+    if scenario in {"defaults", "nested"}:
         payload["parameters"] = (
             {}
             if scenario == "defaults"
             else {"nested": [None, {"values": [1, True, "text"]}]}
+        )
+    elif scenario == "unknown_provider":
+        payload["location"] = selection("area-1", provider="unknown").model_dump(
+            mode="json"
         )
     elif scenario == "missing_parameters":
         payload["parameters"] = {}
@@ -2139,12 +2153,11 @@ def _submission_fixture(
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
         payload["location"]["ids"] = [""]
-    manifest = plugin_manifest(declaration)
-    if scenario != "missing_provider":
-        manifest["providers"] = [SELECTED.declaration.model_dump(mode="json")]
-        manifest["resources"] = {SELECTED.declaration.resource: {}}
-    (tmp_path / "lyra.plugin.json").write_text(json.dumps(manifest))
-    config = load_test_config(tmp_path, plugins=[tmp_path])
+    installed = InstalledPlugin("test-plugin", plugin, {"report": "interactive"})
+    monkeypatch.setattr(
+        "lyra.server.registry.load_installed_plugins", lambda _: [installed]
+    )
+    config = load_test_config(tmp_path)
     config.mcp.enabled = True
     return config, payload
 
@@ -2158,7 +2171,7 @@ def _submission_fixture(
         "selector",
         "invalid",
         "malformed",
-        "missing_provider",
+        "unknown_provider",
         "unknown",
         "private_root",
         "extra_parameters",
@@ -2176,19 +2189,20 @@ def _submission_fixture(
         "omitted",
         "edition",
         "unknown_edition",
-        "revision",
-        "null_revision",
-        "blank_revision",
-        "long_revision",
-        "numeric_revision",
         "numeric_edition",
     ],
 )
 def test_mounted_submission_matches_rest(
     tmp_path: Path,
     scenario: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config, payload = _submission_fixture(tmp_path, scenario)
+    acquire = Mock(side_effect=AssertionError("Submission acquired a provider"))
+    monkeypatch.setattr(Provider, "setup", acquire)
+    monkeypatch.setattr(
+        Provider, "resolve", create_autospec(Provider.resolve, side_effect=acquire)
+    )
+    config, payload = _submission_fixture(tmp_path, scenario, monkeypatch)
     app = main.create_app(config, credentials=api_credentials())
     enqueue = Mock()
     request: JsonObject = {
@@ -2210,18 +2224,15 @@ def test_mounted_submission_matches_rest(
         "edition": {"edition": "release"},
         "unknown_edition": {"edition": "unknown"},
         "numeric_edition": {"edition": 42},
-        "revision": {"cache_revision": " revision-λ "},
-        "null_revision": {"cache_revision": None},
-        "blank_revision": {"cache_revision": " "},
-        "long_revision": {"cache_revision": "x" * 257},
-        "numeric_revision": {"cache_revision": 42},
     }
     request.update(options.get(scenario, {}))
     original = deepcopy(request)
 
     rest, wire = asyncio.run(submit_both(app, request, enqueue))
+    acquire.assert_not_called()
     result = wire.get("structuredContent", {})
     errors = {
+        "unknown_provider": "invalid_parameters",
         "invalid": "invalid_parameters",
         "malformed": "invalid_parameters",
         "extra_parameters": "invalid_parameters",
@@ -2239,11 +2250,6 @@ def test_mounted_submission_matches_rest(
         "unknown_edition": "invalid_arguments",
         "numeric_edition": "invalid_arguments",
         "edition": "invalid_arguments",
-        "revision": "invalid_arguments",
-        "null_revision": "invalid_arguments",
-        "blank_revision": "invalid_arguments",
-        "long_revision": "invalid_arguments",
-        "numeric_revision": "invalid_arguments",
     }
     assert request == original
     if scenario in errors:
@@ -2252,6 +2258,7 @@ def test_mounted_submission_matches_rest(
         if errors[scenario] != "invalid_arguments":
             assert result["error"]["code"] == errors[scenario]
         if errors[scenario] == "invalid_parameters":
+            assert rest.status_code == 422
             assert result["error"]["details"] == rest.json()["detail"]
         enqueue.assert_not_called()
     else:
@@ -2312,8 +2319,6 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     assert wire["isError"] is False
     payload = wire["structuredContent"]["result"]
     assert payload["metric"] == "quantity"
-    if status in {"succeeded", "failed"}:
-        assert "cache_revision" not in payload["provenance"]
 
 
 @pytest.mark.parametrize(
@@ -2420,9 +2425,7 @@ class RetainedBackend(FakeMCPBackend):
 
 def test_direct_operations_and_mutation_isolation() -> None:
     async def exercise() -> None:
-        metric = MetricManifest.model_validate(
-            metric_manifest(name="report", spatial=set())
-        )
+        metric = _parameterless_metric("report", "Report")
         backend = RetainedBackend([metric])
         backend.discovery = await FakeMCPBackend.get_discovery(backend)
         listed = await tools.list_metrics(ListMetricsInput(limit=1), backend)
@@ -2448,13 +2451,7 @@ def test_direct_operations_and_mutation_isolation() -> None:
 
 def test_direct_job_operations_and_mutation_isolation() -> None:
     async def exercise() -> None:
-        backend = FakeMCPBackend(
-            [
-                MetricManifest.model_validate(
-                    metric_manifest(name="report", spatial=set())
-                )
-            ]
-        )
+        backend = FakeMCPBackend([_parameterless_metric("report", "Report")])
         request = JobCreateRequest(metric="report")
         first = await tools.run_metric(request, backend)
         second = await tools.run_metric(request, backend)
@@ -2608,7 +2605,7 @@ def test_python_submission_reaches_shared_acceptance(
     *,
     asynchronous: bool,
 ) -> None:
-    config, _ = _submission_fixture(tmp_path, scenario)
+    config, _ = _submission_fixture(tmp_path, scenario, monkeypatch)
     if scenario == "defaults":
         sections = {
             **sections,
@@ -2693,7 +2690,7 @@ def test_python_submission_reaches_shared_acceptance(
 def test_official_client_mounted_job_workflow(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: JobStatus
 ) -> None:
-    config, _ = _submission_fixture(tmp_path, "empty")
+    config, _ = _submission_fixture(tmp_path, "empty", monkeypatch)
     config.api.public_base_url = "https://lyra.example.test"
     app = main.create_app(config, credentials=api_credentials())
 

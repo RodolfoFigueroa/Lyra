@@ -1,7 +1,7 @@
 """Catalog-only acceptance captures routes and rejects malformed requests."""
 
 from collections.abc import Iterator
-from unittest.mock import Mock
+from unittest.mock import Mock, create_autospec
 
 import pytest
 from pydantic import Field
@@ -9,8 +9,7 @@ from pydantic import Field
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from test_support.accepted_sources import routed_request
-from test_support.manifest_catalog import compile_catalog
-from tests.request_preparation_helpers import with_parameters
+from test_support.location_operations import Places
 
 
 def test_capture() -> None:
@@ -20,8 +19,6 @@ def test_capture() -> None:
     assert prepared.inputs[1].binding.operations == ()
     assert all(binding.revision is None for binding in prepared.revisions.bindings)
     request["inputs"]["places"]["ids"].append("changed")
-    assert catalog.graph.nodes["score"].node.kind == "metric"
-    catalog.graph.nodes["score"].node.private = True
     assert prepared.inputs[0].ids == ("unknown",)
     assert prepared.parameters == {}
 
@@ -69,15 +66,10 @@ def test_rejections(change: str) -> None:
 
 
 def test_named_edition_defaults_and_private() -> None:
-    catalog, request = routed_request()
-    node = catalog.graph.nodes["score"].node
-    assert node.kind == "metric"
-    assert node.kind == "metric"
-
     class Parameters(MetricParameters):
         weight: int = Field(2, ge=1, description="Weight")
 
-    catalog = with_parameters(compile_catalog(catalog.manifests), Parameters)
+    catalog, request = routed_request(Parameters)
     prepared = prepare_execution(catalog, request)
     assert prepared.parameters == {"weight": 2}
     prepared.parameters["weight"] = 10
@@ -85,9 +77,7 @@ def test_named_edition_defaults_and_private() -> None:
     request["parameters"] = {"weight": 0}
     with pytest.raises(PreparationError):
         prepare_execution(catalog, request)
-    assert catalog.graph.nodes["score"].node.kind == "metric"
-    catalog.graph.nodes["score"].node.private = True
-    catalog = compile_catalog(catalog.manifests)
+    catalog, request = routed_request(Parameters, private=True)
     with pytest.raises(PreparationError):
         prepare_execution(catalog, request)
 
@@ -98,9 +88,11 @@ pytestmark = pytest.mark.usefixtures("no_side_effects")
 @pytest.fixture
 def no_side_effects(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Every acceptance and rejection leaves acquisition and enqueue untouched."""
-    acquisition = Mock(side_effect=AssertionError("Unexpected acquisition"))
+    acquisition = create_autospec(
+        Places.resolve, side_effect=AssertionError("Unexpected acquisition")
+    )
     enqueue = Mock(side_effect=AssertionError("Unexpected enqueue"))
-    monkeypatch.setattr("lyra.sdk.locations.LocationProvider.resolve", acquisition)
+    monkeypatch.setattr(Places, "resolve", acquisition)
     monkeypatch.setattr("lyra.server.job_store.JobStore.enqueue", enqueue)
     yield
     acquisition.assert_not_called()
@@ -108,7 +100,13 @@ def no_side_effects(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def test_native_and_owned_nested_defaults() -> None:
-    catalog, request = routed_request()
+    class Options(MetricParameters):
+        values: list[int] = Field(default_factory=lambda: [1], description="Values")
+
+    class Parameters(MetricParameters):
+        options: Options = Field(default_factory=Options, description="Options")
+
+    catalog, request = routed_request(Parameters)
     node = catalog.graph.nodes["score"].node
     native = node.location_inputs["places"].contract
     request["inputs"]["places"] = {
@@ -116,13 +114,6 @@ def test_native_and_owned_nested_defaults() -> None:
         "ids": ["unknown", "unknown"],
     }
 
-    class Options(MetricParameters):
-        values: list[int] = Field(default_factory=lambda: [1], description="Values")
-
-    class Parameters(MetricParameters):
-        options: Options = Field(default_factory=Options, description="Options")
-
-    catalog = with_parameters(catalog, Parameters)
     prepared = prepare_execution(catalog, request)
     assert prepared.inputs[0].binding.operations == ()
     assert prepared.inputs[0].ids == ("unknown", "unknown")

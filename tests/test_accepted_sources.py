@@ -1,99 +1,45 @@
-"""Concrete public source bindings compiled from enabled canonical routes."""
+"""Concrete public selections from registered canonical routes."""
 
 from typing import Any, cast
 
 import pytest
 
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
-from test_support.accepted_sources import declarations
-from test_support.canonical_routes import contract
-from test_support.manifest_catalog import compile_catalog
-from test_support.plugin_graph import manifest
+from lyra.sdk.plugin import PluginDefinition
+from test_support.routing_plugins import provider, routed_plugins, score_plugin
 
 
-def test_provider_binding_roundtrip_and_multiple_inputs() -> None:
-    metric, source, other, operations = declarations()
-    manifests = {
-        "metric": manifest("metric", metric),
-        "routes": manifest("routes", *operations),
-    }
-    assert compile_catalog(manifests).accepted_sources["score"]["places"][
-        source.family.collection
-    ].operations == ("select_0",)
-    metric.location_inputs["places"].source_bindings = (source.reference,)
-    manifests = {
-        key: type(value).model_validate_json(value.model_dump_json())
-        for key, value in manifests.items()
-    }
-    catalog = compile_catalog(manifests)
+def test_multiple_inputs_and_edition_specific_reachability() -> None:
+    definitions = routed_plugins()
+    definitions["second_metric"] = score_plugin(target="second", name="score_second")
+    definitions["second_provider"] = PluginDefinition(
+        resources={"second": provider("second")}
+    )
+    catalog = compile_live_catalog(definitions)
     places = catalog.accepted_sources["score"]["places"]
-    assert places[source.family.collection].source == source.reference
-    assert places[source.family.collection].operations == ("select_0",)
-    native = metric.location_inputs["places"].contract.reference
-    assert places[native.collection].operations == ()
-    reference = catalog.accepted_sources["score"]["reference"]
-    assert next(iter(reference.values())).source == other.reference
-    assert len(reference) == 1
-    assert catalog.graph.nodes["score"].node.kind == "metric"
-    assert catalog.graph.nodes["score"].node.outputs == metric.outputs
-    assert catalog.graph.nodes["select_0"].node.description == operations[0].description
+    assert {key: binding.operations for key, binding in places.items()} == {
+        "native": (),
+        "source": ("select_0",),
+        "other": ("select_1",),
+    }
+    assert set(catalog.accepted_sources["score"]["reference"]) == {"other"}
+    assert set(catalog.accepted_sources["score_second"]["places"]) == {"second"}
     with pytest.raises(TypeError):
-        cast("Any", places)["invalid", "invalid"] = next(iter(places.values()))
+        cast("Any", places)["invalid"] = places["native"]
 
 
 def test_native_only_and_private() -> None:
-    metric, _, _, _ = declarations()
-    compiled = compile_catalog({"metric": manifest("metric", metric)})
-    assert all(
-        len(sources) == 1 for sources in compiled.accepted_sources["score"].values()
-    )
-    metric.private = True
-    compiled = compile_catalog({"metric": manifest("metric", metric)})
-    assert "score" in compiled.graph.nodes
-    with pytest.raises(ValueError, match="Unknown public metric"):
-        prepare_execution(compiled, {"metric": "score"})
-
-
-@pytest.mark.parametrize("kind", ["duplicate", "unreachable", "native"])
-def test_invalid_bindings(kind: str) -> None:
-    metric, source, _, operations = declarations()
-    bindings = (source.reference,)
-    name = "places"
-    if kind == "duplicate":
-        bindings *= 2
-    elif kind == "unreachable":
-        bindings = (source.reference.model_copy(update={"source": "missing"}),)
-    else:
-        alternative = metric.location_inputs["places"].contract.model_copy(
-            update={"edition": "alternative"}
-        )
-        operations[0].location_inputs["source"].contract = alternative
-        bindings = (alternative.reference,)
-    for input_name, references in ({name: bindings}).items():
-        metric.location_inputs[input_name].source_bindings = references
-    with pytest.raises(ValueError, match="binding"):
-        compile_catalog(
-            {
-                "metric": manifest("metric", metric),
-                "routes": manifest("routes", *operations),
-            }
-        )
-
-
-def test_edition_specific_reachability() -> None:
-    metric, source, _, operations = declarations()
-    metric.location_inputs["places"].source_bindings = (source.reference,)
-    second = metric.model_copy(deep=True)
-    second.name = "score_second"
-    for declaration in second.location_inputs.values():
-        declaration.source_bindings = ()
-    second.location_inputs["places"].contract = contract("second")
-    compiled = compile_catalog(
+    catalog = compile_live_catalog(
         {
-            "metrics": manifest("metrics", metric, second),
-            "selectors": manifest("selectors", *operations),
+            "metrics": score_plugin(private=True),
+            "providers": PluginDefinition(
+                resources={key: provider(key) for key in ("native", "other")}
+            ),
         }
     )
-    key = source.family.collection
-    assert key in compiled.accepted_sources["score"]["places"]
-    assert key not in compiled.accepted_sources["score_second"]["places"]
+    assert all(
+        len(sources) == 1 for sources in catalog.accepted_sources["score"].values()
+    )
+    with pytest.raises(ValueError, match="Unknown public metric"):
+        prepare_execution(catalog, {"metric": "score"})

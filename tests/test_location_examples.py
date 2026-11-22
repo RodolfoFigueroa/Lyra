@@ -15,12 +15,12 @@ from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.resources import IOConfig
 from lyra.data.results import serialize_outputs
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError
 from lyra.sdk import loading
 from lyra.sdk.plugin_cli import render_description, render_manifest
 from lyra.server import job_submission, registry, worker
 from lyra.server.plugins import InstalledPlugin
-from test_support.manifest_graph import build_graph
 from tests.config_helpers import load_test_config
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.runtime_helpers import make_runtime
@@ -66,7 +66,7 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
     assert set(
         plugin.describe("block_score").manifest.request_schema["properties"]
     ) == {"blocks"}
-    graph = build_graph({"example": plugin.node_manifests})
+    graph = compile_live_catalog({"example": plugin}).graph
     assert (
         graph.dependencies["block_score"]["members"].output.producer.node.name
         == "street_membership"

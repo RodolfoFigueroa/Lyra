@@ -1,103 +1,40 @@
-"""Revision closures and structural namespaces remain independently scoped."""
+"""Revision closures for registered provider and operation uses."""
 
 from typing import Any, cast
 
 import pytest
 
-from lyra.contracts.dependencies import Dependency, LocationDependency
-from lyra.contracts.plugins import LocationInputDeclaration
-from test_support.accepted_sources import declarations
-from test_support.manifest_catalog import compile_catalog
-from test_support.plugin_graph import manifest, node
+from lyra.runtime.planning.catalog import compile_live_catalog
+from lyra.runtime.planning.preparation import prepare_execution
+from test_support.accepted_sources import routed_request
+from tests.dependency_route_helpers import definitions, request
 
 
-def test_selected_route_boundary_and_revision_only_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    metric, source, other, operations = declarations()
-    metric.location_inputs["places"].source_bindings = (source.reference,)
-    source.data_revision = "same"
-    other.data_revision = "same"
-    native = metric.location_inputs["places"].contract
-    native.data_revision = "native"
-    unrelated = node("unrelated")
-    manifests = {"test": manifest("test", metric, unrelated, *operations)}
-    first = compile_catalog(manifests)
-    plan = first.revisions.plan("score", ((source.reference, ("select_0",)),))
-    assert {b.contract for b in plan.calculation} == {native.reference, other.reference}
-    assert {b.contract for b in plan.selection} == {source.reference, native.reference}
-    assert len(plan.bindings) == 3
-    assert first.revisions.nodes["unrelated"] == frozenset()
-    source.data_revision = "changed"
-    second = compile_catalog(manifests)
-    assert first.computation.nodes == second.computation.nodes
-    assert first.revisions.nodes["score"] == second.revisions.nodes["score"]
-    assert first.revisions.nodes["select_0"] != second.revisions.nodes["select_0"]
-    assert first.revisions.contracts[source.reference].revision == "same"
+def test_selected_route_revision_boundary() -> None:
+    catalog, inputs = routed_request()
+    plan = prepare_execution(catalog, inputs)
+    assert {item.contract.collection for item in plan.revisions.calculation} == {
+        "native",
+        "other",
+    }
+    assert {item.contract.collection for item in plan.revisions.selection} == {
+        "native",
+        "source",
+        "other",
+    }
+    assert len(plan.revisions.bindings) == 3
     with pytest.raises(TypeError):
-        cast("Any", first.revisions.contracts)[source.reference] = None
-    monkeypatch.setattr(
-        "lyra.runtime.planning.computation.installed_version", lambda _: "changed"
+        cast("Any", catalog.revisions.contracts)[plan.inputs[0].binding.source] = None
+
+
+def test_transitive_provider_scope_changes() -> None:
+    before = compile_live_catalog(definitions(binding="nested"))
+    after = compile_live_catalog(
+        definitions({"middle_provider": "changed"}, binding="nested")
     )
-    assert compile_catalog(manifests).computation.nodes == first.computation.nodes
-
-
-def test_transitive_dependencies_and_unversioned_target() -> None:
-    _metric, source, _, operations = declarations()
-    operation = operations[0]
-    operation.canonical = False
-    assert operation.output_contract is not None
-    operation.output_contract.data_revision = None
-    source.data_revision = "source"
-    producer = node("producer", spatial={"places"})
-    producer.location_inputs = {"places": LocationInputDeclaration(contract=source)}
-    middle = node(
-        "middle", inputs={"data": Dependency("producer", producer="producer")}
-    )
-    root = node("root", inputs={"data": Dependency("middle", producer="middle")})
-    for consumer in (middle, root):
-        consumer.location_inputs = producer.location_inputs.copy()
-        consumer.parameters_schema = producer.parameters_schema
-    compiled = compile_catalog(
-        {"test": manifest("test", producer, middle, root, operation)}
-    )
-    assert compiled.revisions.nodes["root"] == compiled.revisions.nodes["producer"]
-    assert {b.revision for b in compiled.revisions.nodes[operation.name]} == {
-        None,
-        "source",
-    }
-    before = compiled.computation.nodes
-    source.meaning = "Changed structural meaning"
-    assert (
-        compile_catalog(
-            {"test": manifest("test", producer, middle, root, operation)}
-        ).computation.nodes
-        != before
-    )
-
-
-def test_dependency_target_revision_reaches_metric() -> None:
-
-    _metric, source, _, operations = declarations()
-    operation = operations[0]
-    operation.canonical = False
-    assert operation.output_contract is not None
-    operation.output_contract.data_revision = "target"
-    source.data_revision = "source"
-    producer = node("producer", spatial={"places"})
-    producer.location_inputs = {
-        "places": LocationInputDeclaration(contract=operation.output_contract)
-    }
-    root = node("root", spatial={"source"})
-    root.location_inputs = {"source": LocationInputDeclaration(contract=source)}
-    root.inputs = {
-        "data": Dependency(
-            producer="producer",
-            output="producer",
-        ).bind(places=LocationDependency(operation=operation.name))
-    }
-    compiled = compile_catalog({"test": manifest("test", root, producer, operation)})
-    assert {b.revision for b in compiled.revisions.nodes["root"]} == {
-        "source",
-        "target",
-    }
+    plan = prepare_execution(before, request())
+    changed = prepare_execution(after, request())
+    assert plan.revisions.calculation != changed.revisions.calculation
+    assert plan.computation_identity != changed.computation_identity
+    assert before.revisions.nodes["producer"] == after.revisions.nodes["producer"]
+    assert before.revisions.nodes["explicit"] != after.revisions.nodes["explicit"]

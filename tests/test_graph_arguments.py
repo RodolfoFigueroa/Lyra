@@ -9,8 +9,7 @@ from test_support.location_helpers import (
     output_schema,
     scoped_payload,
 )
-from test_support.plugin_graph import graph, node
-from test_support.runtime_inputs import assert_records, native_inputs
+from test_support.runtime_inputs import assert_records
 from tests.graph_arguments_helpers import (
     Consumer,
     NestedSettings,
@@ -23,8 +22,11 @@ from tests.graph_arguments_helpers import (
     YearSettings,
     geometry,
     invocation,
+    location_edge,
+    parameter_edge,
     plugin,
     resolve,
+    scoped_inputs,
 )
 
 
@@ -74,55 +76,37 @@ def test_explicit_null_does_not_default(overrides: dict[str, object]) -> None:
 def test_invalid_forwarded_value_and_missing_required() -> None:
     consumer = invocation(Objects, {})
     # Supply paths are checked structurally; runtime checks still protect absent values.
-    registry = graph(
-        node(
-            "consumer",
-            parameters=Required,
-            inputs={"table": Dependency("producer", producer="producer")},
-        ),
-        node("producer", parameters=Required),
+    edge = parameter_edge(
+        "consumer", Required, Dependency("producer", producer="producer"), Required
     )
     with pytest.raises(MetricInputError, match="year"):
-        prepare_dependency(
-            consumer, registry.dependencies["consumer"]["table"], plugin(Required)
-        )
+        prepare_dependency(consumer, edge, plugin(Required))
     with pytest.raises(MetricInputError, match=r"parameters\.year"):
         resolve(invocation(Consumer, {}), Producer, {"year": "invalid"})
 
 
 def test_chain_references_current_effective_parameters() -> None:
-    registry = graph(
-        node(
-            "root",
-            parameters=Consumer,
-            inputs={
-                "table": Dependency(
-                    "middle", parameters={"year": 1990}, producer="middle"
-                )
-            },
+    middle_edge = parameter_edge(
+        "root",
+        Consumer,
+        Dependency("middle", producer="middle", parameters={"year": 1990}),
+        Producer,
+    )
+    source_edge = parameter_edge(
+        "middle",
+        Producer,
+        Dependency(
+            "producer",
+            producer="producer",
+            parameters={"year": Input("parameters.year")},
         ),
-        node(
-            "middle",
-            parameters=Producer,
-            inputs={
-                "table": Dependency(
-                    "producer",
-                    parameters={"year": Input("parameters.year")},
-                    producer="producer",
-                )
-            },
-        ),
-        node("producer", parameters=Required),
+        Required,
     )
     root = plugin(Consumer, name="root").prepare_resolved_invocation(
         "root", {"parameters": {}}
     )
-    middle = prepare_dependency(
-        root, registry.dependencies["root"]["table"], plugin(Producer, name="middle")
-    )
-    result = prepare_dependency(
-        middle, registry.dependencies["middle"]["table"], plugin(Required)
-    )
+    middle = prepare_dependency(root, middle_edge, plugin(Producer, name="middle"))
+    result = prepare_dependency(middle, source_edge, plugin(Required))
     assert result.inspect_parameters() == Required(year=1990)
 
 
@@ -183,27 +167,18 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
         scoped_payload(geometry()), schema=output_schema(label=str)
     )
     consumer = PreparedResolvedInvocation(
-        "consumer", None, native_inputs({"location": location, "bounds": bounds})
+        "consumer", None, scoped_inputs({"location": location, "bounds": bounds})
     )
-    registry = graph(
-        node(
-            "consumer",
-            spatial={"location", "bounds"},
-            inputs={"table": Dependency("producer", producer="producer")},
-        ),
-        node("producer", spatial={"location", "bounds"}),
-    )
-    result = prepare_dependency(
-        consumer, registry.dependencies["consumer"]["table"], implementation
-    )
-    assert_records(result.locations["location"], location)
-    assert_records(result.locations["bounds"], bounds)
+    edge = location_edge()
+    result = prepare_dependency(consumer, edge, implementation)
+    assert_records(result.locations["location"], consumer.locations["location"])
+    assert_records(result.locations["bounds"], consumer.locations["bounds"])
     assert resolve(consumer, None).locations == {}
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
     altered = implementation.prepare_resolved_invocation(
         "producer",
-        native_inputs(
+        scoped_inputs(
             {
                 "location": fixture_locations(changed, schema=output_schema(label=str)),
                 "bounds": bounds,
@@ -216,7 +191,7 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     assert (
         implementation.prepare_resolved_invocation(
             "producer",
-            native_inputs(
+            scoped_inputs(
                 {
                     "location": fixture_locations(
                         changed, schema=output_schema(label=str)
@@ -236,15 +211,6 @@ def test_invalid_forwarded_value_uses_producer_validation() -> None:
 
 @pytest.mark.parametrize("missing", ["location", "bounds"])
 def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
-    registry = graph(
-        node(
-            "consumer",
-            parameters=Consumer,
-            spatial={"location", "bounds"},
-            inputs={"table": Dependency("producer", producer="producer")},
-        ),
-        node("producer", spatial={"location", "bounds"}),
-    )
     spatial = {
         "location": fixture_locations(
             scoped_payload(geometry()), schema=output_schema(label=str)
@@ -254,10 +220,10 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
         ),
     }
     del spatial[missing]
-    edge = registry.dependencies["consumer"]["table"]
+    edge = location_edge()
     with pytest.raises(MetricInputError, match="missing spatial input") as error:
         prepare_dependency(
-            PreparedResolvedInvocation("consumer", Consumer(), native_inputs(spatial)),
+            PreparedResolvedInvocation("consumer", Consumer(), scoped_inputs(spatial)),
             edge,
             plugin(None, spatial=True),
         )
@@ -267,21 +233,16 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
 
 
 def test_missing_referenced_inputs_keep_edge_context() -> None:
-    registry = graph(
-        node(
-            "consumer",
-            parameters=Consumer,
-            inputs={
-                "table": Dependency(
-                    "producer",
-                    parameters={"year": Input("parameters.baseline")},
-                    producer="producer",
-                )
-            },
+    edge = parameter_edge(
+        "consumer",
+        Consumer,
+        Dependency(
+            "producer",
+            producer="producer",
+            parameters={"year": Input("parameters.baseline")},
         ),
-        node("producer", parameters=Producer),
+        Producer,
     )
-    edge = registry.dependencies["consumer"]["table"]
     with pytest.raises(MetricInputError, match="missing referenced input") as error:
         prepare_dependency(
             PreparedResolvedInvocation("consumer", None, {}),

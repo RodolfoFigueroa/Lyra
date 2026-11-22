@@ -5,7 +5,6 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
-from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.geometry import GeoJSON, PointGeometry, SingleGeoJSON
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import LocationDependency
@@ -50,19 +49,6 @@ def test_spatial_model_and_schema_agree(
 
 def test_standalone_point_geometry_remains_importable() -> None:
     assert PointGeometry(type="Point", coordinates=[0, 0]).type == "Point"
-
-
-def test_special_bounds_annotation_is_rejected() -> None:
-    with pytest.raises(PluginDefinitionError, match="bounds: unsupported"):
-
-        @metric(
-            code_revision="1",
-            name="bad_bounds",
-            description="Invalid bounds.",
-            outputs={"bad_bounds": pa.DataFrameSchema({}, strict=True)},
-        )
-        def handler(bounds: SingleGeoJSON) -> None:
-            pass
 
 
 def test_sdk_passes_resolved_points_to_location_handler() -> None:

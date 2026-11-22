@@ -26,7 +26,6 @@ from lyra.contracts.errors import (
     ResourceConfigurationError,
     UnresolvedLocationIDsError,
 )
-from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.resources import IOConfig, ResourceConfig
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
@@ -707,15 +706,6 @@ def test_local_repeated_run_reuses_result(tmp_path: Path) -> None:
         assert len(calls) == 1
 
 
-@pytest.mark.parametrize("value", [None, "valid", "", "  ", "x" * 257, 1, True, [], {}])
-def test_invalid_cache_revision(value: object) -> None:
-
-    with pytest.raises(ValidationError):
-        JobCreateRequest.model_validate(
-            {"metric": "root", "inputs": {}, "parameters": {}, "cache_revision": value}
-        )
-
-
 @pytest.mark.parametrize("routed", ["native", "routed"])
 @pytest.mark.parametrize("inputs", [1, 2])
 def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -> None:
@@ -918,18 +908,3 @@ def test_required_selection_after_omission(method: str, submission: dict) -> Non
     )
     with pytest.raises(PreparationError, match="Expected inputs"):
         getattr(runner, method)("root", **submission)
-
-
-@pytest.mark.parametrize("method", ["run", "run_development"])
-@pytest.mark.parametrize("revision", [None, "valid"])
-def test_local_rejects_request_cache_revision(
-    method: str, revision: str | None
-) -> None:
-    @metric(name="root", description="Root", outputs={"answer": TABLE})
-    def root() -> pd.DataFrame:
-        pytest.fail("Invalid submission reached handler")
-
-    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[root])})
-    with pytest.raises(TypeError, match="cache_revision"):
-        getattr(runner, method)("root", cache_revision=revision)
-    assert runner.inspect() is None

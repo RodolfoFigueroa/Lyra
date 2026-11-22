@@ -22,13 +22,9 @@ def test_native_operations_without_authoring_or_execution() -> None:
         MODULES,
         blocked=BLOCKED,
         assertions="""
-        import numpy as np
-        import pandas as pd
         import geopandas as gpd
-        import pyarrow as pa
         from shapely.geometry import MultiPoint, Point
         from lyra.data.location_frames import validate_frame
-        from lyra.data.scalars import normalize_property
         frame = gpd.GeoDataFrame(
             {'id': ['a', 'b'], 'value': [1, 2]},
             geometry=[Point(1, 2, 3), MultiPoint([])], crs=4326,
@@ -39,8 +35,6 @@ def test_native_operations_without_authoring_or_execution() -> None:
         assert owned['value'].tolist() == [1, 2]
         assert owned.geometry.iloc[0].has_z
         assert owned.geometry.iloc[1].is_empty
-        assert normalize_property(np.int64(3), 'value') == 3
-        assert normalize_property(pd.NA, 'value') is None
         """,
     )
 

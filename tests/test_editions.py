@@ -6,6 +6,7 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 
+from lyra.contracts.location_validation import validate_location_families
 from lyra.contracts.plugins import (
     LocationInputDeclaration,
     PluginInfo,
@@ -14,7 +15,6 @@ from lyra.runtime.invocation import BoundPlugin
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_schema import dataset
-from test_support.manifest_graph import build_graph
 from test_support.plugin_graph import node
 from tests.graph_execution_helpers import executor
 
@@ -81,4 +81,4 @@ def test_location_structure_conflicts_still_rejected() -> None:
         -1
     ].nullable = True
     with pytest.raises(ValueError, match="incompatible structure"):
-        build_graph({"test": [first, second]})
+        validate_location_families([first, second])

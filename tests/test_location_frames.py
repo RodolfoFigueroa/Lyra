@@ -1,6 +1,3 @@
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -9,7 +6,6 @@ import pytest
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import GeometryCollection, Point, shape
 
-from lyra.data.scalars import normalize_property
 from lyra.sdk.location_schema import LocationOutputSchema
 from tests.geometry_fixtures import VALUE_GEOMETRIES as GEOMETRIES
 from tests.location_frame_helpers import convert, source_frame
@@ -91,49 +87,6 @@ def test_duplicate_ids() -> None:
     frame["key"] = ["same", "same"]
     with pytest.raises(ValueError, match="unique"):
         convert(frame)
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        [],
-        {},
-        b"bytes",
-        complex(1, 2),
-        timedelta(days=1),
-        np.timedelta64(1, "s"),
-        np.timedelta64(1, "ns"),
-        np.timedelta64(1, "ps"),
-        Decimal("1.2"),
-        float("inf"),
-        Point(0, 0),
-    ],
-)
-def test_unsupported_properties_identify_column(value: object) -> None:
-    frame = source_frame()
-    frame["extra"] = pd.Series([value, None], dtype=object)
-    with pytest.raises(ValueError, match="extra"):
-        normalize_property(value, "extra")
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (np.int64(3), 3),
-        (np.float32(1.5), 1.5),
-        (np.bool_(1), True),
-        (np.str_("a"), "a"),
-        (np.datetime64("2026-10-29"), "2026-10-29T00:00:00"),
-        (np.datetime64("NaT"), None),
-        (np.timedelta64("NaT"), None),
-        (datetime(2026, 10, 29, tzinfo=UTC), "2026-10-29T00:00:00+00:00"),
-        (np.float64("nan"), None),
-    ],
-)
-def test_object_column_scalars(value: object, expected: object) -> None:
-    frame = source_frame()
-    frame["extra"] = pd.Series([value, None], dtype=object)
-    assert normalize_property(value, "extra") == expected
 
 
 def test_invalid_frame_contracts() -> None:

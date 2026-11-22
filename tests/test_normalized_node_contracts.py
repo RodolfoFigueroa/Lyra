@@ -13,7 +13,6 @@ from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.locations import LocationSelection
 from lyra.contracts.plugins import (
     NODE_MANIFEST_ADAPTER,
-    LocationInputDeclaration,
     LocationOperationManifest,
     MetricManifest,
     PluginManifest,
@@ -61,7 +60,6 @@ def test_manifest_only_schema_and_detached_description() -> None:
     assert (
         not {
             "request_schema",
-            "spatial_inputs",
             "location_contracts",
             "location_output",
         }
@@ -95,7 +93,6 @@ def test_manifest_only_schema_and_detached_description() -> None:
         "output_contract",
         "location_output",
         "request_schema",
-        "spatial_inputs",
     ],
 )
 def test_metric_rejects_nonmetric_and_redundant_fields(field: str) -> None:
@@ -133,18 +130,6 @@ def test_operation_binding_and_canonical_validation() -> None:
             description="Convert",
             output_contract=contract,
             canonical=True,
-        )
-    with pytest.raises(ValidationError, match="only to metrics"):
-        LocationOperationManifest(
-            code_revision="1",
-            name="convert",
-            description="Convert",
-            output_contract=contract,
-            location_inputs={
-                "source": LocationInputDeclaration(
-                    contract=contract, source_bindings=(contract.reference,)
-                )
-            },
         )
 
 

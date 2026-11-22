@@ -20,6 +20,7 @@ from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.parameters import MetricParameters
@@ -30,7 +31,6 @@ from lyra.sdk.plugin import (
     metric,
 )
 from lyra.sdk.resources import BaseIO, Resource
-from test_support.manifest_graph import build_graph
 from tests.provider_helpers import FakeProvider
 
 if TYPE_CHECKING:
@@ -362,8 +362,9 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
     plugin = PluginDefinition(
         metrics=[source, decorate(consumer)], resources={"places": FakeProvider}
     )
-    restored = manifest(plugin)
-    edge = build_graph({"local": restored.nodes}).dependencies["consumer"]["data"]
+    edge = compile_live_catalog({"local": plugin}).graph.dependencies["consumer"][
+        "data"
+    ]
     assert edge.dependency.locations["location"] == Input("lots")
 
 

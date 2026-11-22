@@ -11,20 +11,19 @@ import pytest
 from typing_extensions import override
 
 from lyra.contracts.errors import MetricResultError
-from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.contracts.resources import IOConfig
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
 from lyra.runtime.planning.bindings import bind_execution
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.sqlite_store import DamagedDataError, SQLiteStore
 from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
-from test_support.declarations import PluginDefinition, metric
-from test_support.location_resolution import SELECTED
-from test_support.manifest_catalog import compile_catalog
+from test_support.routing_plugins import provider
 from tests.cache_helpers import SCHEMA
 from tests.frame_assertions import assert_logical_equal
 from tests.graph_execution_helpers import executor
@@ -45,6 +44,9 @@ if TYPE_CHECKING:
 
 def setup_graph(
     tmp_path: Path,
+    *,
+    revision: str = "1",
+    description: str = "Source",
 ) -> tuple[
     GraphExecutor, PreparedResolvedInvocation, SQLiteStore, list[str], list[bool]
 ]:
@@ -52,9 +54,10 @@ def setup_graph(
     broken = [False]
 
     @metric(
-        code_revision="1",
+        cache="full",
+        code_revision=revision,
         name="source",
-        description="Source",
+        description=description,
         outputs={"source": SCHEMA},
     )
     def source() -> pd.DataFrame:
@@ -62,6 +65,7 @@ def setup_graph(
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="consumer",
         description="Consumer",
@@ -165,6 +169,7 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
             acquisitions.append("setup")
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="Source",
@@ -175,6 +180,7 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -202,11 +208,9 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
 def test_repeated_executions_preserve_entries(tmp_path: Path) -> None:
     runner, root, _, events, _ = setup_graph(tmp_path)
     runner.execute(root)
-    old_key = runner.persistent_key(root.identity)
     events.clear()
     runner.execute(root)
     assert events == []
-    assert old_key == runner.persistent_key(root.identity)
     events.clear()
     runner.execute(root)
     assert events == []
@@ -224,19 +228,15 @@ def test_namespace_contract_versions_and_order(
         ).identity
 
     original = key()
-    manifests = dict(runner.catalog.manifests)
-    runner.catalog = compile_catalog(dict(reversed(list(manifests.items()))))
+    definitions = {key: value.definition for key, value in runner.plugins.items()}
+    runner.catalog = compile_live_catalog(dict(reversed(definitions.items())))
     assert key() == original
-    for manifest in manifests.values():
-        for node in manifest.nodes:
-            node.description = "Edited description"
-    runner.catalog = compile_catalog(manifests)
+    runner, *_ = setup_graph(tmp_path, description="Edited description")
     assert key() == original
     monkeypatch.setattr(computation, "installed_version", lambda _: "2")
-    runner.catalog = compile_catalog(manifests)
+    runner, *_ = setup_graph(tmp_path)
     assert key() == original
-    manifests["plugin_1"].nodes[0].code_revision = "2"
-    runner.catalog = compile_catalog(manifests)
+    runner, *_ = setup_graph(tmp_path, revision="2")
     assert key() != original
 
 
@@ -250,38 +250,25 @@ def test_only_participating_versions_invalidate_seeded_root(
     monkeypatch.setattr(computation, "installed_version", versions.get)
     runner, root, _, events, _ = setup_graph(tmp_path)
     runner.store = SQLiteStore(tmp_path / "values.sqlite")
-    manifests = dict(runner.catalog.manifests)
-    manifests[SELECTED.distribution] = PluginManifest(
-        plugin=PluginInfo(name=SELECTED.distribution, version="test"),
-        factory="test:create",
-        providers=(SELECTED.declaration,),
-        resources={SELECTED.resource: {}, "other": {}},
-    )
-    runner.catalog = compile_catalog(manifests)
+
+    def register_provider(executor: GraphExecutor, name: str) -> None:
+        definitions = {key: value.definition for key, value in executor.plugins.items()}
+        definitions["unrelated"] = PluginDefinition(
+            resources={name: provider("unused")}
+        )
+        executor.catalog = compile_live_catalog(definitions)
+        executor.plugins = executor.catalog.implementations
+
+    register_provider(runner, "locations")
     runner.execute(root)
     events.clear()
     runner.execute(root)
     assert events == []
-    if change == "provider_contract":
-        manifests[SELECTED.distribution].providers = (
-            SELECTED.declaration.model_copy(update={"resource": "other"}),
-        )
-    elif change == "producer_revision":
-        manifests["plugin_1"].nodes[0].code_revision = "2"
-        implementation = runner.plugins["plugin_1"]
-        manifest = implementation.node_manifest("source")
-        assert manifest is not None
-        manifest.code_revision = "2"
-        monkeypatch.setattr(implementation, "node_manifest", lambda _: manifest)
-        descriptor = implementation.definition.implementation("source")
-        monkeypatch.setattr(
-            implementation.definition,
-            "implementation",
-            lambda _: replace(descriptor, manifest=manifest),
-        )
-    else:
-        versions[SELECTED.distribution] = "2"
-    runner.catalog = compile_catalog(manifests)
+    if change == "producer_revision":
+        runner, root, _, events, _ = setup_graph(tmp_path, revision="2")
+    elif change == "provider_version":
+        versions["unrelated"] = "2"
+    register_provider(runner, "other" if change == "provider_contract" else "locations")
     runner.execute(root)
     assert events == (["source", "consumer"] if change == "producer_revision" else [])
 
@@ -371,8 +358,6 @@ def test_runs_reuse_compiled_metadata(
     runner.store = SQLiteStore(tmp_path / "values.sqlite")
     versions.reset_mock()
     runner.execute(root)
-    first = runner.persistent_key(root.identity)
-    assert runner.persistent_key(root.identity) == first
     runner.execute(root)
     versions.assert_not_called()
 

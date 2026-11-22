@@ -248,12 +248,10 @@ def test_development_reuses_local_values_and_private_roots(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("transport", ["http", "mcp"])
-@pytest.mark.parametrize("revision", [None, "valid"])
-def test_submission_rejects_cache_revision_before_enqueue(
+def test_submission_rejects_unexpected_field_before_enqueue(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     transport: str,
-    revision: str | None,
 ) -> None:
     events, work = [], []
     _, runtime = install_definitions(
@@ -268,7 +266,7 @@ def test_submission_rejects_cache_revision_before_enqueue(
             {
                 "metric": "complete",
                 "inputs": {"places": {"provider": "target", "ids": ["a"]}},
-                "cache_revision": revision,
+                "unexpected": True,
             },
         )
     )

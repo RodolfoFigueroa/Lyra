@@ -457,11 +457,6 @@ class GraphExecutor:
                 msg = f"Dependency bindings differ from live declarations: {name}"
                 raise ValueError(msg)
 
-    @staticmethod
-    def persistent_key(identity: str) -> str:
-        """Return the declared computation key directly for stored values."""
-        return identity
-
     def execute(
         self,
         root: PreparedResolvedInvocation | PreparedExecution,
@@ -596,19 +591,18 @@ class GraphExecutor:
             interventions, completed.report, retain_result=self.retain_result
         ) as resolver:
             completed.resolver = resolver
+            bound = completed.bound_root
+            if bound is None:
+                msg = "Preflight must bind the root before execution"
+                raise RuntimeError(msg)
             if isinstance(root, PreparedExecution):
                 for name, selection in root.request.inputs.items():
                     resolver.check_removals(name, selection)
-            bound = completed.bound_root
-            primary = (
-                root.locations.get(bound.primary_input or "")
-                if isinstance(root, PreparedResolvedInvocation) and bound is not None
-                else None
-            )
+                return self._run_bound_metric(bound, completed)
+            primary = root.locations.get(bound.primary_input or "")
             if (
                 primary is not None
                 and not primary.ids
-                and bound is not None
                 and bound.per_location
                 and bound.primary_input is not None
             ):
@@ -621,8 +615,6 @@ class GraphExecutor:
                         ].select(frozenset())
                     },
                 )
-                return self._run_bound_metric(bound, completed)
-            if isinstance(root, PreparedExecution) and bound is not None:
                 return self._run_bound_metric(bound, completed)
             return self._execute_scoped(root, resolver, completed)
 
@@ -1198,50 +1190,17 @@ class GraphExecutor:
 
     def _execute_scoped(
         self,
-        root: PreparedResolvedInvocation | PreparedExecution,
+        root: PreparedResolvedInvocation,
         resolver: LocationResolver,
         completed: RunState,
-        *,
-        primary_demand: frozenset[str] | None = None,
     ) -> tuple[NativeOutputs, ExecutionMetadata]:
-        if isinstance(root, PreparedResolvedInvocation):
-            for value in root.original().locations.values():
-                resolver.retain(value)
+        for value in root.original().locations.values():
+            resolver.retain(value)
 
-        def context_factory(node: str) -> RunContext:
-            return self.context_factory(node)
-
-        if isinstance(root, PreparedExecution):
-            locations = self._prepared_locations(root, completed, primary_demand)
-            arguments = dict(locations)
-            metric_arguments: dict[str, object] = dict(arguments)
-            entry = self.graph.nodes[root.node]
-            if "parameters" in cast("dict", entry.node.request_schema["properties"]):
-                metric_arguments["parameters"] = root.parameters
-            root = self.plugins[entry.distribution].prepare_resolved_invocation(
-                root.node, metric_arguments
-            )
-            root = replace(
-                root,
-                parameters=root.inspect_parameters(),
-                bound_use=completed.bound_root,
-            )
-            root = self._derived_inputs(root, (root.node,), completed, context_factory)
-            recorded = {item.name for item in completed.native_inputs}
-            completed.native_inputs.extend(
-                NativeInputSummary(name, len(value.frame))
-                for name, value in root.locations.items()
-                if name not in recorded
-            )
-
-        if primary_demand is not None and isinstance(root, PreparedResolvedInvocation):
-            primary_name = self.graph.nodes[root.node].node.primary_input
-            if primary_name is not None:
-                root = root.select_primary(primary_name, primary_demand)
         root = replace(
             root, parameters=root.inspect_parameters(), bound_use=completed.bound_root
         )
-        root = self._derived_inputs(root, (root.node,), completed, context_factory)
+        root = self._derived_inputs(root, (root.node,), completed, self.context_factory)
         node = self.graph.nodes[root.node].node
         if node.kind != "metric":
             message = "Execution results require a metric root"
@@ -1261,7 +1220,7 @@ class GraphExecutor:
                 for name, description in node.outputs.items()
             },
         )
-        result = self._execute(root, (root.node,), completed, context_factory)
+        result = self._execute(root, (root.node,), completed, self.context_factory)
         return cast("NativeOutputs", result), metadata
 
     def _retain_result(self, metadata: ExecutionMetadata, completed: RunState) -> None:
@@ -1334,178 +1293,6 @@ class GraphExecutor:
             )
             metadata.location_inputs = projection.location_inputs
             completed.root_artifact = reference
-
-    def _prepared_locations(
-        self,
-        root: PreparedExecution,
-        completed: RunState,
-        primary_demand: frozenset[str] | None,
-    ) -> dict[str, NativeLocationInput]:
-        """Acquire accepted inputs after scheduling direct-source operations.
-
-        Returns:
-            Native inputs with correspondence identities preserved.
-
-        Raises:
-            RuntimeError: If the execution resolver is unavailable.
-        """
-        resolver = completed.resolver
-        if resolver is None:
-            message = "Input acquisition requires an active resolver"
-            raise RuntimeError(message)
-        primary_name = self.graph.nodes[root.node].node.primary_input
-        restored = {}
-        if completed.bound_root is not None:
-            for item in root.inputs:
-                location = completed.bound_root.locations[item.name]
-                if location.upstream is not None:
-                    value = self._reuse_bound_operation(
-                        location.upstream, (root.node,), completed
-                    )
-                    if value is not None:
-                        restored[item.name] = value
-        needed_ids = (
-            {primary_name: tuple(sorted(primary_demand))}
-            if primary_name is not None and primary_demand is not None
-            else {}
-        )
-        needed_ids.update(dict.fromkeys(restored, ()))
-        locations = resolver.resolve_prepared(root, needed_ids=needed_ids)
-        for item in root.inputs:
-            value = restored.get(item.name)
-            if value is None:
-                value = self._execute_route(
-                    locations[item.name],
-                    item.name,
-                    (root.node,),
-                    completed,
-                    bound=completed.bound_root.locations[item.name]
-                    if completed.bound_root is not None
-                    else None,
-                )
-            locations[item.name] = value
-            completed.native_inputs.append(
-                NativeInputSummary(item.name, len(value.frame))
-            )
-        return locations
-
-    def _reuse_bound_operation(
-        self,
-        bound: BoundInvocation,
-        path: tuple[str, ...],
-        completed: RunState,
-    ) -> NativeLocationInput | None:
-        """Schedule direct-source mapping reuse before source acquisition.
-
-        Returns:
-            Forwarded requested groups, or None when ordinary execution is needed.
-
-        Raises:
-            GraphExecutionError: If retained mappings or target acquisition fail.
-        """
-        try:
-            return self._lookup_bound_operation(bound, path, completed)
-        except Exception as exc:
-            raise GraphExecutionError(
-                bound.node, (*path, bound.node), exc, kind="location_operation"
-            ) from exc
-
-    def _lookup_bound_operation(
-        self,
-        bound: BoundInvocation,
-        path: tuple[str, ...],
-        completed: RunState,
-    ) -> NativeLocationInput | None:
-        """Restore direct-source groups and execute only missing partitions.
-
-        Returns:
-            Forwarded groups, or None when ordinary execution is needed.
-        """
-        node = self.graph.nodes[bound.node].node
-        source = next(iter(bound.locations.values()))
-        store = self.provider_records.store if self.provider_records else self.store
-        if (
-            node.kind != "location_operation"
-            or node.cache not in {"full", "per_location"}
-            or source.upstream is not None
-            or source.ids is None
-        ):
-            return None
-        if store is None or completed.resolver is None:
-            return None
-        key = bound.demand().identity
-        keys = bound.demand().computation_keys
-        if keys is None:
-            return None
-        if not store.path.exists():
-            store.initialize()
-        groups: dict[str, tuple[str, ...]] = {}
-        missing: set[str | None] = set()
-        for group, value_key in keys.items():
-            header = Header(
-                value_key=value_key,
-                node_id=bound.node,
-                output_scope="location",
-                owner_scope=source.provider.provider_scope,
-                target_scope=bound.descriptor.target,
-            )
-            saved = OperationPairs(store).lookup(
-                header, source.ids if group is None else (group,)
-            )
-            if saved is None:
-                missing.add(group)
-            else:
-                groups.update(saved)
-        completed.observe_partial_reuse(
-            bound.node,
-            key,
-            (*path, bound.node),
-            mixed=bool(missing) and len(missing) < len(keys),
-        )
-        if missing:
-            if not bound.per_location:
-                return None
-            invocation = self._materialize_bound_invocation(bound, missing, completed)
-            result = self._operation(
-                invocation,
-                completed,
-                (*path, bound.node),
-                retained=groups,
-            )
-            target = self.catalog.provider_registry[str(node.target_provider)]
-            forwarded = forward_correspondences(result, target.schema.metadata)
-            return replace(
-                forwarded,
-                computations=tuple(
-                    (value_key, group) for group, value_key in keys.items()
-                ),
-            )
-        target = self.catalog.provider_registry[str(node.target_provider)]
-        ids = sorted({target_id for values in groups.values() for target_id in values})
-        targets = completed.resolver.resolve(
-            {"targets": LocationSelection(provider=str(node.target_provider), ids=ids)},
-            use_ids={"targets": completed.report.target_use_id(bound)},
-        )["targets"]
-        result = OperationResult(groups, source.provider, targets)
-        forwarded = forward_correspondences(result, target.schema.metadata)
-        completed.observations.append(
-            InvocationObservation(
-                bound.node,
-                sha256(key.encode()).hexdigest(),
-                (*path, bound.node),
-                "shared_reuse"
-                if isinstance(completed.get(key), OperationResult)
-                else "cache_hit",
-            )
-        )
-        return replace(
-            forwarded,
-            computations=(
-                tuple((value_key, group) for group, value_key in keys.items())
-                if bound.per_location
-                else tuple((key, group) for group in groups) or ((key, None),)
-            ),
-        )
 
     def _execute_route(
         self,

@@ -12,15 +12,14 @@ from lyra.contracts.errors import MetricInputError, MetricResultError
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.context import RunContext
-from lyra.sdk.dependencies import Dependency
-from test_support.declarations import metric
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import metric
 from test_support.location_helpers import (
     fixture_locations,
-    node_contract,
     output_schema,
 )
-from test_support.runtime_inputs import native_inputs
-from tests.graph_arguments_helpers import geometry
+from test_support.routing_plugins import provider
+from tests.graph_arguments_helpers import geometry, scoped_inputs
 from tests.graph_execution_helpers import TABLE, Consumer, Label, Year, executor
 
 
@@ -52,6 +51,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         plain = plain.iloc[:0]
 
     @metric(
+        cache="full",
         code_revision="1",
         name="leaf",
         description="leaf",
@@ -62,6 +62,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return plain
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -74,6 +75,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return {"places": spatial, "counts": table}
 
     @metric(
+        cache="full",
         code_revision="1",
         name="left",
         description="left",
@@ -90,6 +92,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return copied
 
     @metric(
+        cache="full",
         code_revision="1",
         name="right",
         description="right",
@@ -107,6 +110,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return table
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -125,6 +129,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return {"summary": a, "details": b}
 
     @metric(
+        cache="full",
         code_revision="1",
         name="unused",
         description="unused",
@@ -166,6 +171,7 @@ def test_effective_arguments_control_reuse() -> None:
     calls: list[str] = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -176,6 +182,7 @@ def test_effective_arguments_control_reuse() -> None:
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
         name="middle",
         description="middle",
@@ -187,6 +194,7 @@ def test_effective_arguments_control_reuse() -> None:
         return table
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -215,8 +223,11 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
     locations: list[gpd.GeoDataFrame] = []
 
     @metric(
+        cache="full",
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={
+            "location": LocationDependency(provider="test:units_lot"),
+        },
         name="source",
         description="source",
         outputs={"source": TABLE},
@@ -226,21 +237,26 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={
+            "location": LocationDependency(provider="test:units_lot"),
+            "table": Dependency("source", producer="source"),
+        },
         name="root",
         description="root",
-        inputs={"table": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(location: gpd.GeoDataFrame, table: pd.DataFrame) -> pd.DataFrame:
         pd.testing.assert_frame_equal(locations[-1], location)
         return table
 
-    runner, plugin = executor(root, source)
+    runner, plugin = executor(
+        root, source, resources={"test:units_lot": provider("test:units_lot")}
+    )
     first = plugin.prepare_resolved_invocation(
         "root",
-        native_inputs(
+        scoped_inputs(
             {
                 "location": fixture_locations(
                     geometry(), schema=output_schema(crs="EPSG:6372", label=str)
@@ -252,7 +268,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
     second = plugin.prepare_resolved_invocation(
         "root",
-        native_inputs(
+        scoped_inputs(
             {
                 "location": fixture_locations(
                     changed, schema=output_schema(crs="EPSG:6372", label=str)
@@ -273,7 +289,13 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     broken = True
     original = RuntimeError("source unavailable")
 
-    @metric(code_revision="1", name="leaf", description="leaf", outputs={"leaf": TABLE})
+    @metric(
+        cache="full",
+        code_revision="1",
+        name="leaf",
+        description="leaf",
+        outputs={"leaf": TABLE},
+    )
     def leaf(parameters: Year) -> object:
         trace.append("leaf")
         assert parameters.year == 2020
@@ -282,6 +304,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         return None if broken and failure == "result" else pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
         name="middle",
         description="middle",
@@ -294,13 +317,18 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         return table
 
     @metric(
-        code_revision="1", name="early", description="early", outputs={"early": TABLE}
+        cache="full",
+        code_revision="1",
+        name="early",
+        description="early",
+        outputs={"early": TABLE},
     )
     def early() -> pd.DataFrame:
         trace.append("early")
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -360,6 +388,7 @@ def test_context_identity_and_job_association() -> None:
         return context
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -371,6 +400,7 @@ def test_context_identity_and_job_association() -> None:
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -391,6 +421,7 @@ def test_context_identity_and_job_association() -> None:
 
 def test_source_can_be_execution_root() -> None:
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -414,20 +445,29 @@ def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
     calls = []
 
     @metric(
-        code_revision="1", name="first", description="First", outputs={"rows": schema}
+        cache="full",
+        code_revision="1",
+        name="first",
+        description="First",
+        outputs={"rows": schema},
     )
     def first() -> pd.DataFrame:
         calls.append("first")
         return pd.DataFrame({"value": [1]})
 
     @metric(
-        code_revision="1", name="second", description="Second", outputs={"rows": schema}
+        cache="full",
+        code_revision="1",
+        name="second",
+        description="Second",
+        outputs={"rows": schema},
     )
     def second() -> pd.DataFrame:
         calls.append("second")
         return pd.DataFrame({"value": [2]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="consumer",
         description="Consumer",

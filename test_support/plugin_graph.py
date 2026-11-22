@@ -11,11 +11,9 @@ from lyra.contracts.plugins import (
     PluginInfo,
     PluginManifest,
 )
-from lyra.runtime.planning.graph import PluginGraph
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
 from test_support.location_helpers import node_contract
-from test_support.manifest_graph import build_graph
 
 
 class Required(MetricParameters):
@@ -61,15 +59,6 @@ def manifest(name: str, *nodes: NodeManifest) -> PluginManifest:
         plugin=PluginInfo(name=name, version="1"),
         factory="unavailable:create_plugin",
         nodes=list(nodes),
-    )
-
-
-def graph(*nodes: NodeManifest) -> PluginGraph:
-    return build_graph(
-        {
-            f"plugin-{index}": manifest(f"plugin-{index}", item).nodes
-            for index, item in enumerate(nodes)
-        }
     )
 
 

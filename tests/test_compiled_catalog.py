@@ -1,71 +1,78 @@
 """Shared catalog capture and complete-catalog validation."""
 
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 
-from lyra.contracts.plugins import PluginManifest
+from lyra.contracts.errors import ResourceConfigurationError
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.sdk.dependencies import Dependency
-from test_support.manifest_catalog import compile_catalog
-from test_support.plugin_graph import manifest as graph_manifest
-from test_support.plugin_graph import node
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.routing_plugins import provider
 from test_support.workloads import catalog, installed, workload
-from tests.contract_helpers import metric_manifest, plugin_manifest
 
 
-def manifest(name: str) -> PluginManifest:
-    return PluginManifest.model_validate(plugin_manifest(metric_manifest(name=name)))
+def metric_plugin(name: str, upstream: str | None = None) -> PluginDefinition:
+    schema = pa.DataFrameSchema(strict=True)
+
+    def source() -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def consumer(data: pd.DataFrame) -> pd.DataFrame:
+        return data
+
+    inputs = {"data": Dependency(upstream, producer=upstream)} if upstream else {}
+    handler = metric(
+        name=name,
+        code_revision="1",
+        description=name,
+        outputs={name: schema},
+        inputs=inputs,
+    )(consumer if upstream else source)
+    return PluginDefinition(metrics=[handler])
 
 
-def test_catalog_captures_declarations_and_reuses_families() -> None:
-    source = manifest("first")
-    compiled = compile_catalog({"one": source, "two": manifest("second")})
-    source.nodes.clear()
-    assert set(compiled.graph.nodes) == {"first", "second"}
+def test_catalog_captures_declarations() -> None:
+    definitions = {"one": metric_plugin("first"), "two": metric_plugin("second")}
+    compiled = compile_live_catalog(definitions)
+    definitions.clear()
+    assert (
+        set(compiled.graph.nodes)
+        == set(compiled.accepted_sources)
+        == {"first", "second"}
+    )
     assert len(compiled.manifests["one"].nodes) == 1
     assert not compiled.providers
 
 
 def test_duplicate_concrete_identity_across_plugins() -> None:
     with pytest.raises(ValueError, match="Duplicate node"):
-        compile_catalog({"one": manifest("same"), "two": manifest("same")})
+        compile_live_catalog(
+            {"one": metric_plugin("same"), "two": metric_plugin("same")}
+        )
 
 
 def test_conflicting_resources_across_plugins() -> None:
-    first, second = manifest("first"), manifest("second")
-    first.resources["shared"] = {"kind": "first"}
-    second.resources["shared"] = {"kind": "second"}
-    with pytest.raises(ValueError, match="Conflicting resource"):
-        compile_catalog({"one": first, "two": second})
+    with pytest.raises(ResourceConfigurationError, match="Conflicting resource"):
+        compile_live_catalog(
+            {
+                key: PluginDefinition(resources={"shared": provider(key)})
+                for key in ("first", "second")
+            }
+        )
 
 
 def test_cross_plugin_dependencies_and_cycles() -> None:
-    source = node("source")
-    consumer = node(
-        "consumer", inputs={"data": Dependency("source", producer="source")}
-    )
-    manifests = {
-        "consumer": graph_manifest("consumer", consumer),
-        "source": graph_manifest("source", source),
+    definitions = {
+        "one": metric_plugin("source"),
+        "two": metric_plugin("consumer", "source"),
     }
-    compiled = compile_catalog(manifests)
-    assert compiled.graph.order.index("source") < compiled.graph.order.index("consumer")
-    source.inputs.update(
-        node(
-            "source", inputs={"data": Dependency("consumer", producer="consumer")}
-        ).inputs
-    )
-    with pytest.raises(ValueError, match=r"[Cc]ycle"):
-        compile_catalog(manifests)
-
-
-def test_distinct_metrics_span_plugins() -> None:
-    compiled = compile_catalog(
-        {
-            "one": graph_manifest("one", node("first")),
-            "two": graph_manifest("two", node("second")),
-        }
-    )
-    assert set(compiled.accepted_sources) == {"first", "second"}
+    compiled = compile_live_catalog(definitions)
+    assert compiled.graph.order == ("source", "consumer")
+    definitions["one"] = metric_plugin("source", "consumer")
+    with pytest.raises(ValueError, match="cycle"):
+        compile_live_catalog(definitions)
 
 
 def test_application_and_local_share_contracts() -> None:
