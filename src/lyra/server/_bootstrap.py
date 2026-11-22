@@ -25,7 +25,6 @@ def command_imports(module: str) -> Generator[None, None, None]:
             "rq",
             "mcp",
             "starlette",
-            "filelock",
             "pandera",
             "pyarrow",
             "geopandas",

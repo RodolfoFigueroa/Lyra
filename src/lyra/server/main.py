@@ -25,15 +25,7 @@ with command_imports(__name__):
     from lyra.server.mcp.tools import InProcessLyraBackend
     from lyra.server.registry import Catalog
     from lyra.server.results import ResultService
-    from lyra.server.routes import (
-        admin,
-        data_types,
-        health,
-        jobs,
-        metrics,
-        reports,
-        results,
-    )
+    from lyra.server.routes.registration import register_http_routes
     from lyra.server.runtime import ApplicationRuntime, require_runtime
     from lyra.version import APP_VERSION
 
@@ -76,16 +68,7 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
 
     app = FastAPI(title="Lyra API", version=APP_VERSION, lifespan=lifespan)
     app.add_exception_handler(RedisError, redis_unavailable_response)
-    for router in (
-        admin.router,
-        health.router,
-        jobs.router,
-        data_types.router,
-        metrics.router,
-        results.router,
-        reports.router,
-    ):
-        app.include_router(router)
+    register_http_routes(app)
     if config.mcp.enabled:
         mcp_app = create_mcp_app(
             agent_api_key=credentials.agent_api_key,

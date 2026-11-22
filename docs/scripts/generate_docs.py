@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 import re
-from contextlib import ExitStack
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, get_args, get_origin
 from urllib.parse import urljoin
 
+import yaml
 from fastapi import FastAPI
 from filelock import FileLock
 from marko import Markdown
@@ -24,7 +25,7 @@ from lyra.api.admin_cli import build_parsers as build_admin_parsers
 from lyra.contracts.config import LyraConfig
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.server.mcp.server import SERVER_INSTRUCTIONS
-from lyra.server.routes import admin, data_types, health, jobs, metrics
+from lyra.server.routes.registration import register_http_routes
 from lyra.server.worker_launcher import build_parser as build_worker_parser
 from lyra.version import APP_VERSION
 
@@ -108,7 +109,7 @@ def main(docs_dir: Path = DOCS_DIR) -> None:
 
 
 def publish_outputs(stage: Path, docs_dir: Path) -> None:
-    """Replace the owned tree and named files, restoring backups on an I/O error.
+    """Publish the validated tree and named files. Rerun after an I/O error.
 
     Raises:
         DocumentationGenerationError: If a public output is missing or unexpected,
@@ -135,22 +136,16 @@ def publish_outputs(stage: Path, docs_dir: Path) -> None:
             message = f"Symlink in staged documentation: {entry}"
             raise DocumentationGenerationError(message)
 
-    # Moving the old tree as a unit also removes stale nested files. Temporary
-    # directory cleanup unlinks symlinks inside that tree without following them.
-    backup = stage / "previous"
-    with ExitStack() as rollback:
-        for relative in outputs:
-            source = stage / relative
-            target = docs_dir / relative
-            previous = backup / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists():
-                previous.parent.mkdir(parents=True, exist_ok=True)
-                target.replace(previous)
-                rollback.callback(previous.replace, target)
-            source.replace(target)
-            rollback.callback(target.replace, source)
-        rollback.pop_all()
+    live_reference = docs_dir / reference
+    live_reference.parent.mkdir(parents=True, exist_ok=True)
+    if live_reference.exists():
+        shutil.rmtree(live_reference)
+    staged_reference.replace(live_reference)
+
+    live_public = docs_dir / "public"
+    live_public.mkdir(exist_ok=True)
+    for name in PUBLIC_FILES:
+        (public / name).replace(live_public / name)
 
 
 def generate_contracts(generated: Path, public: Path) -> None:
@@ -207,14 +202,7 @@ def create_openapi_app() -> FastAPI:
         An application suitable for generating the complete OpenAPI document.
     """
     app = FastAPI(title="Lyra API", version=APP_VERSION)
-    for router in (
-        admin.router,
-        health.router,
-        jobs.router,
-        data_types.router,
-        metrics.router,
-    ):
-        app.include_router(router)
+    register_http_routes(app)
     return app
 
 
@@ -242,7 +230,16 @@ def generate_http_reference(generated: Path) -> dict[str, Any]:
     ]
     groups: dict[str, list[tuple[str, str, dict[str, Any]]]] = {}
     for path, path_item in sorted(schema["paths"].items()):
-        for method in ("get", "post", "put", "patch", "delete"):
+        for method in (
+            "get",
+            "post",
+            "put",
+            "patch",
+            "delete",
+            "head",
+            "options",
+            "trace",
+        ):
             operation = path_item.get(method)
             if operation is None:
                 continue
@@ -740,33 +737,34 @@ def read_frontmatter(path: Path) -> tuple[str, str, str]:
     """Read a page's required metadata and Markdown body.
 
     Returns:
-        The page title, description, and stripped body.
+        The page title, description, and Markdown body with its whitespace preserved.
 
     Raises:
         DocumentationGenerationError: If frontmatter is missing, malformed, or
             lacks a title or description.
     """
     content = path.read_text(encoding="utf-8")
-    match = re.match(r"^---\n(.*?)\n---\n(.*)$", content, flags=re.DOTALL)
+    match = re.match(
+        r"^---\n(.*?)^---(?:\n|$)(.*)\Z", content, flags=re.DOTALL | re.MULTILINE
+    )
     if match is None:
         message = f"Missing frontmatter: {path}"
         raise DocumentationGenerationError(message)
     metadata, body = match.groups()
-    fields: dict[str, str] = {}
-    for line in metadata.splitlines():
-        key, separator, value = line.partition(":")
-        if not separator:
-            message = f"Invalid frontmatter line in {path}: {line}"
-            raise DocumentationGenerationError(message)
-        parsed_value = value.strip()
-        if parsed_value.startswith('"'):
-            parsed_value = json.loads(parsed_value)
-        fields[key.strip()] = parsed_value
     try:
-        return fields["title"], fields["description"], body.strip()
-    except KeyError as exc:
-        message = f"Incomplete frontmatter: {path}"
+        fields = yaml.safe_load(metadata)
+    except (yaml.YAMLError, ValueError) as exc:
+        message = f"Invalid frontmatter in {path}: {exc}"
         raise DocumentationGenerationError(message) from exc
+    if not isinstance(fields, dict):
+        message = f"Expected a frontmatter mapping in {path}"
+        raise DocumentationGenerationError(message)
+    for key in ("title", "description"):
+        value = fields.get(key)
+        if not isinstance(value, str) or not value.strip():
+            message = f"Expected a nonblank frontmatter {key} in {path}"
+            raise DocumentationGenerationError(message)
+    return fields["title"], fields["description"], body
 
 
 def navigation_slugs(items: list[str | dict[str, Any]]) -> list[str]:

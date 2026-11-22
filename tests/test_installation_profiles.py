@@ -12,7 +12,7 @@ CLIENT = {"httpx"}
 TABLES = {"geopandas", "numpy", "pandas", "pyproj", "shapely"}
 DATA = TABLES | {"pyarrow", "pyogrio"}
 SDK = DATA | {"pandera"}
-RUNTIME = SDK | {"filelock"}
+RUNTIME = SDK
 SERVER = RUNTIME | CLIENT | {"fastapi", "mcp", "redis", "rq", "starlette", "uvicorn"}
 EARTH_ENGINE = DATA | {"earthengine-api"}
 

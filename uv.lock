@@ -2017,7 +2017,6 @@ earth-engine = [
 ]
 runtime = [
     { name = "duckdb" },
-    { name = "filelock" },
     { name = "geopandas" },
     { name = "ibis-framework", extra = ["duckdb", "postgres"] },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -2050,7 +2049,6 @@ sdk = [
 server = [
     { name = "duckdb" },
     { name = "fastapi" },
-    { name = "filelock" },
     { name = "geopandas" },
     { name = "ibis-framework", extra = ["duckdb", "postgres"] },
     { name = "mcp" },
@@ -2113,7 +2111,6 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.4.3,<1.5" },
     { name = "earthengine-api", marker = "extra == 'earth-engine'", specifier = ">=1.7.26" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.136.1" },
-    { name = "filelock", marker = "extra == 'runtime'", specifier = ">=3.32.2" },
     { name = "geopandas", marker = "extra == 'tables'", specifier = ">=1.2.0" },
     { name = "httpx", marker = "extra == 'client'", specifier = ">=0.28.1" },
     { name = "ibis-framework", marker = "extra == 'sdk'", specifier = ">=12,<13" },

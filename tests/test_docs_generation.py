@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -150,10 +151,42 @@ def test_rejects_symlinked_output_paths(site: Path, relative: Path) -> None:
     assert published(site) == before
 
 
-def test_publication_error_rolls_back_owned_outputs(
+def test_folded_frontmatter_and_markdown_body(tmp_path: Path) -> None:
+    page = tmp_path / "folded.md"
+    body = "    first()\n    second()\n\n---\nMore\n"
+    page.write_text(
+        f"---\ntitle: 'A: guide'\ndescription: >-\n  first\n  second\n---\n{body}"
+    )
+    assert docs.read_frontmatter(page) == ("A: guide", "first second", body)
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "title: missing delimiters",
+        "---\ntitle: unclosed",
+        "---\ntitle: [\n---",
+        "---\n- item\n---",
+        "---\ntitle: Guide\n---",
+        "---\ntitle: 12\ndescription: Test\n---",
+        "---\ntitle: Guide\ndescription: ' '\n---",
+        "---\ntitle: Guide\ndescription: 2026-02-30\n---",
+    ],
+)
+def test_invalid_frontmatter_preserves_generation(site: Path, header: str) -> None:
+    before = published(site)
+    page = site / docs.CONTENT / "reference/index.md"
+    docs.write_text(page, header + "\nBody")
+    docs.write_text(site / "revision", "second")
+    with pytest.raises(docs.DocumentationGenerationError) as error:
+        docs.main(site)
+    assert str(page) in str(error.value)
+    assert published(site) == before
+
+
+def test_publication_error_is_repaired_by_rerun(
     site: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    before = published(site)
     original = Path.replace
     failed = False
 
@@ -169,9 +202,17 @@ def test_publication_error_rolls_back_owned_outputs(
     monkeypatch.setattr(Path, "replace", replace)
     with pytest.raises(OSError, match="injected write error"):
         docs.main(site)
-    assert published(site) == before
     docs.main(site)
-    assert published(site) != before
+
+    clean = site.parent / "clean"
+    shutil.copytree(
+        site / docs.CONTENT / "reference",
+        clean / docs.CONTENT / "reference",
+        ignore=shutil.ignore_patterns("generated"),
+    )
+    shutil.copyfile(site / "navigation.json", clean / "navigation.json")
+    docs.main(clean)
+    assert published(site) == published(clean)
 
 
 def test_generated_mcp_schemas_and_annotations_match_advertised_tools(

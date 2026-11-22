@@ -42,7 +42,7 @@ THIRD_PARTY = {
     # Runtime owns managed acquisition, selector validation, and SQLite storage.
     "lyra.runtime": CONTRACT_LIBS
     | NATIVE_LIBS
-    | {"filelock", "ibis", "pandera", "pydantic_core", "sqlalchemy"},
+    | {"ibis", "pandera", "pydantic_core", "sqlalchemy"},
     "lyra.api": {
         "httpx",
         "geopandas",

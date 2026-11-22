@@ -26,7 +26,6 @@ from docs.scripts.generate_docs import (
     CONTENT_DIR,
     ENV_FIELDS,
     config_rows,
-    create_openapi_app,
     navigation_pages,
     schema_fields,
 )
@@ -49,6 +48,8 @@ from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.sdk.plugin_cli import main as plugin_main
 from lyra.sdk.plugin_cli import render_manifest
+from lyra.server.main import create_app
+from tests.config_helpers import api_credentials, load_test_config
 from tests.plugin_helpers import plugin_config
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
 from tests.sqlite_helpers import database
@@ -331,8 +332,30 @@ def test_api_reference_checker_rejects_missing_and_empty_index(tmp_path: Path) -
     assert "API symbol index must contain symbols" in api_reference_failures(tmp_path)
 
 
-def test_generated_openapi_has_explicit_authentication_boundaries() -> None:
-    schema = create_openapi_app().openapi()
+def test_generated_http_contract_matches_application(tmp_path: Path) -> None:
+    generated = tmp_path / "reference"
+    public = tmp_path / "public"
+    generate_docs.generate_contracts(generated, public)
+    schema = json.loads((public / "openapi.json").read_text())
+    app = create_app(load_test_config(tmp_path), credentials=api_credentials())
+
+    def operations(paths: dict) -> set[tuple[str, str]]:
+        return {
+            (method.upper(), path)
+            for path, item in paths.items()
+            for method, operation in item.items()
+            if isinstance(operation, dict) and "operationId" in operation
+        }
+
+    expected = operations(app.openapi()["paths"])
+    assert operations(schema["paths"]) == expected
+    headings = re.findall(
+        r"^### `([A-Z]+) (/[^\n`]+)`$",
+        (generated / "http.md").read_text(),
+        re.MULTILINE,
+    )
+    assert set(headings) == expected
+
     schemes = schema["components"]["securitySchemes"]
 
     assert set(schemes) == {"AdminBearer", "AgentBearer"}

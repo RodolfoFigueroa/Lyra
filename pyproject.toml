@@ -31,7 +31,6 @@ sdk = [
 # DuckDB 1.4 LTS keeps a bounded spatial/materialization API for Ibis 12.
 runtime = [
     "lyra[sdk]",
-    "filelock>=3.32.2",
     "ibis-framework[duckdb,postgres]>=12,<13",
     "duckdb>=1.4.3,<1.5",
     "psycopg[binary]>=3.3.2,<4",
