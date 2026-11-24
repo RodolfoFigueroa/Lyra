@@ -287,8 +287,6 @@ class GraphExecutor:
         Returns:
             The bound root and the resource scope validated for this execution.
 
-        Raises:
-            ValueError: If accepted contracts, identities or revisions differ.
         """
         validate_execution_plan(
             self.graph,
@@ -297,19 +295,6 @@ class GraphExecutor:
             self.catalog.dependency_routes,
         )
         bound = bind_execution(self.catalog, prepared)
-        try:
-            identity = self.catalog.computation.plan(
-                prepared.node,
-                prepared.inputs,
-                prepared.dependency_routes,
-                prepared.parameter_uses,
-            )
-        except KeyError as exc:
-            msg = "Accepted computation is unavailable"
-            raise ValueError(msg) from exc
-        if identity != prepared.computation_identity:
-            msg = "Computation identity differs from accepted plan"
-            raise ValueError(msg)
         self._validate_root(prepared.node)
         self._validate_scopes(prepared)
         scope = ResourceScope(
@@ -1102,7 +1087,9 @@ class GraphExecutor:
     ) -> ResourceScope:
         if isinstance(root, PreparedExecution):
             completed.bound_root, scope = self._bind_plan(root)
-            completed.parameter_uses = deepcopy(root.parameter_uses)
+            completed.parameter_uses = deepcopy(
+                {"root": root.request.parameters, **root.parameter_uses}
+            )
             completed.routes = {
                 item.name: item.binding for item in root.inputs
             } | deepcopy(root.dependency_routes)
@@ -1939,12 +1926,10 @@ class GraphExecutor:
             else edge.binding_path
         )
         parameter_key = use_key(
-            owner.node,
-            owner.parameter_values(),
-            binding_path,
-            scope=owner.bound_use.parameter_use_key
+            owner.bound_use.parameter_use_key
             if owner.bound_use is not None
             else owner.parameter_use_key,
+            binding_path,
         )
         bound = owner.bound_use.bindings[binding_path] if owner.bound_use else None
 

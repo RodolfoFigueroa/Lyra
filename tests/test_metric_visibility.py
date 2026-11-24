@@ -153,9 +153,9 @@ def test_each_live_metric_owns_its_schema_and_computed_inputs() -> None:
     assert detail.computed_inputs["values"]["producer"] == "numbers"
     detail.computed_inputs.clear()
     assert view.inspect("combined").computed_inputs
-    assert prepare_execution(runner.catalog, {"metric": "numbers"}).parameters == {
-        "count": 2
-    }
+    assert prepare_execution(
+        runner.catalog, {"metric": "numbers"}
+    ).request.parameters == {"count": 2}
     for request in (
         {"metric": "labels"},
         {"metric": "numbers", "parameters": {"label": "wrong"}},

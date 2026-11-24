@@ -155,6 +155,7 @@ def test_descriptor_roles_revisions_and_compact_upstream_keys() -> None:
         object(),
         {1: "a"},
         (1, 2),
+        b"bytes",
         {"nested": [float("nan")]},
     ],
 )

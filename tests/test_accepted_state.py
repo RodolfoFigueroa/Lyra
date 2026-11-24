@@ -18,7 +18,7 @@ from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
-from lyra.server.job_submission import submit_job
+from lyra.server.job_submission import MetricPayloadValidationError, submit_job
 from lyra.server.registry import Catalog
 
 
@@ -57,8 +57,7 @@ def test_effective_values_survive_defaults_and_storage(
     request = ExecutionRequest.model_validate(raw) if model_request else raw
     plan = prepare_execution(parameter_catalog(), request)
     stored = PreparedExecution.model_validate_json(plan.model_dump_json())
-    assert stored.request.parameters == stored.parameters
-    assert stored.parameters == {
+    assert stored.request.parameters == {
         "options": {"values": [1]},
         "nullable": None if parameters and "nullable" in parameters else 7,
     }
@@ -81,13 +80,12 @@ def test_nested_views_and_constructor_inputs_are_owned() -> None:
     raw["parameters"]["options"]["values"].append(3)
     catalog.graph.nodes["root"].node.description = "changed"
     cast("dict", plan.request.parameters["options"])["values"].append(4)
-    cast("dict", plan.parameters["options"])["values"].append(5)
     plan.output_metadata["result"].columns.clear()
     accepted.plugin.name = "changed"
     view = envelope.model_dump(mode="json")
     view["accepted"]["plan"]["request"]["parameters"].clear()
     restored = JobEnvelope.model_validate(snapshot)
-    snapshot["accepted"]["plan"]["parameters"].clear()
+    snapshot["accepted"]["plan"]["request"]["parameters"].clear()
     assert envelope.model_dump(mode="json") == restored.model_dump(mode="json")
     assert restored.accepted.plan.request.parameters == {
         "options": {"values": [2]},
@@ -106,7 +104,7 @@ def test_invalid_persisted_state_is_rejected(change: str) -> None:
     if change == "extra":
         payload["unexpected"] = True
     elif change == "parameters":
-        payload["parameters"] = []
+        payload["request"]["parameters"] = []
     else:
         payload["outputs"].clear()
     with pytest.raises(ValidationError):
@@ -124,10 +122,53 @@ def test_http_adapter_captures_effective_values(*, explicit: bool) -> None:
         submit_job(JobCreateRequest.model_validate(data), catalog=catalog, jobs=jobs)
     )
     (envelope,) = jobs.enqueue.call_args.args
-    assert (
-        envelope.accepted.plan.request.parameters == envelope.accepted.plan.parameters
+    assert envelope.accepted.plan.parameter_uses == {}
+    assert envelope.accepted.plan.request.parameters["nullable"] == 7
+
+
+def test_submission_rejects_nested_union_default_that_changes_type_on_replay() -> None:
+    class FloatChoice(MetricParameters):
+        value: float
+
+    class IntChoice(MetricParameters):
+        value: int = 1
+
+    class Parameters(MetricParameters):
+        choice: FloatChoice | IntChoice = Field(
+            default_factory=IntChoice, description="Numeric choice"
+        )
+
+    @metric(
+        name="root",
+        description="Root",
+        outputs={"result": pa.DataFrameSchema(strict=True)},
     )
-    assert envelope.accepted.plan.parameters["nullable"] == 7
+    def root(parameters: Parameters) -> pd.DataFrame:
+        pytest.fail(f"Submission invoked the handler with {parameters!r}")
+
+    compiled = compile_live_catalog({"fixture": PluginDefinition(metrics=[root])})
+    catalog = Catalog(compiled, {"root": "default"})
+    jobs = Mock()
+    # The factory constructs IntChoice, but its JSON object matches FloatChoice first.
+    with pytest.raises(MetricPayloadValidationError) as error:
+        asyncio.run(
+            submit_job(JobCreateRequest(metric="root"), catalog=catalog, jobs=jobs)
+        )
+    assert "revalidation" in error.value.errors[0]["msg"]
+    jobs.enqueue.assert_not_called()
+
+    plan = prepare_execution(
+        compiled, {"metric": "root", "parameters": {"choice": {"value": 1.5}}}
+    )
+    stored = WorkerRequest.model_validate_json(
+        WorkerRequest.from_plan(plan).model_dump_json()
+    )
+    replay = prepare_execution(
+        compiled,
+        stored.request.submission_payload(),
+        normalized_uses=stored.parameter_uses,
+    )
+    assert replay.request.parameters == {"choice": {"value": 1.5}}
 
 
 @pytest.mark.parametrize("explicit", [False, True])
@@ -150,13 +191,48 @@ def test_local_adapter_captures_effective_values(*, explicit: bool) -> None:
     record = runner.inspect()
     assert record is not None
     assert record.accepted is not None
-    assert record.accepted.parameters == {"number": 7}
+    assert record.accepted.request.parameters == {"number": 7}
 
 
 def test_missing_nested_normalized_default_is_rejected() -> None:
     catalog = parameter_catalog()
     plan = prepare_execution(catalog, {"metric": "root"})
     values = plan.model_dump(mode="json")["parameter_uses"]
-    del values["root"]["options"]["values"]
+    request = plan.request.model_dump()
+    del request["parameters"]["options"]["values"]
     with pytest.raises(PreparationError, match="Missing normalized"):
-        prepare_execution(catalog, plan.request.model_dump(), normalized_uses=values)
+        prepare_execution(catalog, request, normalized_uses=values)
+
+
+def test_empty_and_absent_models_remain_distinct_in_worker_requests() -> None:
+    class Empty(MetricParameters):
+        pass
+
+    @metric(
+        name="declared",
+        description="Empty model",
+        outputs={"result": pa.DataFrameSchema(strict=True)},
+    )
+    def declared(parameters: Empty) -> pd.DataFrame:
+        assert isinstance(parameters, Empty)
+        return pd.DataFrame()
+
+    @metric(
+        name="absent",
+        description="No model",
+        outputs={"result": pa.DataFrameSchema(strict=True)},
+    )
+    def absent() -> pd.DataFrame:
+        return pd.DataFrame()
+
+    runner = LocalRunner.from_definitions(
+        {"fixture": PluginDefinition(metrics=[declared, absent])}
+    )
+    for metric_name, has_parameters in (("declared", True), ("absent", False)):
+        runner.run(metric_name)
+        plan = prepare_execution(runner.catalog, {"metric": metric_name})
+        stored = WorkerRequest.model_validate_json(
+            WorkerRequest.from_plan(plan).model_dump_json()
+        )
+        assert stored.request.parameters == {}
+        assert stored.has_parameters is has_parameters

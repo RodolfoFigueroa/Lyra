@@ -139,14 +139,18 @@ def parameter_edge(
         del parameters
         return table
 
-    calculate.__annotations__["parameters"] = model or MetricParameters
+    def independent(table: pd.DataFrame) -> pd.DataFrame:
+        return table
+
+    if model is not None:
+        calculate.__annotations__["parameters"] = model
     handler = metric(
         name=owner,
         code_revision="1",
         description=owner,
         inputs={"table": dependency},
         outputs={owner: pa.DataFrameSchema(strict=True)},
-    )(calculate)
+    )(independent if model is None else calculate)
     catalog = compile_live_catalog(
         {
             "caller": PluginDefinition(metrics=[handler]),

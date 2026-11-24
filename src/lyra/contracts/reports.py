@@ -19,7 +19,7 @@ from lyra.contracts.provider_scope import DatasetScope, EffectiveScope
 from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.revision_tokens import BuildRevision, ImplementationRevision
 from lyra.contracts.strict import StrictBaseModel
-from lyra.contracts.value_identity import check_json_value
+from lyra.contracts.value_identity import check_json_value, same_json
 
 LocalName = Annotated[str, Field(min_length=1)]
 NodeOutcome = Literal["executed", "reused", "mixed", "skipped"]
@@ -196,7 +196,7 @@ class ExecutionReport(BaseModel):
         if (
             root.kind != "metric"
             or root.node_id != self.request.metric
-            or root.parameters != self.request.parameters
+            or not same_json(root.parameters, self.request.parameters)
         ):
             msg = "Request must match the root metric and effective parameters"
             raise ValueError(msg)

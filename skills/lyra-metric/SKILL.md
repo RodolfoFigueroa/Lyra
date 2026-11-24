@@ -71,7 +71,7 @@ Routine private helper names and layout choices can follow repository convention
 
 Build and register the adapter with these steps:
 
-1. Preserve the existing callable and its defaults. Put ordinary inputs in a compatible parameter model, and use the SDK’s resolved spatial arguments. Convert geometry for the existing callable without changing its CRS or attributes unless the workflow explicitly requires that transformation.
+1. Preserve the existing callable and its defaults. Put ordinary inputs in a concrete `MetricParameters` subclass, and use the SDK’s resolved spatial arguments. Convert geometry for the existing callable without changing its CRS or attributes unless the workflow explicitly requires that transformation.
 2. Declare the output columns and their [units](references/authoring.md#output-units). If the measurement unit is unknown, ask for it. If parameters change which columns the calculation returns, ask for a fixed schema.
 
    Preserve the producer’s row IDs. Ask for a mapping only if the calculation needs one. Publish native tables and use the job temporary directory for scratch files. Agree on an adaptation before wrapping an unsupported async or generator workflow.

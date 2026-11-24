@@ -78,7 +78,8 @@ def test_contract_serialization_without_execution_dependencies() -> None:
         assert validate_json_object(payload) == payload
         adapter = TypeAdapter(JsonValue)
         assert adapter.validate_json(adapter.dump_json(payload)) == payload
-        assert "$defs" in adapter.json_schema()
+        from jsonschema import Draft202012Validator
+        Draft202012Validator(adapter.json_schema()).validate(payload)
         selection = LocationSelection(
             provider="example:places", ids=["001", "001"]
         )
@@ -227,7 +228,7 @@ for mutate in ("revision", "parameters"):
         raw["revisions"]["calculation"] = []
         raw["revisions"]["selection"] = []
     else:
-        raw["parameter_uses"]["root"] = {"unexpected": 1}
+        raw["request"]["parameters"] = []
     try:
         type(plan).model_validate(raw)
     except ValidationError:

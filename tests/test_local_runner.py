@@ -855,11 +855,11 @@ def test_local_submission_matches_remote_preparation(
         {"metric": "root", **{k: v for k, v in submission.items() if v is not None}},
     )
     result = getattr(runner, method)("root", **submission).tables
-    assert result["answer"].value.tolist() == [remote.parameters["count"]]
+    assert result["answer"].value.tolist() == [remote.request.parameters["count"]]
     inspection = runner.inspect()
     assert inspection is not None
     assert inspection.accepted is not None
-    assert inspection.accepted.parameters == remote.parameters
+    assert inspection.accepted.request.parameters == remote.request.parameters
 
 
 @pytest.mark.parametrize("method", ["run", "run_development"])

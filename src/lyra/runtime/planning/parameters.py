@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from pydantic import BaseModel
-
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import MetricInputError
+from lyra.contracts.value_identity import same_json
 from lyra.runtime.planning.graph import ResolvedDependency, ResolvedLocationDependency
 from lyra.sdk.parameters import parameter_values
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from lyra.contracts.accepted import AcceptedSource, PreparedInput
     from lyra.contracts.types import JsonObject, JsonValue
@@ -42,23 +39,22 @@ class ParameterUseError(ValueError):
         super().__init__(f"{cause}; path {' -> '.join(path)}, binding {binding!r}")
 
 
-def use_key(
-    owner: str, values: JsonObject, binding: str, *, scope: str = "root"
-) -> str:
-    """Return a stable receiving-use key within its declaring caller scope."""
-    if scope != "root":
-        scope = hashlib.sha256(scope.encode()).hexdigest()
-    return json.dumps([scope, owner, values, binding], sort_keys=True, allow_nan=False)
+def use_key(scope: str, binding: str) -> str:
+    """Return the key for an edge within its declaring invocation."""
+    path = [] if scope == "root" else json.loads(scope)
+    return json.dumps([*path, ["edge", binding]], separators=(",", ":"))
 
 
 def receiving_key(scope: str, binding: str, name: str) -> str:
-    """Return a receiving-route key in its original caller's invocation scope."""
-    return json.dumps([scope, binding, name])
+    """Return the key for an input routed into a dependency."""
+    path = json.loads(use_key(scope, binding))
+    return json.dumps([*path, ["input", name]], separators=(",", ":"))
 
 
 def route_key(name: str, index: int) -> str:
-    """Return the key for a selected automatic route hop."""
-    return json.dumps(["route", name, index])
+    """Return the key for one automatic hop at a root or dependency input."""
+    path = json.loads(name) if name.startswith("[") else [["input", name]]
+    return json.dumps([*path, ["hop", index]], separators=(",", ":"))
 
 
 def forwarded_parameters(
@@ -136,6 +132,11 @@ def prepare_parameter_uses(
     Raises:
         ValueError: If normalized use values are incomplete or unexpected.
     """
+    if normalized_uses is not None:
+        if "root" in normalized_uses:
+            message = "Unexpected normalized root parameter use"
+            raise ValueError(message)
+        normalized_uses = {"root": values, **normalized_uses}
     preparation = _ParameterPreparation(catalog, normalized_uses)
     preparation.visit(node, values, "root", (node,))
     for item in inputs:
@@ -174,11 +175,8 @@ class _ParameterPreparation:
         if key in self.uses:
             return
         self.active.add(name)
-        forwarded = raw
-        accepted = None
         if self.normalized is not None:
-            accepted = _normalized_values(self.normalized, key)
-            raw = accepted
+            raw = _normalized_values(self.normalized, key)
         try:
             effective = _normalize(
                 self.catalog, name, raw, complete=self.normalized is not None
@@ -186,7 +184,6 @@ class _ParameterPreparation:
         except MetricInputError as exc:
             kind = self.catalog.graph.nodes[name].node.kind
             raise ParameterUseError(exc, path, binding, kind) from exc
-        _validate_accepted_values(self.catalog, name, accepted, forwarded, key)
         self.uses[key] = effective
         for edge in (
             *self.catalog.graph.dependencies[name].values(),
@@ -211,8 +208,10 @@ class _ParameterPreparation:
             binding = edge.binding_path
         self.visit(
             target,
-            forwarded_parameters(effective, edge),
-            use_key(name, effective, binding, scope=key),
+            # Accepted values include defaults inside partially forwarded objects.
+            # The pinned plan digest covers both the declarations and all uses.
+            forwarded_parameters(effective, edge) if self.normalized is None else {},
+            use_key(key, binding),
             (*path, target),
             binding,
         )
@@ -245,30 +244,20 @@ def _normalize(
     if plugin is None:
         message = f"Node {name!r} requires a live parameter model"
         raise ValueError(message)
-    parameters = plugin.prepare_parameters(name, deepcopy(dict(raw)))
+    parameters = plugin.prepare_parameters(name, raw)
+    values = parameter_values(parameters)
+    if same_json(values, raw):
+        return values
     if complete:
-        _require_complete(parameters, raw)
-    return parameter_values(parameters)
-
-
-def _require_complete(value: object, raw: object) -> None:
-    """Check transport completeness using the model Pydantic actually selected.
-
-    Raises:
-        ValueError: If normalized model fields are missing.
-    """
-    if isinstance(value, BaseModel):
-        if not isinstance(raw, Mapping) or type(value).model_fields.keys() - raw.keys():
-            message = "Missing normalized parameter fields"
-            raise ValueError(message)
-        for name in type(value).model_fields:
-            _require_complete(getattr(value, name), raw[name])
-    elif isinstance(value, dict) and isinstance(raw, Mapping):
-        for name, child in value.items():
-            _require_complete(child, raw.get(name))
-    elif isinstance(value, list) and isinstance(raw, list):
-        for child, original in zip(value, raw, strict=True):
-            _require_complete(child, original)
+        message = f"Missing normalized fields or changed effective values for {name!r}"
+        raise ValueError(message)
+    # Defaults and coercion can produce JSON that selects a different union member.
+    replayed = plugin.prepare_parameters(name, values)
+    if not same_json(parameter_values(replayed), values):
+        raise MetricInputError(
+            name, "parameters", "Effective values change on revalidation"
+        )
+    return values
 
 
 def _normalized_values(uses: Mapping[str, JsonObject], key: str) -> JsonObject:
@@ -276,18 +265,3 @@ def _normalized_values(uses: Mapping[str, JsonObject], key: str) -> JsonObject:
         message = f"Missing normalized parameter use: {key}"
         raise ValueError(message)
     return uses[key]
-
-
-def _validate_accepted_values(
-    catalog: CompiledCatalog,
-    name: str,
-    accepted: JsonObject | None,
-    forwarded: Mapping[str, object],
-    key: str,
-) -> None:
-    if accepted is None or all(accepted.get(k) == v for k, v in forwarded.items()):
-        return
-    expected = _normalize(catalog, name, accepted | dict(forwarded), complete=False)
-    if expected != accepted:
-        message = f"Effective parameter bindings disagree with acceptance: {key}"
-        raise ValueError(message)

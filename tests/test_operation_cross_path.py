@@ -217,7 +217,7 @@ def execute_queued(
     envelope = JobEnvelope.model_validate_json(
         cast("Mock", runtime.jobs.enqueue).call_args.args[0].model_dump_json()
     )
-    assert envelope.accepted.plan.parameters == {
+    assert envelope.accepted.plan.request.parameters == {
         "limits": values.get("limits", {"minimum": [0]})
     }
     payload = envelope.model_dump(mode="json")
@@ -290,7 +290,7 @@ def test_selector_identity_precedes_acquisition(change: str) -> None:
         upstream = operation.locations["declared_source"].upstream
         assert upstream is not None
         assert upstream.node == "expand"
-        assert operation.parameter_values() == prepared.parameters
+        assert operation.parameter_values() == prepared.request.parameters
         return operation
 
     original = bound(changed=False)

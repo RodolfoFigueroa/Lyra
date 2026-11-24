@@ -15,7 +15,7 @@ from typing import (
     Unpack,
 )
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import TypeAdapter
 
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.metric_scope import (
@@ -51,7 +51,7 @@ from lyra.sdk.handler import (
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.output_schema import OutputSchema, compile_output, validate_metric_output
-from lyra.sdk.parameters import build_parameter_schema
+from lyra.sdk.parameters import MetricParameters, build_parameter_schema
 from lyra.sdk.resources import (
     BaseIO,
     resource_annotation,
@@ -82,7 +82,7 @@ class NodeImplementation:
     """Registered handler, captured executable schemas and invocation requirements."""
 
     function: Callable[..., object]
-    parameters: type[BaseModel] | None
+    parameters: type[MetricParameters] | None
     accepts_context: bool
     manifest: NodeManifest
     schemas: dict[str, "pa.DataFrameSchema"]
@@ -112,7 +112,7 @@ class NodeDefinition:
     name: str
     kind: Literal["metric", "location_operation"]
     function: Callable[..., object]
-    parameters: type[BaseModel] | None
+    parameters: type[MetricParameters] | None
     accepts_context: bool
     code_revision: str | None
     description: str

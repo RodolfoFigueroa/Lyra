@@ -138,7 +138,7 @@ def test_direct_chains_shared_and_separate_uses_without_execution(
     assert (
         report.request.parameters
         == report.descriptions[root_id].parameters
-        == plan.parameters
+        == plan.request.parameters
     )
     assert report.descriptions[shared].parameters == {
         "radius": 5,
@@ -225,4 +225,4 @@ def test_cached_root_retains_forwarding_for_bypassed_dependency(tmp_path: Path) 
         assert report.uses[binding.target_use_id].node == "leaf"
         assert report.descriptions[binding.target_use_id].parameters == {"distance": 5}
         assert report.request is not None
-        assert report.request.parameters == plan.parameters
+        assert report.request.parameters == plan.request.parameters

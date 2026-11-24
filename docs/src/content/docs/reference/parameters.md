@@ -14,7 +14,7 @@ Handlers are synchronous functions. Lyra accepts positional-or-keyword and keywo
 
 | Argument | Annotation and rule |
 | --- | --- |
-| `parameters` | A concrete compatible Pydantic model; omit it when there are no ordinary inputs |
+| `parameters` | A concrete `MetricParameters` subclass; omit it when there are no ordinary inputs |
 | Any location argument name | `geopandas.GeoDataFrame`; explicitly declared with `LocationDependency`; optional `Annotated` metadata uses `Field(description="…")` |
 | `context` | Optional service argument, annotated `RunContext` for runtime services |
 | Dependency arguments | Names match the decorator’s `inputs` mapping |
@@ -41,7 +41,7 @@ Operation callbacks must be synchronous functions. Lyra rejects generators and c
 
 ## Model settings
 
-Set `extra="forbid"` and `validate_default=True` on the root parameter model and every nested model. Inherit from `MetricParameters` to apply both settings and reject non-finite float values.
+Define the root and every nested parameter model as concrete subclasses of `MetricParameters`. Keep the inherited settings for unknown-field rejection, validated defaults, and finite numbers.
 
 Root parameter fields require descriptions. Nested field descriptions and examples are optional. Fields use ordinary Pydantic names without aliases.
 
@@ -85,7 +85,7 @@ Factories and validators must follow these rules:
 - Do not perform external input/output (I/O), such as accessing files or services.
 - Preserve normalized values when validators run again (idempotence), including after JSON serialization and parsing.
 
-Lyra supports ordinary field and model validators and trusts authors to meet these obligations. Validation at request and worker boundaries does not prove validator purity. Workers revalidate the queued effective values, including defaults.
+Normalize fields in field validators. Return fresh containers when transforming a list or dictionary. Use model validators for read-only cross-field checks. Workers revalidate the queued effective values, including defaults.
 
 Discovery generates parameter schemas without running parameter default factories or validators. Pydantic schema generation can reject a literal dictionary default containing a `$ref` key. You can still supply dictionaries as parameter values.
 
@@ -137,7 +137,7 @@ The parameter contract excludes:
 
 - `Any`, arbitrary classes, root models, recursive models, and unresolved generic models
 - sets, tuples, bytes, datetimes, decimals, and non-string dictionary keys
-- aliases, field exclusions, custom serializers, and computed fields
+- aliases, field exclusions, custom serializers or encoders, and computed fields
 - custom JSON Schema hooks or structural overrides
 
 Registration errors identify the node and field path. Adapt incompatible models explicitly; Lyra does not mutate or clone them to change their settings.

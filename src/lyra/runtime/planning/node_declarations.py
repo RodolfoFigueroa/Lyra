@@ -12,7 +12,7 @@ from graphlib import CycleError, TopologicalSorter
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import TypeAdapter
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.metric_scope import (
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from lyra.runtime.planning.provider_registry import RegisteredProvider
+    from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.resources import resource_annotation
 
 
@@ -66,7 +67,7 @@ class CompiledNode:
     declaration: NodeDeclaration
     locations: Mapping[str, RegisteredProvider]
     origins: frozenset[Origin]
-    parameters: type[BaseModel] | None
+    parameters: type[MetricParameters] | None
 
 
 def compile_node_declarations(
@@ -137,7 +138,9 @@ def compile_node_declarations(
     return MappingProxyType(nodes)
 
 
-def _declaration_parameters(declaration: NodeDeclaration) -> type[BaseModel] | None:
+def _declaration_parameters(
+    declaration: NodeDeclaration,
+) -> type[MetricParameters] | None:
     if declaration.kind == "location_operation":
         parameters = _operation_arguments(
             declaration.name, declaration.function, declaration.target_selector

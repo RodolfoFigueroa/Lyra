@@ -151,11 +151,11 @@ def test_job_construction_captures_accepted_metadata() -> None:
     provenance = JobRunProvenance(accepted=accepted)
     expected = envelope.model_dump()
     raw["parameters"].clear()
-    plan.parameters.clear()
+    plan.request.parameters.clear()
     accepted.plan.request.parameters.clear()
     provenance.accepted.plan.parameter_uses.clear()
     assert envelope.model_dump() == expected
-    assert envelope.accepted.plan.parameters["nested"] == {"tags": ["accepted"]}
+    assert envelope.accepted.plan.request.parameters["nested"] == {"tags": ["accepted"]}
 
 
 def test_accepted_request_owns_nested_constructor_inputs() -> None:

@@ -14,7 +14,6 @@ from lyra.runtime.planning.computation import CatalogComputation, compile_comput
 from lyra.runtime.planning.dependency_routes import compile_dependency_routes
 from lyra.runtime.planning.graph import PluginGraph, build_graph, parameter_contract
 from lyra.runtime.planning.native_bindings import bind_native_definitions
-from lyra.runtime.planning.parameters import prepare_parameter_uses
 from lyra.runtime.planning.provider_registry import (
     RegisteredProvider,
     compile_registrations,
@@ -89,7 +88,7 @@ def compile_live_catalog(
         ),
     )
     sources_by_target = _sources_by_target(routes)
-    catalog = CompiledCatalog(
+    return CompiledCatalog(
         computation=compile_computation(graph, selected),
         revisions=compile_revisions(graph, selected),
         manifests=MappingProxyType(descriptions),
@@ -105,9 +104,6 @@ def compile_live_catalog(
         dependency_routes=compile_dependency_routes(graph, routes),
         build_revision=build_revision,
     )
-    for edge in edges:
-        prepare_parameter_uses(catalog, edge.operation, {})
-    return catalog
 
 
 def _sources_by_target(

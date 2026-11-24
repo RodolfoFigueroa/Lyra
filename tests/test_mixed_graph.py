@@ -32,12 +32,10 @@ def test_nested_cross_plugin_graph_preserves_owner_and_public_schema() -> None:
         catalog,
         {"metric": "consumer", "inputs": {"seed": {"provider": "tracts", "ids": []}}},
     )
-    assert plan.parameter_uses[use_key("consumer", plan.parameters, path)] == {
-        "year": 2025
+    assert plan.parameter_uses[use_key("root", path)] == {"year": 2025}
+    assert plan.parameter_uses[use_key("root", path + ".locations.source")] == {
+        "year": 2024
     }
-    assert plan.parameter_uses[
-        use_key("consumer", plan.parameters, path + ".locations.source")
-    ] == {"year": 2024}
     outer = graph.location_dependencies["consumer"][path]
     inner = graph.location_dependencies["consumer"][path + ".locations.source"]
     assert outer.consumer == inner.consumer == graph.nodes["consumer"]

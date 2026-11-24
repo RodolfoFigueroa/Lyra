@@ -86,7 +86,7 @@ def test_live_routes_discovery_and_owned_requests(
         assert prepared.inputs[0].ids == ()
         request["parameters"]["weights"].append(3)
         request["inputs"]["places"]["ids"].append("later")
-        assert prepared.parameters == {"weights": [2]}
+        assert prepared.request.parameters == {"weights": [2]}
         assert prepared.inputs[0].ids == ()
     acquire.assert_not_called()
 
@@ -119,7 +119,7 @@ def test_required_selection_and_defaults() -> None:
         catalog,
         {"metric": "score", "inputs": {"places": {"provider": "counties", "ids": []}}},
     )
-    assert prepared.parameters == {"weights": [1]}
+    assert prepared.request.parameters == {"weights": [1]}
 
 
 @pytest.mark.parametrize("reverse", [False, True])
@@ -224,10 +224,21 @@ def test_canonical_parameters_must_be_satisfiable(*, required: bool) -> None:
         del source, parameters
         pytest.fail("Preparation invoked an operation")
 
-    with pytest.raises(
-        ValueError, match=r"unsatisfied parameters|greater than or equal"
-    ):
-        compile_live_catalog(definitions([invalid]))
+    if required:
+        with pytest.raises(ValueError, match="unsatisfied parameters"):
+            compile_live_catalog(definitions([invalid]))
+        return
+    catalog = compile_live_catalog(definitions([invalid]))
+    for provider_id in ("counties", "tracts"):
+        request = {
+            "metric": "score",
+            "inputs": {"places": {"provider": provider_id, "ids": []}},
+        }
+        if provider_id == "tracts":
+            with pytest.raises(ValueError, match="greater than or equal"):
+                prepare_execution(catalog, request)
+        else:
+            assert prepare_execution(catalog, request).node == "score"
 
 
 def test_python_omission_and_private_selection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,7 +269,7 @@ def test_python_omission_and_private_selection(monkeypatch: pytest.MonkeyPatch) 
             parameters=options.get("parameters"),
         )
         prepared = execute.call_args.args[0]
-        assert prepared.parameters == {"weights": [1]}
+        assert prepared.request.parameters == {"weights": [1]}
         assert prepared.inputs == ()
     with pytest.raises(ValueError, match="Unknown public metric"):
         runner.run("private_score")

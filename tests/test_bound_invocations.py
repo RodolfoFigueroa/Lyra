@@ -55,7 +55,7 @@ def test_unordered_selections_and_empty_provider_identity() -> None:
 
 def test_effective_values_are_owned_and_affect_identity() -> None:
     _, prepared, root = bound(["a"])
-    prepared.parameters["year"] = 1
+    prepared.request.parameters["year"] = 1
     exposed = root.parameter_values()
     exposed["year"] = 2
     assert root.parameter_values() == {"year": 2025}
@@ -126,9 +126,7 @@ def test_explicit_and_implicit_source_forwarding_are_equivalent() -> None:
 
 def test_executor_preflight_rejects_missing_parameter_use_before_acquisition() -> None:
     catalog, prepared, _ = bound(["a"])
-    prepared.parameter_uses.pop(
-        next(key for key in prepared.parameter_uses if key != "root")
-    )
+    prepared.parameter_uses.pop(next(iter(prepared.parameter_uses)))
     context = Mock(side_effect=AssertionError("handler context acquired"))
     executor = GraphExecutor(catalog, context)
     with pytest.raises(ValueError, match="Missing normalized parameter use"):
@@ -143,7 +141,7 @@ def test_executor_rejects_changed_effective_binding() -> None:
             values["year"] = 1999
             break
     executor = GraphExecutor(catalog, Mock())
-    with pytest.raises(ValueError, match="bindings disagree"):
+    with pytest.raises(ValueError, match="identity differs"):
         executor.validate_plan(prepared)
 
 

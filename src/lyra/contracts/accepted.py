@@ -3,13 +3,14 @@
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Self
+from typing import Annotated, Self
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
-    JsonValue,
+    StrictStr,
     TypeAdapter,
     field_serializer,
     field_validator,
@@ -28,8 +29,9 @@ from lyra.contracts.locations import (
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.revisions import BuildRevision, RevisionBinding, RevisionPlan
-from lyra.contracts.value_identity import check_json_value
+from lyra.contracts.types import JsonObject, validate_json_object
 
+_ParameterObject = Annotated[JsonObject, BeforeValidator(validate_json_object)]
 _REVISION_PLAN_ADAPTER = TypeAdapter(RevisionPlan)
 
 
@@ -38,7 +40,7 @@ class ExecutionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
     metric: str
-    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+    parameters: _ParameterObject = Field(default_factory=dict)
     inputs: dict[str, LocationSelection] = Field(default_factory=dict)
     interventions: list[InterventionSpec] = Field(default_factory=list)
 
@@ -63,7 +65,7 @@ class SubmittedRequest(BaseModel):
         return deepcopy(value)
 
     metric: str
-    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+    parameters: _ParameterObject
     inputs: dict[str, LocationSelection] = Field(default_factory=dict)
     interventions: list[AcceptedIntervention] = Field(default_factory=list)
 
@@ -102,7 +104,6 @@ class PreparedExecution(BaseModel):
     @field_validator(
         "request",
         "inputs",
-        "parameters",
         "parameter_uses",
         "dependency_routes",
         "revisions",
@@ -119,8 +120,7 @@ class PreparedExecution(BaseModel):
     request: SubmittedRequest
     node: str = Field(min_length=1)
     inputs: tuple[PreparedInput, ...]
-    parameters: dict[str, JsonValue]
-    parameter_uses: dict[str, dict[str, JsonValue]]
+    parameter_uses: dict[StrictStr, _ParameterObject]
     dependency_routes: dict[str, AcceptedSource]
     revisions: RevisionPlan
     computation_identity: str = Field(min_length=1)
@@ -169,15 +169,6 @@ class PreparedExecution(BaseModel):
         Raises:
             ValueError: If captured inputs or bindings disagree.
         """
-        check_json_value(self.parameters, "parameters")
-        check_json_value(self.parameter_uses, "parameter uses")
-        if (
-            self.parameter_uses.get("root") != self.parameters
-            or self.request.parameters != self.parameters
-        ):
-            message = "Effective root parameters disagree with acceptance"
-            raise ValueError(message)
-        check_json_value(self.request.parameters, "submitted parameters")
         names = [item.name for item in self.inputs]
         if len(set(names)) != len(names) or set(names) != self.request.inputs.keys():
             message = "Input bindings disagree with original request"
@@ -262,8 +253,7 @@ class WorkerRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     request: SubmittedRequest
-    parameters: dict[str, JsonValue]
-    parameter_uses: dict[str, dict[str, JsonValue]]
+    parameter_uses: dict[StrictStr, _ParameterObject]
     build_revision: BuildRevision | None
     computation_identity: str = Field(min_length=1)
     provider_scopes: dict[str, RevisionBinding]
@@ -279,7 +269,6 @@ class WorkerRequest(BaseModel):
         """
         return cls(
             request=plan.request,
-            parameters=plan.parameters,
             parameter_uses=plan.parameter_uses,
             build_revision=plan.build_revision,
             computation_identity=plan.computation_identity,
@@ -292,21 +281,3 @@ class WorkerRequest(BaseModel):
     def metric(self) -> str:
         """The public metric selected by the caller."""
         return self.request.metric
-
-    @model_validator(mode="after")
-    def check_parameters(self) -> Self:
-        """Require consistent effective parameter values.
-
-        Returns:
-            The validated request.
-
-        Raises:
-            ValueError: If the root values differ.
-        """
-        if (
-            self.parameter_uses.get("root") != self.parameters
-            or self.parameters != self.request.parameters
-        ):
-            msg = "Effective root parameters disagree with acceptance"
-            raise ValueError(msg)
-        return self

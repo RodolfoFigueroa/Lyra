@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
@@ -16,7 +15,7 @@ from lyra.contracts.errors import (
     PluginDefinitionError,
 )
 from lyra.contracts.operations import OPERATION_MAPPING_ADAPTER
-from lyra.contracts.value_identity import check_json_value
+from lyra.contracts.types import validate_json_object
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.native_inputs import NativeLocationInput, copy_frame
 from lyra.runtime.resources import resource_invocation
@@ -29,12 +28,12 @@ if TYPE_CHECKING:
 
     import ibis.expr.types as ir
     import pandera.pandas as pa
-    from pydantic import BaseModel
 
     from lyra.contracts.plugins import NodeManifest
     from lyra.data.results import NativeOutputs
     from lyra.runtime.planning.provider_registry import RegisteredProvider
     from lyra.sdk.context import RunContext
+    from lyra.sdk.parameters import MetricParameters
     from lyra.sdk.plugin import NodeImplementation, PluginDefinition
 
 
@@ -62,7 +61,7 @@ class BoundPlugin:
         node = self._nodes.get(name)
         return node.manifest.model_copy(deep=True) if node is not None else None
 
-    def prepare_parameters(self, name: str, value: object) -> BaseModel:
+    def prepare_parameters(self, name: str, value: object) -> MetricParameters:
         """Validate parameter JSON before parsing it through the author's model.
 
         Returns:
@@ -78,9 +77,7 @@ class BoundPlugin:
             msg = f"Metric {name!r}: metric has no parameters"
             raise PluginDefinitionError(msg)
         try:
-            check_json_value(value, "parameters")
-            encoded = json.dumps(value, allow_nan=False)
-            return model.model_validate_json(encoded)
+            return model.model_validate(validate_json_object(value))
         except ValidationError as exc:
             error = exc.errors(include_url=False)[0]
             path = ".".join(["parameters", *(str(item) for item in error["loc"])])

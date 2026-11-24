@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import geopandas as gpd
 import pytest
@@ -13,7 +13,6 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    PlainSerializer,
     RootModel,
     create_model,
     field_serializer,
@@ -71,7 +70,6 @@ def register(model: type[BaseModel]) -> PluginDefinition:
         list,
         dict,
         Literal[1, "a"],
-        Annotated[int, PlainSerializer(str)],
     ],
 )
 def test_unsupported_types(annotation: TypeForm[Any]) -> None:
@@ -102,6 +100,8 @@ def test_invalid_field_contracts(field: object) -> None:
 
 
 class Permissive(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_default=True)
+
     value: int = Field(description="Value")
 
 
@@ -109,16 +109,7 @@ class Recursive(MetricParameters):
     children: list[Recursive] = Field(description="Children")
 
 
-class Serializer(MetricParameters):
-    value: int = Field(description="Value")
-
-    @field_serializer("value")
-    @staticmethod
-    def serialize(value: int) -> str:
-        return str(value)
-
-
-@pytest.mark.parametrize("model", [Permissive, Recursive, Serializer, RootModel[int]])
+@pytest.mark.parametrize("model", [Permissive, Recursive, RootModel[int]])
 def test_unsupported_models(model: type[BaseModel]) -> None:
     with pytest.raises(PluginDefinitionError):
         validate_parameter_model(model, "test")
@@ -305,6 +296,11 @@ def test_strict_models_can_reject_schema_valid_numbers() -> None:
 class Filters(MetricParameters):
     tags: list[str] = Field(default_factory=list)
 
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, tags: list[str]) -> list[str]:
+        return sorted(set(tags))
+
 
 class Effective(MetricParameters):
     filters: Filters = Field(default_factory=Filters, description="Filters")
@@ -316,11 +312,6 @@ class Effective(MetricParameters):
     @classmethod
     def normalize_label(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
-
-    @model_validator(mode="after")
-    def normalize_tags(self) -> Self:
-        self.filters.tags = sorted(set(self.filters.tags))
-        return self
 
 
 def test_factories_and_normalized_json_roundtrip() -> None:
@@ -400,8 +391,9 @@ def test_nested_model_serializers_are_rejected() -> None:
         __base__=MetricParameters,
         value=(Custom, Field(description="Value")),
     )
-    with pytest.raises(PluginDefinitionError, match="serializers"):
-        register(model)
+    register(model)
+    with pytest.raises(ValueError, match="Serialized parameters"):
+        parameter_values(model.model_validate({"value": {}}))
 
 
 @pytest.mark.parametrize("number", [float("nan"), float("inf"), -float("inf")])
@@ -439,3 +431,25 @@ def test_serialization_rejects_invalid_effective_values(value: object) -> None:
     model = Effective().model_copy(update={"options": value})
     with pytest.raises(ValueError, match=r"serializ|validation error|Out of range"):
         parameter_values(model)
+
+
+def test_nonfinite_literal_default_rejected_at_registration() -> None:
+    class Parameters(MetricParameters):
+        scale: float = Field(float("inf"), description="Scale")
+
+    with pytest.raises(PluginDefinitionError, match="default"):
+        register(Parameters)
+
+
+def test_type_changing_serializer_rejected_during_capture() -> None:
+    class Parameters(MetricParameters):
+        count: int = Field(1, description="Count")
+
+        @field_serializer("count", when_used="json")
+        @staticmethod
+        def serialize_count(value: int) -> float:
+            return float(value)
+
+    register(Parameters)
+    with pytest.raises(ValueError, match="Serialized parameters"):
+        parameter_values(Parameters())

@@ -396,7 +396,7 @@ Read full `provenance` from the result or download. Use these fields to compare 
 | Field | What to inspect |
 | --- | --- |
 | `provenance.accepted.plan.request` | Your validated location selections and the requested metric’s parameters after defaults and validation |
-| `provenance.accepted.plan.parameters` | Effective parameter values, including defaults |
+| `provenance.accepted.plan.request.parameters` | Effective parameter values, including defaults |
 | `provenance.execution` | Resolved input summaries and node outcomes from the execution attempt; `null` if execution has not started |
 
 A planned dependency can reuse a cached result without running its handler. Read [execution reports and provenance](../../concepts/provenance/) to interpret reuse and failures. For local success, inspect `result.report`; use `runner.inspect()` for diagnostics from the latest attempt.

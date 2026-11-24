@@ -461,9 +461,7 @@ class _Binder:
             if edge is None:
                 message = f"Missing location binding {name!r}.{key}"
                 raise ValueError(message)
-            invocation = self.edge_use(
-                (name, effective, scope), resolve, bindings, edge, path
-            )
+            invocation = self.edge_use((name, scope), resolve, bindings, edge, path)
             operation = edge.producer.node
             if operation.kind != "location_operation":
                 message = "Location binding requires an operation"
@@ -480,9 +478,7 @@ class _Binder:
         for key in node.location_inputs:
             resolve(key)
         dependencies = {
-            key: self.edge_use(
-                (name, effective, scope), resolve, bindings, edge, f"inputs.{key}"
-            )
+            key: self.edge_use((name, scope), resolve, bindings, edge, f"inputs.{key}")
             for key, edge in self.catalog.graph.dependencies[name].items()
         }
         descriptor = ComputationIdentity(
@@ -525,13 +521,13 @@ class _Binder:
 
     def edge_use(
         self,
-        owner: tuple[str, dict, str],
+        owner: tuple[str, str],
         resolve: Callable[[str], BoundLocation],
         bindings: dict[str, BoundInvocation],
         edge: ResolvedDependency | ResolvedLocationDependency,
         path: str,
     ) -> BoundInvocation:
-        name, effective, scope = owner
+        name, scope = owner
         producer = (
             edge.output.producer
             if isinstance(edge, ResolvedDependency)
@@ -565,9 +561,7 @@ class _Binder:
                 declaration.contract.reference,
                 receiving_key(scope, path, receiving),
             )
-        invocation = self.visit(
-            producer.name, arguments, use_key(name, effective, path, scope=scope)
-        )
+        invocation = self.visit(producer.name, arguments, use_key(scope, path))
         bindings[path] = invocation
         return invocation
 
@@ -575,7 +569,7 @@ class _Binder:
         parameters = prepare_parameter_uses(
             self.catalog,
             prepared.node,
-            prepared.parameters,
+            prepared.request.parameters,
             prepared.inputs,
             normalized_uses=prepared.parameter_uses,
         )
@@ -583,6 +577,19 @@ class _Binder:
         if self.routes != prepared.dependency_routes:
             message = "Selected dependency routes differ from accepted plan"
             raise ValueError(message)
+        try:
+            identity = self.catalog.computation.plan(
+                prepared.node,
+                prepared.inputs,
+                prepared.dependency_routes,
+                parameters.uses,
+            )
+        except KeyError as exc:
+            msg = "Accepted computation is unavailable"
+            raise ValueError(msg) from exc
+        if identity != prepared.computation_identity:
+            msg = "Computation identity differs from accepted plan"
+            raise ValueError(msg)
         self.interventions = {
             change.catalog: change for change in prepared.request.interventions
         }

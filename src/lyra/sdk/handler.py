@@ -6,7 +6,7 @@ from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
 from geopandas import GeoDataFrame
 from ibis.expr.types import Table
-from pydantic import BaseModel, Field
+from pydantic import Field
 from pydantic.fields import FieldInfo
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
@@ -24,7 +24,7 @@ def _handler_arguments(
     name: str,
     function: Callable[..., object],
     inputs: Mapping[str, Dependency | LocationDependency],
-) -> tuple[type[BaseModel] | None, set[str], bool]:
+) -> tuple[type[MetricParameters] | None, set[str], bool]:
     if (
         not inspect.isfunction(function)
         or inspect.iscoroutinefunction(function)
@@ -45,7 +45,7 @@ def _handler_arguments(
             _definition_message(name, "invalid dependency input keys")
         )
     hints = _handler_hints(name, function)
-    parameters: type[BaseModel] | None = None
+    parameters: type[MetricParameters] | None = None
     spatial = {
         key for key, value in inputs.items() if isinstance(value, LocationDependency)
     }
@@ -62,7 +62,7 @@ def _handler_arguments(
         if (
             key == "parameters"
             and isinstance(annotation, type)
-            and issubclass(annotation, BaseModel)
+            and issubclass(annotation, MetricParameters)
         ):
             parameters = annotation
         elif key in spatial:
@@ -115,7 +115,7 @@ def _location_description(name: str, key: str, annotation: object) -> str | None
 def _validate_references(
     name: str,
     inputs: Mapping[str, Dependency | LocationDependency],
-    parameters: type[BaseModel] | None,
+    parameters: type[MetricParameters] | None,
     spatial: set[str],
 ) -> None:
     available = {

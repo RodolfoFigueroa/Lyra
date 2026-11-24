@@ -4,18 +4,14 @@ from __future__ import annotations
 
 from typing import TypeAlias
 
-from pydantic import TypeAdapter
-from typing_extensions import TypeAliasType
+from pydantic import ConfigDict, JsonValue, TypeAdapter
 
 JsonScalar: TypeAlias = bool | int | float | str | None
-JsonValue = TypeAliasType(
-    "JsonValue",
-    JsonScalar | list["JsonValue"] | dict[str, "JsonValue"],
-)
 JsonObject: TypeAlias = dict[str, JsonValue]
 
-_JSON_VALUE_ADAPTER: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
-_JSON_OBJECT_ADAPTER: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
+_FINITE_JSON = ConfigDict(strict=True, allow_inf_nan=False)
+_JSON_VALUE_ADAPTER = TypeAdapter(JsonValue, config=_FINITE_JSON)
+_JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject, config=_FINITE_JSON)
 
 
 def validate_json_value(value: object) -> JsonValue:

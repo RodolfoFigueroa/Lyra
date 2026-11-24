@@ -221,5 +221,5 @@ def _submitted_input(provenance: JobRunProvenance) -> dict[str, Any]:
         name: value.model_dump(mode="json") for name, value in request.inputs.items()
     }
     if provenance.accepted.plan.has_parameters:
-        result["parameters"] = provenance.accepted.plan.parameters
+        result["parameters"] = request.parameters
     return result

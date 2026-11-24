@@ -20,7 +20,7 @@ def test_capture() -> None:
     assert all(binding.revision is None for binding in prepared.revisions.bindings)
     request["inputs"]["places"]["ids"].append("changed")
     assert prepared.inputs[0].ids == ("unknown",)
-    assert prepared.parameters == {}
+    assert prepared.request.parameters == {}
 
 
 def test_empty_interventions_preserve_ordinary_preparation() -> None:
@@ -71,9 +71,9 @@ def test_named_edition_defaults_and_private() -> None:
 
     catalog, request = routed_request(Parameters)
     prepared = prepare_execution(catalog, request)
-    assert prepared.parameters == {"weight": 2}
-    prepared.parameters["weight"] = 10
-    assert prepare_execution(catalog, request).parameters == {"weight": 2}
+    assert prepared.request.parameters == {"weight": 2}
+    prepared.request.parameters["weight"] = 10
+    assert prepare_execution(catalog, request).request.parameters == {"weight": 2}
     request["parameters"] = {"weight": 0}
     with pytest.raises(PreparationError):
         prepare_execution(catalog, request)
@@ -121,18 +121,18 @@ def test_native_and_owned_nested_defaults() -> None:
         prepared.node,
         prepared.inputs,
         prepared.dependency_routes,
-        prepared.parameter_uses,
+        {"root": prepared.request.parameters, **prepared.parameter_uses},
     )
-    assert prepared.parameters == {"options": {"values": [1]}}
+    assert prepared.request.parameters == {"options": {"values": [1]}}
     native.data_revision = "changed"
     schema = catalog.graph.nodes["score"].node.parameters_schema
     assert schema is not None
     schema.clear()
-    values = prepared.request.parameters
+    values = prepared.request.model_dump()["parameters"]
     options = values["options"]
     assert isinstance(options, dict)
     nested = options["values"]
     assert isinstance(nested, list)
     nested.append(2)
-    assert prepared.parameters == {"options": {"values": [1]}}
+    assert prepared.request.parameters == {"options": {"values": [1]}}
     assert all(binding.revision is None for binding in prepared.revisions.bindings)

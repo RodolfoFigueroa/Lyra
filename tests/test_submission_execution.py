@@ -80,7 +80,10 @@ def test_submission_native_round_trip(
     envelope = JobEnvelope.model_validate_json(
         runtime.jobs.enqueue.call_args.args[0].model_dump_json()
     )
-    assert envelope.accepted.plan.parameters == {"weights": [3], "optional": None}
+    assert envelope.accepted.plan.request.parameters == {
+        "weights": [3],
+        "optional": None,
+    }
     assert set(runtime.catalog.compiled.graph.nodes) >= {"summary", name}
     assert "summary" not in runtime.catalog.get_loaded_metric_names()
     original = deepcopy(envelope.model_dump(mode="json"))

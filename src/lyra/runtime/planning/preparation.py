@@ -129,8 +129,7 @@ def _prepare(
         intervention_targets=targets,
         node=node_name,
         inputs=tuple(inputs),
-        parameters=parameters,
-        parameter_uses=uses,
+        parameter_uses={key: value for key, value in uses.items() if key != "root"},
         dependency_routes=dependency_routes,
         revisions=revisions,
         computation_identity=catalog.computation.plan(

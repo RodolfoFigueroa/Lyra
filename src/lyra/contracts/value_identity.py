@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
+
+from lyra.contracts.types import validate_json_value
 
 if TYPE_CHECKING:
     from lyra.contracts.origins import Origin
@@ -19,20 +20,18 @@ def check_json_value(value: object, path: str = "value") -> None:
     Raises:
         ValueError: If a value is not a finite JSON primitive or container.
     """
-    if value is None or type(value) in {str, bool, int}:
-        return
-    if type(value) is float and math.isfinite(value):
-        return
-    if isinstance(value, list):
-        for index, item in enumerate(value):
-            check_json_value(item, f"{path}[{index}]")
-        return
-    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
-        for key, item in value.items():
-            check_json_value(item, f"{path}.{key}")
-        return
-    message = f"{path}: expected a finite JSON value with string object keys"
-    raise ValueError(message)
+    try:
+        validate_json_value(value)
+    except ValueError as exc:
+        message = f"{path}: expected a finite JSON value with string object keys"
+        raise ValueError(message) from exc
+
+
+def same_json(left: object, right: object) -> bool:
+    """Return whether finite JSON values have equal canonical representations."""
+    return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(
+        right, sort_keys=True, allow_nan=False
+    )
 
 
 def value_key(payload: object) -> str:

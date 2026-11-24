@@ -4,7 +4,7 @@ from typing import Self
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lyra.sdk import LocationDependency, MetricParameters, RunContext, metric
 from test_support.location_resolution import Provider
@@ -54,8 +54,8 @@ class ExistingSettings(BaseModel):
     units: int = Field(default=4, ge=1, description="Units per selected feature.")
 
 
-class CompatibleSettings(ExistingSettings):
-    model_config = ConfigDict(extra="forbid", validate_default=True)
+class CompatibleSettings(ExistingSettings, MetricParameters):
+    pass
 
 
 @metric(

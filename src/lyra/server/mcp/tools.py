@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol
 
+from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from typing_extensions import override
 
@@ -220,7 +221,7 @@ class InProcessLyraBackend(LyraMCPBackend):
             raise ToolCallError(
                 _INVALID_PARAMETERS_ERROR,
                 "Invalid metric parameters.",
-                validate_json_value(exc.errors),
+                validate_json_value(jsonable_encoder(exc.errors)),
             ) from exc
         except SubmissionUnavailableError as exc:
             raise ToolCallError(_BACKEND_ERROR, str(exc), {"retryable": True}) from exc

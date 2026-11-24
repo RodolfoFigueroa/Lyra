@@ -20,7 +20,7 @@ Return the same logical values and membership for the same identity and effectiv
 
 Decorate each synchronous metric function with `lyra.sdk.metric`. The runtime calls the function by keyword in both local and worker execution, using the declared parameter, location, context, resource, and dependency arguments:
 
-- `parameters` is a concrete Pydantic model. `MetricParameters` supplies `extra="forbid"` and `validate_default=True`; nested models need those settings too. Omit this argument for a metric without ordinary inputs.
+- `parameters` is a concrete `MetricParameters` subclass. Use this base for nested models as well. Keep its settings for unknown-field rejection, validated defaults, and finite numbers. Omit this argument for a metric without ordinary inputs.
 - Lyra infers each operation’s optional model from its keyword-only `parameters` annotation.
 - Root parameter fields require descriptions. Preserve evidenced defaults and constraints using `Field`; omission and accepting `None` are different choices.
 - Supported scalars include strings, booleans, integers, finite floats, null, and homogeneous scalar `Literal` enums. Lists, string-keyed dictionaries, unions, and nested models must contain supported values.
@@ -28,7 +28,7 @@ Decorate each synchronous metric function with `lyra.sdk.metric`. The runtime ca
 - Use `Field(default_factory=...)` for containers and nested models. Lyra serializes all effective parameter fields, including defaults and nulls.
 - Factories and validators must return the same values for the same inputs. They must not perform external input/output (I/O), such as accessing files or services.
 - Validators must preserve normalized values when run again, including after JSON serialization and parsing.
-- Do not use aliases, `Any`, sets, tuples, datetimes, recursive models, field exclusions, custom serializers, computed fields, or custom schema overrides. Consult version-matched documentation for other types.
+- Do not use aliases, `Any`, sets, tuples, datetimes, recursive models, field exclusions, custom serializers or encoders, computed fields, or custom schema overrides. Consult version-matched documentation for other types.
 - Named `gpd.GeoDataFrame` arguments receive native records from inputs declared with `LocationDependency(provider="provider_id")`. Each frame includes `location_id`, active `geometry`, the provider CRS, and every declared attribute. Metrics may declare zero or more provider inputs.
 - Declare `context: RunContext` to identify the job and node, log diagnostics, manage scratch files, and report progress.
 
@@ -938,7 +938,7 @@ assert values == {
 assert Parameters(label=" north ").label == "north"
 ```
 
-Lyra supports ordinary field and model validators. Your validators must produce deterministic results without external I/O and preserve normalized values on repeated validation. Lyra trusts this author contract; it does not prove validator purity.
+Use deterministic, idempotent field validators for normalization. Return fresh containers when transforming lists or dictionaries. Keep model-level cross-field checks read-only and run all validators without external I/O.
 
 Workers receive defaults and nulls explicitly. They revalidate the complete values for every selected node use, so validators must preserve values after JSON transport.
 

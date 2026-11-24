@@ -19,7 +19,7 @@ def test_round_trip() -> None:
     catalog.graph.nodes.clear()
     restored = PreparedExecution.model_validate_json(payload)
     assert restored == plan
-    assert restored.parameters == {}
+    assert restored.request.parameters == {}
     assert restored.request.model_dump(mode="json")["inputs"]
 
 
@@ -50,7 +50,7 @@ def test_defaults_and_identity(*, native: bool) -> None:
     schema.clear()
     restored = PreparedExecution.model_validate_json(plan.model_dump_json())
     assert restored == plan
-    assert restored.parameters == {"values": [1]}
+    assert restored.request.parameters == {"values": [1]}
     assert restored.request.model_dump(mode="json")["parameters"] == {"values": [1]}
 
 

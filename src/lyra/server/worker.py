@@ -391,7 +391,10 @@ def _execute_bound_job(
     if live.required_scopes() != plan.provider_scopes:
         msg = "Required provider scopes differ from acceptance"
         raise BoundPlanError(msg)
-    if live.computation_identity != plan.computation_identity:
+    if (
+        live.has_parameters != plan.has_parameters
+        or live.computation_identity != plan.computation_identity
+    ):
         msg = "Selected computation differs from acceptance"
         raise BoundPlanError(msg)
     report = ReportCollection()

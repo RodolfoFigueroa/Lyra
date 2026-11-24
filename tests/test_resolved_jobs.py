@@ -10,7 +10,7 @@ from unittest.mock import Mock, create_autospec
 import geopandas as gpd
 import pandas as pd
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import Field, ValidationError, field_validator
 
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Input
@@ -21,6 +21,7 @@ from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
 from lyra.server import worker
@@ -39,10 +40,8 @@ if TYPE_CHECKING:
     from rq.job import Job
 
 
-class Parameters(BaseModel):
+class Parameters(MetricParameters):
     """Every effective field participates in execution identity."""
-
-    model_config = ConfigDict(extra="forbid", validate_default=True)
 
     value: int = Field(default=7, description="Value")
 
@@ -73,7 +72,7 @@ def test_effective_parameters_round_trip() -> None:
     request = {"metric": "root", "parameters": {"value": 7}}
     prepared = prepare_execution(runner.catalog, request)
     restored = PreparedExecution.model_validate_json(prepared.model_dump_json())
-    assert restored.parameters == {"value": 8}
+    assert restored.request.parameters == {"value": 8}
     result = (
         GraphExecutor(
             runner.catalog,
@@ -202,7 +201,7 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
     _, local, envelope, native, seen, sentinel, adapter = queued
     payload = json.loads(envelope.model_dump_json())
     prepared = envelope.accepted.plan
-    assert prepared.parameters == {"value": 7}
+    assert prepared.request.parameters == {"value": 7}
     assert prepared.request.inputs["lots"].ids == ["b"]
     assert payload["accepted"]["plan"]["request"]["parameters"] == {"value": 7}
     assert payload["accepted"]["plan"]["request"]["inputs"]["lots"]["ids"] == ["b"]
@@ -394,19 +393,12 @@ def test_missing_normalized_values_fail_before_acquisition(
     payload = json.loads(envelope.model_dump_json())
     plan = payload["accepted"]["plan"]
     if missing == "dependency":
-        plan["parameter_uses"].pop(
-            next(key for key in plan["parameter_uses"] if key != "root")
-        )
+        plan["parameter_uses"].pop(next(iter(plan["parameter_uses"])))
     elif missing == "root":
-        plan["parameter_uses"].pop("root")
+        plan["request"].pop("parameters")
     else:
-        for values in [
-            plan["parameters"],
-            plan["request"]["parameters"],
-            plan["parameter_uses"]["root"],
-        ]:
-            values.clear()
-    with pytest.raises(ValueError, match=r"normalized|Effective root"):
+        plan["request"]["parameters"].clear()
+    with pytest.raises(ValueError, match=r"normalized|Field required"):
         worker.run_metric_task(payload)
     assert seen == []
     provider.assert_not_called()

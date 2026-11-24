@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import inspect
 import types
 from typing import (
     TYPE_CHECKING,
@@ -14,17 +14,18 @@ from typing import (
     get_origin,
 )
 
-from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.schema import (
     JSON_SCHEMA_DIALECT,
-    check_request_schema,
+    check_parameter_schema,
     schema_nodes,
 )
-from lyra.contracts.value_identity import check_json_value
+from lyra.contracts.types import validate_json_object
+from lyra.contracts.value_identity import check_json_value, same_json
 
 if TYPE_CHECKING:
     from lyra.contracts.types import JsonObject
@@ -33,7 +34,7 @@ _SCHEMA_ANNOTATIONS = {"title", "description", "examples", "deprecated"}
 
 
 class MetricParameters(BaseModel):
-    """Convenient parameter base with explicit fields and validated defaults."""
+    """Base class for metric, operation, and nested parameter models."""
 
     model_config = ConfigDict(
         extra="forbid", validate_default=True, allow_inf_nan=False
@@ -64,9 +65,7 @@ def _check_schema_extra(extra: object, metric: str, path: str) -> None:
 def _check_metadata(metadata: object, metric: str, path: str) -> None:
     if isinstance(metadata, FieldInfo):
         _check_field_options(metadata, metric, path)
-    elif hasattr(metadata, "__get_pydantic_json_schema__") or type(
-        metadata
-    ).__name__ in {"PlainSerializer", "WrapSerializer"}:
+    elif hasattr(metadata, "__get_pydantic_json_schema__"):
         _fail(metric, path, "custom schema hooks and serializers are unsupported")
     elif (
         getattr(metadata, "json_schema_input_type", PydanticUndefined)
@@ -95,6 +94,12 @@ def _check_field_options(field: FieldInfo, metric: str, path: str) -> None:
 
 
 def _check_model_options(model: type[BaseModel], metric: str, path: str) -> None:
+    if (
+        not issubclass(model, MetricParameters)
+        or model is MetricParameters
+        or inspect.isabstract(model)
+    ):
+        _fail(metric, path, "expected a concrete MetricParameters subclass")
     if model.model_config.get("extra") != "forbid":
         _fail(metric, path, 'parameter models require extra="forbid"')
     if model.model_config.get("validate_default") is not True:
@@ -106,13 +111,7 @@ def _check_model_options(model: type[BaseModel], metric: str, path: str) -> None
         _fail(metric, path, "root and unresolved generic models are unsupported")
     if not model.__pydantic_complete__:
         _fail(metric, path, "model annotations must be fully resolved")
-    decorators = model.__pydantic_decorators__
-    if (
-        decorators.field_serializers
-        or decorators.model_serializers
-        or model.model_config.get("json_encoders")
-        or model.model_computed_fields
-    ):
+    if model.model_config.get("json_encoders") or model.model_computed_fields:
         _fail(metric, path, "custom serializers and computed fields are unsupported")
     _check_model_customization(model, metric, path)
 
@@ -126,9 +125,6 @@ def _check_model_customization(model: type[BaseModel], metric: str, path: str) -
         ) or "__get_pydantic_core_schema__" in vars(base):
             _fail(metric, path, "custom schema hooks are unsupported")
     _check_schema_extra(model.model_config.get("json_schema_extra"), metric, path)
-    for validator in model.__pydantic_decorators__.field_validators.values():
-        if validator.info.json_schema_input_type is not PydanticUndefined:
-            _fail(metric, path, "validator input schema overrides are unsupported")
 
 
 def _check_literal(values: tuple[object, ...], metric: str, path: str) -> None:
@@ -227,7 +223,7 @@ def build_parameter_schema(
     try:
         schema = parameters.model_json_schema(mode="validation")
         schema["$schema"] = JSON_SCHEMA_DIALECT
-        check_request_schema(schema)
+        check_parameter_schema(schema)
         _check_schema_values(schema, metric)
     except (TypeError, ValueError, KeyError) as exc:
         message = f"Metric {metric!r}, request schema: {exc}"
@@ -235,19 +231,27 @@ def build_parameter_schema(
     return schema
 
 
-_JSON_PARAMETERS = TypeAdapter(dict[str, JsonValue])
+def _field_tree(value: object) -> object:
+    if isinstance(value, BaseModel):
+        return {
+            name: _field_tree(getattr(value, name)) for name in type(value).model_fields
+        }
+    if isinstance(value, list):
+        return [_field_tree(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _field_tree(item) for key, item in value.items()}
+    return value
 
 
 def parameter_values(model: BaseModel) -> JsonObject:
-    """Serialize all effective fields, including defaults and nulls.
+    """Return detached JSON that exactly represents all effective model fields.
 
-    Returns:
-        Detached JSON values produced by Pydantic.
+    Raises:
+        ValueError: If serialization changes a field name, value or scalar type.
     """
-    values = _JSON_PARAMETERS.validate_python(
-        model.model_dump(mode="python", warnings="error"), strict=True
-    )
-    # Python-mode output preserves invalid keys and non-finite numbers so the
-    # library checks reject them before JSON encoding can coerce them.
-    json.dumps(values, allow_nan=False)
-    return values
+    fields = validate_json_object(_field_tree(model))
+    serialized = model.model_dump(mode="json", warnings="error")
+    if not same_json(fields, serialized):
+        message = "Serialized parameters differ from effective model fields"
+        raise ValueError(message)
+    return fields

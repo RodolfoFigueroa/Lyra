@@ -60,7 +60,7 @@ Lyra prepares parameters for every selected metric or operation invocation befor
 
 Pydantic converts compatible input types; for example, an ordinary integer field accepts the string `"7"`. Use strict Pydantic fields when inputs must match their declared types.
 
-Use model-level after validators for cross-field checks and preserve declared types. Lyra rejects invalid parameters during preparation, before any handler runs. Request [provenance](../../concepts/provenance/) records the resulting parameter values used for execution and [cache identity](../../concepts/caching/).
+Return fresh values from field validators and keep model-level cross-field checks read-only. Lyra rejects invalid parameters during preparation, before any handler runs. Request [provenance](../../concepts/provenance/) records the resulting parameter values used for execution and [cache identity](../../concepts/caching/).
 
 ## Declare spatial inputs
 
@@ -111,7 +111,7 @@ These declarations describe the calculation independently of source selection.
 
 ## Reuse an existing parameter model
 
-An existing `BaseModel` works when it and every nested model set `extra="forbid"` and `validate_default=True`. Inherited settings count. Adapt an incompatible model with a small subclass and compatible nested types; Lyra leaves the original model unchanged.
+Reuse a concrete `MetricParameters` subclass across handlers that accept the same fields. For an existing library, define the public parameters and nested models as `MetricParameters` subclasses and pass their validated values to the library.
 
 See [parameter and handler rules](../../reference/parameters/) for the supported types and signature constraints. Continue to [output tables](../outputs/) to describe the result and [testing](../testing/) to exercise the adapter.
 

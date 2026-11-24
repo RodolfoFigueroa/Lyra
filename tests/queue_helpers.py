@@ -51,7 +51,7 @@ def submitted_input(envelope: JobEnvelope) -> dict:
         name: item.model_dump(mode="json") for name, item in request.inputs.items()
     }
     if envelope.accepted.plan.has_parameters:
-        values["parameters"] = envelope.accepted.plan.parameters
+        values["parameters"] = request.parameters
     return values
 
 

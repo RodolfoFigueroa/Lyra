@@ -15,6 +15,7 @@ from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.reports import ExecutionReport, ReportOutput
 from lyra.contracts.results import ResultDescription as PublicResultDescription
 from lyra.contracts.types import JsonObject
+from lyra.contracts.value_identity import same_json
 from lyra.runtime.location_inputs import (
     InputBindings,
     _input_traversal,
@@ -113,7 +114,7 @@ class ResultDescriptions:
         root = next(node for node in report.nodes if node.use_id == report.root_use_id)
         if (
             description.metric_name != root.node_id
-            or description.parameters != root.parameters
+            or not same_json(description.parameters, root.parameters)
             or description.code_revision != root.code_revision
             or set(description.output_names) != set(root.outputs)
             or any(

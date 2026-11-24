@@ -2253,10 +2253,9 @@ def test_mounted_submission_matches_rest(
         assert plan.request.model_dump(mode="json")["inputs"] == original.get(
             "inputs", {}
         )
-        assert plan.request.parameters == plan.parameters
         assert plan.metric == "report"
         if scenario in {"defaults", "nested"}:
-            assert plan.parameters == {
+            assert plan.request.parameters == {
                 "value": 7,
                 "nested": None,
                 **payload["parameters"],
@@ -2658,7 +2657,7 @@ def test_python_submission_reaches_shared_acceptance(
             assert accepted.accepted.plan.request.model_dump(mode="json")["inputs"] == (
                 sections.get("inputs") or {}
             )
-            assert accepted.accepted.plan.parameters == (
+            assert accepted.accepted.plan.request.parameters == (
                 {"value": 7, "nested": None, **(sections.get("parameters") or {})}
                 if scenario == "defaults"
                 else {}

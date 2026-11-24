@@ -381,9 +381,9 @@ def test_shared_preparation_validates_parameters(
             prepare_execution(catalog.compiled, request)
     else:
         plan = prepare_execution(catalog.compiled, request)
-        assert plan.parameters == values
+        assert plan.request.parameters == values
         values.clear()
-        assert plan.parameters
+        assert plan.request.parameters
 
 
 def test_catalog_prepares_location_and_bounds(

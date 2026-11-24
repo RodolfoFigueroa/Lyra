@@ -399,9 +399,9 @@ def prepare_dependency(
         edge.output.producer if isinstance(edge, ResolvedDependency) else edge.producer
     )
     try:
-        arguments = _dependency_arguments(consumer, edge, location_input)
-        if effective_parameters is not None and "parameters" in arguments:
-            arguments["parameters"] = effective_parameters
+        arguments = _dependency_arguments(
+            consumer, edge, location_input, effective_parameters
+        )
         return plugin.prepare_resolved_invocation(producer.node.name, arguments)
     except MetricInputError as exc:
         raise MetricInputError(
@@ -418,18 +418,21 @@ def _dependency_arguments(
         [str, NativeLocationInput | LocationDependency], NativeLocationInput
     ]
     | None,
+    effective_parameters: dict | None,
 ) -> dict[str, object]:
     producer = (
         edge.output.producer if isinstance(edge, ResolvedDependency) else edge.producer
     ).node
     if consumer.node != edge.consumer.node.name:
         raise MetricInputError(producer.name, "input", "consumer node mismatch")
-    source = consumer.parameter_values()
-    values = forwarded_parameters(source, edge)
     arguments: dict[str, object] = {}
     properties = producer.request_schema.get("properties", {})
     if isinstance(properties, dict) and "parameters" in properties:
-        arguments["parameters"] = values
+        arguments["parameters"] = (
+            effective_parameters
+            if effective_parameters is not None
+            else forwarded_parameters(consumer.parameter_values(), edge)
+        )
     locations = consumer.locations
     bindings = edge.dependency.locations
     for name, declaration in producer.location_inputs.items():
