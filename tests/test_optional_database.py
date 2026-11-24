@@ -59,7 +59,7 @@ def test_worker_context_creates_scratch_directory(
     config = load_test_config(tmp_path)
     monkeypatch.setattr(worker, "require_worker_config", lambda: config)
     monkeypatch.setattr(worker, "_runner_temp_base", lambda: tmp_path)
-    context = worker.build_run_context("test", node="source")
+    context = worker.build_run_context("a" * 32, node="source")
     assert context.temp_dir.is_dir()
 
 

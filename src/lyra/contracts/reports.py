@@ -16,7 +16,7 @@ from lyra.contracts.accepted import SubmittedRequest
 from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.provider_scope import DatasetScope, EffectiveScope
-from lyra.contracts.references import ExecutionID, ResultReference
+from lyra.contracts.references import JobId
 from lyra.contracts.revision_tokens import BuildRevision, ImplementationRevision
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.value_identity import check_json_value, same_json
@@ -160,8 +160,7 @@ class ExecutionReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request: SubmittedRequest
-    execution_id: ExecutionID
-    result_ref: ResultReference
+    job_id: JobId
     status: Literal["succeeded"]
     root_use_id: LocalName
     nodes: list[ReportNode]
@@ -253,7 +252,7 @@ class ExecutionReportPreview(StrictBaseModel):
     """Fixed summary linking to the complete authenticated JSON download."""
 
     kind: Literal["preview"] = "preview"
-    execution_id: ExecutionID
+    job_id: JobId
     metric: str
     status: Literal["succeeded"]
     omitted: tuple[Literal["report"]] = ("report",)

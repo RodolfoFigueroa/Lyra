@@ -58,14 +58,12 @@ def submitted_input(envelope: JobEnvelope) -> dict:
 def run_and_read(task: Callable[..., dict], payload: dict, *args: object) -> dict:
     """Execute a worker entry point and read its persisted native result."""
     reference = task(payload, *args)
-    assert set(reference) == {"result_ref", "execution_id"}
+    assert set(reference) == {"job_id"}
     envelope = JobEnvelope.model_validate(payload)
-    retained = read_retained(reference["result_ref"])
+    retained = read_retained(reference["job_id"])
     return TableJobResult.model_validate(
         {
             "job_id": envelope.job_id,
-            "execution_id": reference["execution_id"],
-            "result_ref": reference["result_ref"],
             "outputs": serialize_outputs(
                 envelope.accepted.plan.metric, retained.tables
             ),

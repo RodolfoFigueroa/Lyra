@@ -90,7 +90,7 @@ def expired_result(
     _, restarted = install_definitions(tmp_path, monkeypatch, definitions)
     monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=NoSuchJobError))
     assert restarted.jobs.read_job(envelope.job_id) is None
-    return restarted, str(saved["result_ref"])
+    return restarted, str(saved["job_id"])
 
 
 def check_pairs(frame: gpd.GeoDataFrame) -> None:
@@ -142,9 +142,8 @@ def test_reopened_frames_and_exports(
         check_pairs(exported)
         assert exported.attrs["lyra"] == {
             "kind": "location_input",
-            "result_ref": ref,
+            "job_id": ref,
             "input_name": "linked",
-            "execution_id": description.execution_id,
             "description": destination_description,
         }
         check_pairs(reader.read_location_input(ref, "linked"))
@@ -178,7 +177,7 @@ async def test_effective_descriptions_pages_and_arrow(
         response = await http.get(f"/results/{ref}")
         response.raise_for_status()
         inspection = response.json()
-        mcp = await call_tool(backend, "lyra_describe_result", {"result_ref": ref})
+        mcp = await call_tool(backend, "lyra_describe_result", {"job_id": ref})
         assert mcp["structuredContent"]["result"] == inspection
         linked = inspection["description"]["location_inputs"]["linked"]
         assert linked["source_scope"]["intervention"] == {
@@ -203,7 +202,7 @@ async def test_effective_descriptions_pages_and_arrow(
                 backend,
                 "lyra_get_location_input_rows",
                 {
-                    "result_ref": ref,
+                    "job_id": ref,
                     "input_name": "linked",
                     **query,
                 },

@@ -5,15 +5,13 @@ from pydantic import ValidationError
 
 from lyra.contracts.errors import (
     ExecutionPersistenceError,
-    InvalidExecutionIDError,
-    InvalidResultReferenceError,
     ReportIntegrityError,
     ReportNotFoundError,
     ResultAccessError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
-from lyra.contracts.references import validate_execution_id, validate_result_reference
+from lyra.contracts.references import validate_job_id
 from lyra.contracts.reports import ExecutionReport
 
 
@@ -89,8 +87,7 @@ def report_payload() -> dict:
                 "parameters": parameters,
                 "inputs": {"places": {"provider": "places", "ids": ["A", "B"]}},
             },
-            "execution_id": "a" * 32,
-            "result_ref": "b" * 32,
+            "job_id": "b" * 32,
             "status": "succeeded",
             "root_use_id": "root",
             "nodes": [provider, operation, root],
@@ -145,23 +142,17 @@ def test_complete_round_trip_and_ownership() -> None:
         b"a" * 32,
     ],
 )
-def test_strict_shared_references(value: object) -> None:
-    for field in ("execution_id", "result_ref"):
-        raw = report_payload()
-        raw[field] = value
-        with pytest.raises(ValidationError):
-            ExecutionReport.model_validate(raw)
-    with pytest.raises(InvalidExecutionIDError) as caught:
-        validate_execution_id(value)
-    assert caught.value.execution_id == value
-    with pytest.raises(InvalidResultReferenceError) as result:
-        validate_result_reference(value, "area")
-    assert result.value.result_ref == value
-    assert result.value.output_name == "area"
+def test_report_requires_valid_job_id(value: object) -> None:
+    raw = report_payload()
+    raw["job_id"] = value
+    with pytest.raises(ValidationError):
+        ExecutionReport.model_validate(raw)
+    with pytest.raises(ValidationError):
+        validate_job_id(value)
 
 
 @pytest.mark.parametrize(
-    "field", ["result_ref", "status", "build_revision", "request", "root_use_id"]
+    "field", ["job_id", "status", "build_revision", "request", "root_use_id"]
 )
 def test_success_requires_complete_fields(field: str) -> None:
     raw = report_payload()
@@ -224,31 +215,27 @@ def test_supported_outcomes(outcome: str, stage: str) -> None:
 
 
 def test_error_context_and_chaining() -> None:
+    job_id = "a" * 32
     for error_type in (
-        InvalidExecutionIDError,
         ReportNotFoundError,
         ReportIntegrityError,
     ):
-        error = error_type("attempt")
+        error = error_type(job_id)
         assert isinstance(error, ResultAccessError)
-        assert error.execution_id == "attempt"
+        assert error.job_id == job_id
     for error_type in (
-        InvalidResultReferenceError,
         ResultNotFoundError,
         ResultIntegrityError,
     ):
-        error = error_type("reference", "area")
+        error = error_type(job_id, "area")
         assert isinstance(error, ResultAccessError)
-        assert error.result_ref == "reference"
+        assert error.job_id == job_id
         assert error.output_name == "area"
     cause = OSError("storage")
-    execution_id = "attempt"
     with pytest.raises(ExecutionPersistenceError) as caught:
-        raise ExecutionPersistenceError(execution_id) from cause
-    assert caught.value.execution_id == "attempt"
+        raise ExecutionPersistenceError(job_id) from cause
+    assert caught.value.job_id == job_id
     assert caught.value.__cause__ is cause
-    assert validate_execution_id("a" * 32) == "a" * 32
-    assert validate_result_reference("b" * 32) == "b" * 32
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), (1, 2), {1: "value"}])

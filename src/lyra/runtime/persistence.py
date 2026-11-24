@@ -7,7 +7,7 @@ from lyra.contracts.errors import ExecutionPersistenceError
 
 
 @contextmanager
-def persistence_boundary(execution_id: str) -> Generator[None, None, None]:
+def persistence_boundary(job_id: str) -> Generator[None, None, None]:
     """Translate a storage failure while preserving its original cause.
 
     Yields:
@@ -21,4 +21,4 @@ def persistence_boundary(execution_id: str) -> Generator[None, None, None]:
     except ExecutionPersistenceError:
         raise
     except Exception as error:
-        raise ExecutionPersistenceError(execution_id) from error
+        raise ExecutionPersistenceError(job_id) from error

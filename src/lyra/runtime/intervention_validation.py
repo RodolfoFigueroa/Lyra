@@ -35,7 +35,7 @@ def validate_interventions(
         provider = providers[change.catalog]
         scope = change.effective_scope(provider.scope)
         key = scope.validation_key
-        with persistence_boundary(report.execution_id):
+        with persistence_boundary(report.job_id):
             validated = store.has_intervention_validation(key)
         if validated:
             report.intervention_validations.append(
@@ -60,7 +60,7 @@ def validate_interventions(
                 "Removed IDs are missing from the base dataset",
                 sorted(missing),
             )
-        with persistence_boundary(report.execution_id):
+        with persistence_boundary(report.job_id):
             store.publish_intervention_validation(key)
         report.intervention_validations.append(
             InterventionValidation(scope=scope, membership_lookup="executed")

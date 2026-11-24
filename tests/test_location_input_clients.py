@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from lyra.contracts.errors import (
     InvalidPaginationError,
-    InvalidResultReferenceError,
     LocationInputUnavailableError,
     ResultAccessError,
     ResultIntegrityError,
@@ -153,7 +152,6 @@ def test_correspondence_reads_pages_and_downloads(
     "error",
     [
         LocationInputUnavailableError(_ID, "places"),
-        InvalidResultReferenceError(_ID, input_name="places"),
         ResultNotFoundError(_ID, input_name="places"),
         ResultIntegrityError(_ID, input_name="places"),
         InvalidPaginationError(_ID, None, "cursor", input_name="places"),
@@ -202,10 +200,8 @@ def test_reference_context_and_encoded_name(
 ) -> None:
     name = "雪 /%?#"
     args = (tmp_path / "out",) if method == "download_location_input" else ()
-    with pytest.raises(InvalidResultReferenceError) as caught:
+    with pytest.raises(ValidationError):
         client.resolve(getattr(client.client.results, method)("bad", name, *args))
-    assert caught.value.input_name == name
-    assert caught.value.output_name is None
     assert not client.requests
     error = ResultNotFoundError(_ID, input_name=name)
     client.responses.append(

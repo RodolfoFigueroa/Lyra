@@ -5,15 +5,10 @@ from typing import Literal
 from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from lyra.contracts import errors
+from lyra.contracts.references import JobId
 from lyra.contracts.strict import StrictBaseModel
-from lyra.contracts.types import JsonValue
 
 _RESULT_ERRORS = {
-    "invalid_result_reference": (
-        errors.InvalidResultReferenceError,
-        422,
-        "Malformed result reference.",
-    ),
     "result_not_found": (
         errors.ResultNotFoundError,
         404,
@@ -26,11 +21,6 @@ _RESULT_ERRORS = {
     ),
 }
 _REPORT_ERRORS = {
-    "invalid_execution_id": (
-        errors.InvalidExecutionIDError,
-        422,
-        "Malformed execution ID.",
-    ),
     "report_not_found": (
         errors.ReportNotFoundError,
         404,
@@ -49,11 +39,9 @@ class ResultErrorPayload(StrictBaseModel):
 
     model_config = ConfigDict(strict=True)
 
-    code: Literal[
-        "invalid_result_reference", "result_not_found", "result_integrity_error"
-    ]
+    code: Literal["result_not_found", "result_integrity_error"]
     message: str
-    result_ref: JsonValue
+    job_id: JobId
     output_name: str | None
     input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
@@ -65,7 +53,7 @@ class LocationInputUnavailableErrorPayload(StrictBaseModel):
 
     code: Literal["location_input_unavailable"]
     message: str
-    result_ref: JsonValue
+    job_id: JobId
     input_name: str
 
 
@@ -74,9 +62,9 @@ class ReportErrorPayload(StrictBaseModel):
 
     model_config = ConfigDict(strict=True)
 
-    code: Literal["invalid_execution_id", "report_not_found", "report_integrity_error"]
+    code: Literal["report_not_found", "report_integrity_error"]
     message: str
-    execution_id: JsonValue
+    job_id: JobId
 
 
 class PaginationErrorPayload(StrictBaseModel):
@@ -86,7 +74,7 @@ class PaginationErrorPayload(StrictBaseModel):
 
     code: Literal["invalid_pagination"]
     message: str
-    result_ref: JsonValue
+    job_id: JobId
     output_name: str | None
     input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     parameter: Literal["cursor", "limit"]
@@ -99,7 +87,7 @@ class RowTooLargeErrorPayload(StrictBaseModel):
 
     code: Literal["row_too_large"]
     message: str
-    result_ref: JsonValue
+    job_id: JobId
     output_name: str | None
     input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     download_url: str
@@ -129,7 +117,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
             {
                 "code": "location_input_unavailable",
                 "message": "The location input was not materialized for this result.",
-                "result_ref": error.result_ref,
+                "job_id": error.job_id,
                 "input_name": error.input_name,
             }
         )
@@ -138,7 +126,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
             {
                 "code": "row_too_large",
                 "message": "The next row exceeds the JSON page size limit.",
-                "result_ref": error.result_ref,
+                "job_id": error.job_id,
                 "output_name": error.output_name,
                 "input_name": error.input_name,
                 "download_url": error.download_url,
@@ -149,7 +137,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
             {
                 "code": "invalid_pagination",
                 "message": "Invalid pagination for this output.",
-                "result_ref": error.result_ref,
+                "job_id": error.job_id,
                 "output_name": error.output_name,
                 "input_name": error.input_name,
                 "parameter": error.parameter,
@@ -161,7 +149,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
                 {
                     "code": code,
                     "message": message,
-                    "result_ref": error.result_ref,
+                    "job_id": error.job_id,
                     "output_name": error.output_name,
                     "input_name": error.input_name,
                 }
@@ -172,7 +160,7 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
                 {
                     "code": code,
                     "message": message,
-                    "execution_id": error.execution_id,
+                    "job_id": error.job_id,
                 }
             )
     msg = f"Unmapped retrieval error: {type(error).__name__}"
@@ -207,25 +195,23 @@ def decode_error(payload: object, *, status: int) -> errors.ResultAccessError | 
 
 def _decode_validated_error(parsed: RetrievalErrorPayload) -> errors.ResultAccessError:
     if isinstance(parsed, LocationInputUnavailableErrorPayload):
-        return errors.LocationInputUnavailableError(
-            parsed.result_ref, parsed.input_name
-        )
+        return errors.LocationInputUnavailableError(parsed.job_id, parsed.input_name)
     if isinstance(parsed, RowTooLargeErrorPayload):
         return errors.RowTooLargeError(
-            parsed.result_ref,
+            parsed.job_id,
             parsed.output_name,
             parsed.download_url,
             input_name=parsed.input_name,
         )
     if isinstance(parsed, PaginationErrorPayload):
         return errors.InvalidPaginationError(
-            parsed.result_ref,
+            parsed.job_id,
             parsed.output_name,
             parsed.parameter,
             input_name=parsed.input_name,
         )
     if isinstance(parsed, ResultErrorPayload):
         return _RESULT_ERRORS[parsed.code][0](
-            parsed.result_ref, parsed.output_name, input_name=parsed.input_name
+            parsed.job_id, parsed.output_name, input_name=parsed.input_name
         )
-    return _REPORT_ERRORS[parsed.code][0](parsed.execution_id)
+    return _REPORT_ERRORS[parsed.code][0](parsed.job_id)

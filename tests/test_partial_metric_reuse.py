@@ -173,7 +173,7 @@ def _assert_result(result: RunResult, owners: set[str], inputs: set[str]) -> Non
     result.metadata.store_path.touch()
     _assert_inputs(result, inputs)
     with ResultStore.open(result.metadata.store_path) as store:
-        restored = store.read_result(result.metadata.result_ref)
+        restored = store.read_result(result.metadata.job_id)
     for name in ("a", "b"):
         assert_logical_equal(result.tables[name], restored.tables[name])
 
@@ -182,18 +182,14 @@ def _assert_inputs(result: RunResult, owners: set[str]) -> None:
     if not owners:
         return
     with ResultStore.open(result.metadata.store_path) as store:
-        places = store.read_location_input(result.metadata.result_ref, "places")
-        reference = store.read_location_input(result.metadata.result_ref, "reference")
+        places = store.read_location_input(result.metadata.job_id, "places")
+        reference = store.read_location_input(result.metadata.job_id, "reference")
         assert set(places.location_id) == owners
         assert set(reference.location_id) == {"a", "b", "c"}
         assert len(reference) == 3
         places.loc[:, "location_id"] = "changed"
         assert (
-            set(
-                store.read_location_input(
-                    result.metadata.result_ref, "places"
-                ).location_id
-            )
+            set(store.read_location_input(result.metadata.job_id, "places").location_id)
             == owners
         )
 

@@ -119,6 +119,36 @@ def _configure_connection(connection: sqlite3.Connection, _record: object) -> No
         cursor.close()
 
 
+def select_from_optional_store(
+    connection: sa.Connection, table: sa.Table, query: sa.Select
+) -> sa.CursorResult:
+    """Read from a store whose first schema transaction may still be pending.
+
+    Returns:
+        The query result from the caller's connection.
+
+    Raises:
+        MissingValueError: If the database has no committed schema.
+        OperationalError: If a populated database lacks the table or the read fails.
+    """
+    try:
+        return connection.execute(query)
+    except exc.OperationalError as error:
+        if not (
+            isinstance(error.orig, sqlite3.OperationalError)
+            and str(error.orig) == f"no such table: {table.name}"
+        ):
+            raise
+        if (
+            connection.exec_driver_sql("SELECT 1 FROM sqlite_schema LIMIT 1").scalar()
+            is None
+        ):
+            msg = "Uninitialized retained store"
+            raise MissingValueError(msg) from error
+    # Initialization may have committed between the failed read and the schema probe.
+    return connection.execute(query)
+
+
 class SQLiteStore:
     """Explicitly owned engine; catalog construction never opens the store."""
 
@@ -228,26 +258,11 @@ class SQLiteStore:
         if keys is not None:
             query = query.where(self.layout.registrations.c.registration_key.in_(keys))
         found = set()
-        try:
-            rows = connection.execute(query)
-        except exc.OperationalError as error:
-            if not (
-                allow_uninitialized
-                and isinstance(error.orig, sqlite3.OperationalError)
-                and str(error.orig) == "no such table: storage_registrations"
-            ):
-                raise
-            # A rolled-back first publication leaves an empty SQLite file.
-            if (
-                connection.exec_driver_sql(
-                    "SELECT 1 FROM sqlite_schema LIMIT 1"
-                ).scalar()
-                is None
-            ):
-                msg = "Uninitialized retained store"
-                raise MissingValueError(msg) from error
-            # Initialization may have committed between the failed read and probe.
-            rows = connection.execute(query)
+        rows = (
+            select_from_optional_store(connection, self.layout.registrations, query)
+            if allow_uninitialized
+            else connection.execute(query)
+        )
         for row in rows.mappings():
             found.add(row["registration_key"])
             registration = Registration.model_validate_json(row["description"])

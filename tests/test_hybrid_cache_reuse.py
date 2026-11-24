@@ -297,12 +297,13 @@ def test_empty_primary_skips_independent_work(
         assert owner.provider_id == "target"
         assert not result.provenance.execution.observations
         if retain:
-            assert result.result_ref is not None
+            assert result.job_id is not None
             with ResultStore(SQLiteStore(tmp_path / "values.sqlite")) as reader:
-                restored = reader.read_result(result.result_ref)
+                restored = reader.read_result(result.job_id)
             assert restored.tables["data"].empty
             assert restored.metadata.outputs == result.metadata.outputs
-    assert (results[0].result_ref != results[1].result_ref) == retain
+    assert results[0].job_id != results[1].job_id
+    assert all((result.committed_report is not None) == retain for result in results)
 
 
 @pytest.mark.parametrize("policy", ["off", "full", "per_location"])
@@ -391,12 +392,12 @@ def test_distinct_uses_report_overlapping_computation_reuse(
         state.clear()
     runner.retain_result = True
     result = runner.execute(state.request(runner))
-    assert result.result_ref is not None
+    assert result.job_id is not None
     with ResultStore(SQLiteStore(tmp_path / "values.sqlite")) as reader:
-        restored = reader.read_result(result.result_ref)
-        report = reader.read_report(restored.metadata.execution_id)
+        restored = reader.read_result(result.job_id)
+        report = reader.read_report(restored.metadata.job_id)
     assert restored.report == report
-    assert report.result_ref == restored.metadata.result_ref == result.result_ref
+    assert report.job_id == restored.metadata.job_id == result.job_id
     assert_logical_equal(restored.tables["data"], result.outputs["data"])
     assert set(restored.tables["data"].location_id) == {"a", "b"}
     nodes = {node.use_id: node for node in report.nodes}

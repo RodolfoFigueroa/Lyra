@@ -15,7 +15,7 @@ queued → running → succeeded
 
 Polling reads the job’s current status; it does not drive execution.
 
-Shared job models require a nonempty string for each job ID and reject other values without conversion. They preserve every character, including whitespace, and accept strings that contain only whitespace. Job IDs have no required format. A valid ID doesn’t guarantee that the job exists.
+A job ID contains exactly 32 lowercase hexadecimal characters. The same ID identifies the queue record, every node context, and the retained report and tables.
 
 ## Submission captures the request
 
@@ -27,7 +27,7 @@ The API server validates your request against the selected metric. Before queuei
 
 Before acquiring resources, the worker checks your job in this order:
 
-1. Compare the accepted [build revision](../../operate/configuration/#assign-a-deployment-build-revision) with the worker’s revision
+1. Match the accepted job ID to the queue record and compare the accepted [build revision](../../operate/configuration/#assign-a-deployment-build-revision) with the worker’s revision
 2. Prepare the request using the worker’s plugin definitions and revalidate its effective parameters with Pydantic
 3. Run the executor’s plan validation before loading data or reusing cached results
 
@@ -45,7 +45,7 @@ Queued jobs do not expire because of queue age. Running jobs use the Redis Queue
 
 During execution, the worker runs the calculation and validates its output tables. The API and worker use the same Pydantic parameter models to validate your request.
 
-Before setting `succeeded`, the worker saves required final values and publishes their retrieval description with a complete [execution report](../provenance/). Successful remote results and inspections include `execution_id` for that report.
+The worker commits the result description and [execution report](../provenance/) together in SQLite. You can then read them by job ID, even if the worker stops before RQ records success.
 
 If storage or publication fails, the job fails even when calculation finished. Python job-handle result and wait methods raise `MetricRunError`. Complete cache values saved earlier can remain reusable after a later publication failure.
 
@@ -69,8 +69,6 @@ Execution failure does not automatically replay the job. Operators inspect the f
 
 Successes and failures remain available for `jobs.result_retention_seconds`, which defaults to 86400s (one day). [Result inspections](../../use/results/#inspect-before-downloading) report the remaining lifetime.
 
-Job retention controls Redis records and API access. Lyra retains [saved results and reports](../../operate/caching/#preserve-stored-results) independently of job expiry.
+When the Redis record expires, a status lookup returns HTTP 404. Failure details and job-based JSON downloads also expire.
 
-With filesystem access to the store, you can still retrieve a report using `ResultStore.read_report()` and a saved execution ID. Use the report’s result reference with `read_result()` to retrieve its outputs. Clean up temporary scratch files separately.
-
-An unavailable reference does not tell you whether the job never existed or its retention period ended. Download data you need before it expires. See [results](../../use/results/) for downloads and [monitoring](../../operate/runbook/) for operational settings.
+Keep your submission’s job ID to read [saved reports, descriptions, and named tables](../../use/results/) after queue expiry. Use the API for remote reads or open the store file with `ResultStore`. Operators can check the [retention settings](../../operate/runbook/).

@@ -174,7 +174,7 @@ def prepare_seed(fixture: Fixture, directory: Path, *, mixed: bool) -> Seed:
     )
     reference = runner.run(
         "root", inputs=retained_inputs(count, fixture.references)
-    ).metadata.result_ref
+    ).metadata.job_id
     return Seed(str(path), reference, count)
 
 

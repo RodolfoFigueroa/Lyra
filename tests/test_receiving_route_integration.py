@@ -9,6 +9,7 @@ import pytest
 from pydantic import Field
 
 from lyra.contracts.jobs import JobEnvelope
+from lyra.contracts.references import new_job_id
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.parameters import MetricParameters
@@ -61,8 +62,11 @@ def test_accepted_routes_execute_with_frozen_defaults(
     accepting = False
     for repeat in range(2):
         native = native_job(monkeypatch)
+        if repeat:
+            envelope = envelope.model_copy(update={"job_id": new_job_id()})
+            serialized = envelope.model_dump(mode="json")
         native.id = envelope.job_id
-        artifact = str(worker.run_metric_task(serialized)["result_ref"])
+        artifact = str(worker.run_metric_task(serialized)["job_id"])
         tables = read_retained(artifact).tables
         pd.testing.assert_frame_equal(
             tables["total"], local.tables["total"].convert_dtypes()

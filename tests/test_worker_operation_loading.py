@@ -195,7 +195,7 @@ def test_split_route_loading_and_execution(
             ),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: "graph-job",
+            job_id_factory=lambda: "33333333333333333333333333333333",
         )
     )
     (envelope,) = enqueue.call_args.args
@@ -212,7 +212,7 @@ def test_split_route_loading_and_execution(
     worker.initialize_worker("heavy", config=runtime.config)
     assert calls == []
     acquisition.assert_not_called()
-    job = native_job(monkeypatch)
+    job = native_job(monkeypatch, job_id=envelope.job_id)
     job.args = (envelope.model_dump(mode="json"),)
     if change_preference:
         with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
@@ -258,7 +258,7 @@ def test_accepted_route_identity_across_worker_reload(
     plugins = definitions(calls)
     _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
     envelope = accepted_envelope(
-        job_id="graph-job",
+        job_id="33333333333333333333333333333333",
         metric="root",
         inputs=dict.fromkeys(["left", "right"], selection("a").model_dump(mode="json")),
         catalog=runtime.catalog.compiled,
@@ -268,7 +268,7 @@ def test_accepted_route_identity_across_worker_reload(
     else:
         plugins = definitions(calls, revisions={change: "2"})
     install_definitions(tmp_path, monkeypatch, plugins)
-    native = native_job(monkeypatch)
+    native = native_job(monkeypatch, job_id=envelope.job_id)
     native.args = (envelope.model_dump(mode="json"),)
     acquire = Mock(wraps=Provider.setup)
     monkeypatch.setattr(Provider, "setup", acquire)

@@ -73,7 +73,7 @@ def test_public_traversal(retained: Retained) -> None:
                 cursor = None
                 for _ in range(len(expected) + 1):
                     arguments = {
-                        "result_ref": retained.reference,
+                        "job_id": retained.reference,
                         "output_name": retained.output_name,
                         "limit": 100,
                     }
@@ -150,7 +150,7 @@ def test_pagination_errors(
                 json=tool_call_payload(
                     "lyra_get_result_rows",
                     {
-                        "result_ref": retained.reference,
+                        "job_id": retained.reference,
                         "output_name": "rows",
                         parameter: value,
                     },
@@ -190,7 +190,7 @@ def test_oversized_recovery(retained: Retained) -> None:
             for mode in ("http", "mcp"):
                 cursor = None
                 for _ in range(2 if prefix else 1):
-                    arguments = {"result_ref": reference, "output_name": "rows"}
+                    arguments = {"job_id": reference, "output_name": "rows"}
                     if cursor is not None:
                         arguments["cursor"] = cursor
                     if mode == "http":
@@ -255,7 +255,7 @@ def test_native_oversized_continuation_and_recovery(
                     client.results.rows(reference, "rows", cursor=cursor)
                 )
             error = caught.value
-            assert (error.result_ref, error.output_name, error.download_url) == (
+            assert (error.job_id, error.output_name, error.download_url) == (
                 reference,
                 "rows",
                 retained.url,
@@ -314,7 +314,6 @@ def test_lookup_and_bound_cursor_errors(
             output = "another"
     elif damage == "reference":
         reference = "bad"
-        code = "invalid_result_reference"
     elif damage in {"missing", "output"}:
         if damage == "missing":
             reference = "0" * 32
@@ -339,19 +338,26 @@ def test_lookup_and_bound_cursor_errors(
             )
             assert response.status_code == status
             error = response.json()["detail"]
-            assert error["code"] == code
-            assert error["result_ref"] == reference
-            assert error["output_name"] == output
+            if damage == "reference":
+                assert error[0]["loc"] == ["path", "job_id"]
+            else:
+                assert error["code"] == code
+                assert error["job_id"] == reference
+                assert error["output_name"] == output
             if damage.startswith("cursor"):
                 assert error["parameter"] == "cursor"
             response = await http.post(
                 BASE + "/mcp/",
                 json=tool_call_payload(
                     "lyra_get_result_rows",
-                    {"result_ref": reference, "output_name": output, **params},
+                    {"job_id": reference, "output_name": output, **params},
                 ),
             )
-            assert tool_payload(response)["error"] == error
+            if damage == "reference":
+                assert response.json()["result"]["isError"]
+                assert not response.json()["result"].get("structuredContent")
+            else:
+                assert tool_payload(response)["error"] == error
 
     asyncio.run(run())
 
@@ -398,7 +404,7 @@ def test_unknown_names_reach_domain_lookup(
             assert detail["input_name" if is_input else "output_name"] == name
             with pytest.raises(ResultNotFoundError) as caught:
                 native_api.resolve(call())
-            assert caught.value.result_ref == ref
+            assert caught.value.job_id == ref
             assert caught.value.output_name == (None if is_input else name)
             assert caught.value.input_name == (name if is_input else None)
 

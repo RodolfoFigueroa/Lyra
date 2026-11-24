@@ -11,6 +11,7 @@ from docs.scripts.mcp_tools import advertised_tools
 from lyra.api.client.endpoints import create_job
 from lyra.contracts.jobs import JobCreateRequest
 from test_support.mcp import call_tool
+from tests.job_id_helpers import TEST_JOB_ID
 
 
 @pytest.mark.parametrize("section", ["inputs", "parameters"])
@@ -83,8 +84,8 @@ def test_metric_requires_json_string(metric: object) -> None:
         ("lyra_get_metric", {"metric": "report"}),
         ("lyra_get_metric_dependencies", {"metric": "report"}),
         ("lyra_run_metric", {"metric": "report"}),
-        ("lyra_get_job_result", {"job_id": "job"}),
-        ("lyra_download_result", {"job_id": "job"}),
+        ("lyra_get_job_result", {"job_id": TEST_JOB_ID}),
+        ("lyra_download_result", {"job_id": TEST_JOB_ID}),
     ],
 )
 def test_unknown_fields_are_rejected_by_schema_and_call(

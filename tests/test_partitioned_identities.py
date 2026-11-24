@@ -613,7 +613,7 @@ def test_empty_executions_keep_fresh_report_identity_without_handlers() -> None:
     second = executor.execute(invocation)
     assert first.outputs["data"].empty
     assert second.outputs["data"].empty
-    assert first.report_state.execution_id != second.report_state.execution_id
+    assert first.report_state.job_id != second.report_state.job_id
     for outcome in (first, second):
         report = outcome.report_state
         assert report.root_use_id is not None

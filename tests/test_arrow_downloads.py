@@ -22,7 +22,6 @@ from mcp.types import TextContent
 from starlette.requests import ClientDisconnect
 
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
@@ -105,7 +104,7 @@ def test_http_ordinary_readers(
     database.engine.dispose.assert_called()
     # OpenAPI advertises the stream media type rather than a JSON wrapper.
     operation = retained.app.openapi()["paths"][
-        "/results/{result_ref}/tables/{output_name}/download"
+        "/results/{job_id}/tables/{output_name}/download"
     ]["get"]
     assert (
         "application/vnd.apache.arrow.stream"
@@ -141,7 +140,7 @@ def test_lookup_errors_before_stream_and_mcp(
     reference, output = retained.reference, "rows"
     if damage == "invalid":
         reference = "bad"
-        error = InvalidResultReferenceError(reference, output)
+        error = None
     elif damage in {"absent", "output", "store"}:
         if damage == "absent":
             reference = "0" * 32
@@ -171,6 +170,10 @@ def test_lookup_errors_before_stream_and_mcp(
             response = await http.get(
                 f"{BASE}/results/{reference}/tables/{output}/download"
             )
+            if error is None:
+                assert response.status_code == 422
+                assert response.json()["detail"][0]["loc"] == ["path", "job_id"]
+                return
             payload = error_payload(error)
             assert response.status_code == error_status(payload)
             assert response.json() == {"detail": payload.model_dump()}
@@ -178,7 +181,7 @@ def test_lookup_errors_before_stream_and_mcp(
                 BASE + "/mcp/",
                 json=tool_call_payload(
                     "lyra_download_table",
-                    {"result_ref": reference, "output_name": output},
+                    {"job_id": reference, "output_name": output},
                 ),
             )
             result = response.json()["result"]
@@ -232,9 +235,9 @@ def test_mcp_link_is_typed_bounded_and_independent_of_report(
             )
             assert tool.annotations is not None
             assert tool.annotations.readOnlyHint
-            assert tool.inputSchema["required"] == ["result_ref", "output_name"]
+            assert tool.inputSchema["required"] == ["job_id", "output_name"]
             assert tool.inputSchema["additionalProperties"] is False
-            arguments = {"result_ref": retained.reference, "output_name": "rows"}
+            arguments = {"job_id": retained.reference, "output_name": "rows"}
             result = await session.call_tool(tool.name, arguments)
             assert not result.isError
             validate(result.structuredContent, tool.outputSchema)
@@ -413,7 +416,7 @@ async def test_mcp_download_link_defers_cell_integrity_to_get(
             BASE + "/mcp/",
             json=tool_call_payload(
                 "lyra_download_table",
-                {"result_ref": retained.reference, "output_name": "rows"},
+                {"job_id": retained.reference, "output_name": "rows"},
             ),
             headers=mcp_headers(),
         )

@@ -48,9 +48,9 @@ result = runner.run(
 )
 tables = result.tables
 print(tables["maintenance"])
-print(result.metadata.execution_id)
+print(result.metadata.job_id)
 print(result.report.request.parameters)
-assert result.report.result_ref == result.metadata.result_ref
+assert result.report.job_id == result.metadata.job_id
 ```
 
 Save this as `run_installed.py` and run `uv run python run_installed.py`. The `maintenance` table contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. Its condition score is 20, below the threshold of 50, so its entire length counts as maintenance workload.
@@ -135,7 +135,7 @@ Use these fields to inspect the result:
 
 The tables preserve declared data types, geometry columns, and CRS. Lyra gives each table a fresh `RangeIndex`; [align rows using declared identifier columns](../results/#understand-row-identity).
 
-Lyra attaches the report before returning, so reading `result.report` performs no storage lookup. Its `status` is `"succeeded"`, and its `execution_id` and `result_ref` match `result.metadata`.
+Read the complete report from `result.report` without opening the store. Its `status` is `"succeeded"`, and its `job_id` matches `result.metadata.job_id`.
 
 You own the returned tables, metadata, and report. Editing them, including nested values or DataFrame attributes, cannot change stored descriptions or later reads. Ordinary field access doesn’t copy values again, and later runs don’t replace this result’s report.
 
@@ -178,7 +178,7 @@ tables = runner.run("observations").tables
 
 Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [city graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace provider acquisition with a mock.
 
-The runner shares resources between location lookups and calculations during a run. It initializes them when needed and closes them when the run ends, including on failure. Pass a custom `context_factory` to replace runtime services. The runner still manages resource cleanup.
+During a run, location lookups and calculations share resources. The runner opens each resource when needed. Every node receives the same job ID and temporary directory. When the run ends, the runner closes those resources and removes the directory, including on failure.
 
 ## Reuse results across runs
 
@@ -207,7 +207,7 @@ Both constructors resolve default and explicit relative paths to absolute paths 
 
 During execution, Lyra creates the parent directory and initializes storage when needed. Choose a persistent writable directory outside job scratch space. SQLite also needs permission to create journal files beside the database.
 
-`run()` and `run_development()` follow the same storage rules, including private metrics and empty results. Each successful run gets its own execution ID and result reference, even when it reuses stored values. Keep `result.metadata.store_path` with both identifiers to [reopen the report or result](../results/#reopen-a-local-result).
+Both `run()` and `run_development()` save results, including empty outputs. Each call gets a fresh job ID, even on a full cache hit. Save `result.metadata.store_path` and `result.metadata.job_id` to [reopen the report or tables](../results/#reopen-a-local-result).
 
 Each node’s [cache policy](../../concepts/caching/) determines whether Lyra can reuse its saved values. A node with caching off executes when invoked, even if Lyra has saved its final output.
 
@@ -231,10 +231,10 @@ Use the exception type to decide whether to correct the root request, plugin loa
 
 Package loading errors identify missing or inconsistent distributions, entry points, or factories. Fix those before rerunning the calculation.
 
-Import `ExecutionPersistenceError` from `lyra.contracts.errors` to handle storage failures. Inspect `execution_id` to identify the attempt and `__cause__` for the underlying exception. The ID doesn’t guarantee that a report exists.
+Import `ExecutionPersistenceError` from `lyra.contracts.errors` to handle storage failures. Inspect `job_id` to identify the attempt and `__cause__` for the underlying exception. The ID doesn’t guarantee that a report exists.
 
-Publication failure fails the run even if calculation finished. Complete cache values saved earlier can remain reusable. Lyra retains complete successful reports only; calculation failures keep their existing exception behavior.
+If publication fails after calculation finishes, the runner raises `ExecutionPersistenceError`. A later run can still reuse cache values that Lyra committed earlier.
 
 Local execution returns results directly to your code. Your application decides whether to retry a failed run.
 
-Read `result.metadata.location_inputs` for captured input descriptions. Use `ResultStore.describe_result()` for metadata without tables or reports, and `read_location_input(result_ref, input_name)` for an explicit native read. [Retained location inputs](../results/#read-retained-location-inputs) describes complete selections across cache hits, known empty inputs, and unavailable skipped work. These rules also apply to `run_development()`. Required input persistence failures prevent successful publication.
+To inspect [retained location inputs](../results/#read-retained-location-inputs), read `result.metadata.location_inputs` or call `store.describe_result(job_id)`. To load a particular input, call `store.read_location_input(job_id, input_name)`. Both runner methods fail if they can’t save a required input.

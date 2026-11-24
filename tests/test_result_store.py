@@ -9,11 +9,10 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 import sqlalchemy as sa
+from pydantic import ValidationError
 from sqlalchemy.exc import DatabaseError
 
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
-    ResultAccessError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
@@ -61,11 +60,11 @@ def test_damaged_geometry_is_an_integrity_error(
             b"".join(store.stream_table(reference, "a"))
         with pytest.raises(ResultIntegrityError) as named:
             store.read_table(reference, "a")
-        assert named.value.result_ref == reference
+        assert named.value.job_id == reference
         assert named.value.output_name == "a"
         with pytest.raises(ResultIntegrityError) as whole:
             store.read_result(reference)
-        assert whole.value.result_ref == reference
+        assert whole.value.job_id == reference
         assert whole.value.output_name is None
 
 
@@ -104,10 +103,10 @@ def test_read_only_owned_results(
         attached = restored.report
         expected_report = attached.model_copy(deep=True)
         assert attached is restored.report
-        assert attached == reader.read_report(restored.metadata.execution_id)
-        assert attached.execution_id == restored.metadata.execution_id
-        assert attached.result_ref == reference
-        assert restored.metadata.result_ref == reference
+        assert attached == reader.read_report(restored.metadata.job_id)
+        assert attached.job_id == restored.metadata.job_id
+        assert attached.job_id == reference
+        assert restored.metadata.job_id == reference
         assert restored.metadata.store_path == path.resolve()
         assert restored.metadata.parameters == description.parameters
         assert (
@@ -157,16 +156,14 @@ def test_reference_errors(
 ) -> None:
     path = tmp_path / "results.sqlite"
     path.touch()
-    expected = (
-        ResultNotFoundError if reference == "0" * 32 else InvalidResultReferenceError
-    )
+    expected = ResultNotFoundError if reference == "0" * 32 else ValidationError
     with ResultStore.open(path) as reader, pytest.raises(expected) as captured:
         reader.read_result(reference) if output is None else reader.read_table(
             reference, output
         )
-    assert isinstance(captured.value, ResultAccessError)
-    assert captured.value.result_ref == reference
-    assert captured.value.output_name == output
+    if isinstance(captured.value, ResultNotFoundError):
+        assert captured.value.job_id == reference
+        assert captured.value.output_name == output
 
 
 @pytest.mark.parametrize(
@@ -205,7 +202,7 @@ def test_required_damage_is_integrity_error(
         reader.read_result(reference) if output is None else reader.read_table(
             reference, output
         )
-    assert captured.value.result_ref == reference
+    assert captured.value.job_id == reference
     assert captured.value.output_name == output
     assert captured.value.__cause__ is not None
 
@@ -275,8 +272,8 @@ def test_local_metadata_and_scalar_reconstruction(
     ).run("nullable", inputs={})
     path.touch()
     with ResultStore.open(path) as reader:
-        restored = reader.read_result(result.metadata.result_ref)
-        described = reader.describe(result.metadata.result_ref)
+        restored = reader.read_result(result.metadata.job_id)
+        described = reader.describe(result.metadata.job_id)
         assert described.model_dump() == result.metadata.model_dump(
             exclude={"store_path"}
         )
@@ -298,20 +295,18 @@ def test_local_metadata_and_scalar_reconstruction(
 def test_description_reference_errors(tmp_path: Path, reference: str) -> None:
     path = tmp_path / "results.sqlite"
     path.touch()
-    expected = (
-        ResultNotFoundError if reference == "0" * 32 else InvalidResultReferenceError
-    )
+    expected = ResultNotFoundError if reference == "0" * 32 else ValidationError
     with ResultStore.open(path) as reader, pytest.raises(expected) as captured:
         reader.describe(reference)
-    assert captured.value.result_ref == reference
-    assert captured.value.output_name is None
+    if isinstance(captured.value, ResultNotFoundError):
+        assert captured.value.job_id == reference
+        assert captured.value.output_name is None
 
 
 @pytest.mark.parametrize(
     "damage",
     [
         "report",
-        "execution_id",
         "description",
         "inventory",
         "registration",
@@ -332,8 +327,6 @@ def test_description_required_relationships(
     record = database.rows["final_results"][0]
     if damage == "report":
         record["report"] = None
-    elif damage == "execution_id":
-        record["execution_id"] = "invalid"
     elif damage == "description":
         record["description"] = "{"
     elif damage == "registration":
@@ -357,7 +350,7 @@ def test_description_required_relationships(
         pytest.raises(ResultIntegrityError) as captured,
     ):
         reader.describe(reference)
-    assert captured.value.result_ref == reference
+    assert captured.value.job_id == reference
     assert captured.value.output_name is None
     assert captured.value.__cause__ is not None
 
@@ -408,7 +401,7 @@ def test_missing_declared_output_selection(
                 reader.read_result(reference) if output is None else reader.read_table(
                     reference, output
                 )
-            assert captured.value.result_ref == reference
+            assert captured.value.job_id == reference
             assert captured.value.output_name == output
         with pytest.raises(ResultNotFoundError):
             reader.read_table(reference, "undeclared")
@@ -440,7 +433,7 @@ def test_unpartitioned_empty_output_inventory(
         saved["output_names"] = ["a", "a"] if damage == "duplicate" else []
     database.rows["final_results"][0]["description"] = json.dumps(saved)
     with ResultStore.open(path) as reader, pytest.raises(ResultIntegrityError):
-        reader.read_result(result.metadata.result_ref)
+        reader.read_result(result.metadata.job_id)
 
 
 def mutate_report(restored: RunResult, parameters: dict) -> None:
@@ -452,6 +445,6 @@ def mutate_report(restored: RunResult, parameters: dict) -> None:
     values.append(99)
     attached.nodes[0].parameters.clear()
     attached.nodes[0].outputs["a"].table_schema.columns.clear()
-    attached.result_ref = "0" * 32
+    attached.job_id = "0" * 32
     assert restored.metadata.parameters == parameters
     assert restored.metadata.outputs["a"].table_schema.columns

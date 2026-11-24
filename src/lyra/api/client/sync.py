@@ -22,7 +22,6 @@ from lyra.api.exceptions import (
     JobNotReadyError,
     ServiceUnavailableError,
 )
-from lyra.contracts.errors import ResultIntegrityError
 from lyra.contracts.jobs import (
     AdminJobDetail,
     JobCreateResponse,
@@ -225,18 +224,18 @@ class _ReportsResource:
     def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
-    def get(self, execution_id: str) -> ExecutionReport:
+    def get(self, job_id: str) -> ExecutionReport:
         """Return the complete validated report from its JSON download."""
-        return self._transport.request(endpoints.get_report(execution_id))
+        return self._transport.request(endpoints.get_report(job_id))
 
-    def inspect(self, execution_id: str) -> ExecutionReportInspection:
+    def inspect(self, job_id: str) -> ExecutionReportInspection:
         """Return the whole report or a bounded preview with a download URL."""
-        return self._transport.request(endpoints.get_report_inspection(execution_id))
+        return self._transport.request(endpoints.get_report_inspection(job_id))
 
-    def download(self, execution_id: str, path: str | os.PathLike[str]) -> None:
+    def download(self, job_id: str, path: str | os.PathLike[str]) -> None:
         """Stream complete JSON, replacing the destination only after success."""
         self._transport.download(
-            report_download_path(execution_id),
+            report_download_path(job_id),
             path,
             operation="download report",
             atomic=True,
@@ -247,11 +246,9 @@ class _ResultsResource:
     def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
-    def describe(self, result_ref: str) -> ResultDescription:
+    def describe(self, job_id: str) -> ResultDescription:
         """Return complete retained metadata, following a preview link when needed."""
-        inspection = self._transport.request(
-            endpoints.get_result_description(result_ref)
-        )
+        inspection = self._transport.request(endpoints.get_result_description(job_id))
         if inspection.kind == "complete":
             return inspection.description
         return self._transport.request(
@@ -263,80 +260,44 @@ class _ResultsResource:
 
     def rows(
         self,
-        result_ref: str,
+        job_id: str,
         output_name: str,
         limit: int = 100,
         cursor: str | None = None,
     ) -> ResultRowPage:
         """Return a bounded page, preserving decimal integer and WKT strings."""
         return self._transport.request(
-            endpoints.get_result_rows(result_ref, output_name, limit, cursor)
+            endpoints.get_result_rows(job_id, output_name, limit, cursor)
         )
 
-    def table(
-        self, result_ref: str, output_name: str
-    ) -> pd.DataFrame | gpd.GeoDataFrame:
+    def table(self, job_id: str, output_name: str) -> pd.DataFrame | gpd.GeoDataFrame:
         """Return an independent native frame from the retained Arrow stream.
 
         Nullable scalar types, geometry, and CRS come from retained Arrow
         metadata. The frame remains usable after client closure.
         """
-        return self._native_table(endpoints.get_table_download(result_ref, output_name))
+        return self._native_table(endpoints.get_table_download(job_id, output_name))
 
     def export_geoparquet(
-        self, result_ref: str, output_name: str, path: str | Path
+        self, job_id: str, output_name: str, path: str | Path
     ) -> None:
-        """Export a retained spatial output to an atomically replaced local file.
-
-        Raises:
-            ResultIntegrityError: If the retrieved table has no retained description.
-        """
-        frame = self.table(result_ref, output_name)
-        description = self.describe(result_ref)
-        selected = description.outputs.get(output_name)
-        if selected is None:
-            raise ResultIntegrityError(result_ref, output_name)
-        write_geoparquet = import_module("lyra.data.geoparquet").write_geoparquet
-
-        write_geoparquet(
-            frame,
-            selected.table_schema,
-            {
-                "kind": "metric_output",
-                "result_ref": description.result_ref,
-                "execution_id": description.execution_id,
-                "output_name": output_name,
-                "description": selected.model_dump(mode="json"),
-            },
-            path,
+        """Export a retained spatial output to an atomically replaced local file."""
+        frame = self.table(job_id, output_name)
+        description = self.describe(job_id)
+        geoparquet = import_module("lyra.data.geoparquet")
+        geoparquet.export_retained_geoparquet(
+            frame, description, "metric_output", output_name, path
         )
 
     def export_location_input_geoparquet(
-        self, result_ref: str, input_name: str, path: str | Path
+        self, job_id: str, input_name: str, path: str | Path
     ) -> None:
-        """Export a retained spatial input to an atomically replaced local file.
-
-        Raises:
-            ResultIntegrityError: If the retrieved table has no retained description.
-        """
-        frame = self.location_input(result_ref, input_name)
-        description = self.describe(result_ref)
-        selected = description.location_inputs.get(input_name)
-        if selected is None:
-            raise ResultIntegrityError(result_ref, input_name=input_name)
-        write_geoparquet = import_module("lyra.data.geoparquet").write_geoparquet
-
-        write_geoparquet(
-            frame,
-            selected.table_schema,
-            {
-                "kind": "location_input",
-                "result_ref": description.result_ref,
-                "execution_id": description.execution_id,
-                "input_name": input_name,
-                "description": selected.model_dump(mode="json"),
-            },
-            path,
+        """Export a retained spatial input to an atomically replaced local file."""
+        frame = self.location_input(job_id, input_name)
+        description = self.describe(job_id)
+        geoparquet = import_module("lyra.data.geoparquet")
+        geoparquet.export_retained_geoparquet(
+            frame, description, "location_input", input_name, path
         )
 
     def _native_table(
@@ -350,14 +311,14 @@ class _ResultsResource:
         return decode_table(content)
 
     def download_table(
-        self, result_ref: str, output_name: str, path: str | os.PathLike[str]
+        self, job_id: str, output_name: str, path: str | os.PathLike[str]
     ) -> None:
         """Atomically save unchanged IPC stream bytes, regardless of extension.
 
         The parent directory must exist. Failure or cancellation preserves any
         existing destination and removes the temporary file.
         """
-        spec = endpoints.get_table_download(result_ref, output_name)
+        spec = endpoints.get_table_download(job_id, output_name)
         self._transport.download(
             spec.path,
             path,
@@ -366,7 +327,7 @@ class _ResultsResource:
             content_type=spec.content_type,
         )
 
-    def location_input(self, result_ref: str, input_name: str) -> gpd.GeoDataFrame:
+    def location_input(self, job_id: str, input_name: str) -> gpd.GeoDataFrame:
         """Return an independent retained input with nullable types, geometry and CRS.
 
         Known empty inputs retain their schema. The complete logical selection
@@ -375,31 +336,31 @@ class _ResultsResource:
         return cast(
             "gpd.GeoDataFrame",
             self._native_table(
-                endpoints.get_location_input_download(result_ref, input_name)
+                endpoints.get_location_input_download(job_id, input_name)
             ),
         )
 
     def location_input_rows(
         self,
-        result_ref: str,
+        job_id: str,
         input_name: str,
         limit: int = 100,
         cursor: str | None = None,
     ) -> ResultRowPage:
         """Return a bounded page of the retained logical input selection."""
         return self._transport.request(
-            endpoints.get_location_input_rows(result_ref, input_name, limit, cursor)
+            endpoints.get_location_input_rows(job_id, input_name, limit, cursor)
         )
 
     def download_location_input(
-        self, result_ref: str, input_name: str, destination: str | os.PathLike[str]
+        self, job_id: str, input_name: str, destination: str | os.PathLike[str]
     ) -> None:
         """Atomically save the input as Arrow IPC and return None.
 
         The parent directory must exist. Failure or cancellation preserves the
         destination and removes the temporary file.
         """
-        spec = endpoints.get_location_input_download(result_ref, input_name)
+        spec = endpoints.get_location_input_download(job_id, input_name)
         self._transport.download(
             spec.path,
             destination,

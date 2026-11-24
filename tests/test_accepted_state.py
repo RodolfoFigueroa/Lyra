@@ -20,6 +20,7 @@ from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server.job_submission import MetricPayloadValidationError, submit_job
 from lyra.server.registry import Catalog
 from test_support.table_fixtures import value_frame, value_schema
+from tests.job_id_helpers import TEST_JOB_ID
 
 
 def parameter_catalog() -> CompiledCatalog:
@@ -75,7 +76,7 @@ def test_nested_views_and_constructor_inputs_are_owned() -> None:
         catalog_fingerprint="test",
         created_at=datetime.now(UTC),
     )
-    envelope = JobEnvelope(job_id="job", accepted=accepted)
+    envelope = JobEnvelope(job_id=TEST_JOB_ID, accepted=accepted)
     snapshot = envelope.model_dump(mode="json")
     raw["parameters"]["options"]["values"].append(3)
     catalog.graph.nodes["root"].node.description = "changed"

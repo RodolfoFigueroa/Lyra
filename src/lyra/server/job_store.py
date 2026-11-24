@@ -5,10 +5,10 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from rq import Queue
 from rq.exceptions import DeserializationError, NoSuchJobError
-from rq.job import Job, JobStatus, validate_job_id
+from rq.job import Job, JobStatus
 from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 from rq.serializers import JSONSerializer
 
@@ -23,7 +23,7 @@ from lyra.contracts.jobs import (
     JobStatusInfo,
     ResultLifetime,
 )
-from lyra.contracts.references import ExecutionID, ResultReference
+from lyra.contracts.references import validate_job_id
 from lyra.contracts.strict import StrictBaseModel
 
 if TYPE_CHECKING:
@@ -33,14 +33,10 @@ if TYPE_CHECKING:
     from lyra.runtime.results import RunResult
 
 
-_JOB_ID = TypeAdapter(JobId)
-
-
 class StoredResult(StrictBaseModel):
     """The complete RQ return value for a successful job."""
 
-    result_ref: ResultReference
-    execution_id: ExecutionID
+    job_id: JobId
 
 
 @dataclass(frozen=True)
@@ -48,8 +44,6 @@ class JobObservation:
     """Best-effort retained observation; lifecycle always comes from RQ."""
 
     snapshot: JobStatusInfo
-    result_ref: str | None = None
-    execution_id: str | None = None
     inspection: dict[str, Any] | None = None
     retained_result: "RunResult | None" = None
     provenance: JobRunProvenance | None = None
@@ -131,15 +125,13 @@ class JobStore:
             if status == JobStatus.FAILED
             else None
         )
-        stored_result = (
-            self._stored_result(job) if status == JobStatus.FINISHED else None
-        )
+        if status == JobStatus.FINISHED and self._stored_result(job).job_id != job.id:
+            message = "Stored result identity disagrees with accepted job"
+            raise InvalidJobResultError(message)
         return JobObservation(
             snapshot=JobStatusInfo(
                 job_id=job.id,
                 status=states[status],
-                result_ref=stored_result.result_ref if stored_result else None,
-                execution_id=stored_result.execution_id if stored_result else None,
                 created_at=job.created_at,
                 updated_at=job.ended_at or job.started_at or job.created_at,
                 started_at=job.started_at,
@@ -148,8 +140,6 @@ class JobStore:
                 error=failure.error if failure else None,
                 progress=progress,
             ),
-            result_ref=stored_result.result_ref if stored_result else None,
-            execution_id=stored_result.execution_id if stored_result else None,
             provenance=provenance,
             lifetime=ResultLifetime(expires_in_seconds=ttl if ttl >= 0 else None),
         )
@@ -176,17 +166,13 @@ class JobStore:
             if record is not None:
                 return StoredResult.model_validate(record.return_value)
         except (ValueError, TypeError, KeyError, DeserializationError) as exc:
-            message = "Invalid stored job result reference."
+            message = "Invalid stored job completion record."
             raise InvalidJobResultError(message) from exc
-        message = "Missing stored job result reference."
+        message = "Missing stored job completion record."
         raise InvalidJobResultError(message)
 
     def _fetch(self, job_id: str) -> Job | None:
-        job_id = _JOB_ID.validate_python(job_id)
-        try:
-            validate_job_id(job_id)
-        except ValueError:
-            return None
+        job_id = validate_job_id(job_id)
         try:
             job = Job.fetch(
                 job_id, connection=self.connection, serializer=JSONSerializer
@@ -211,7 +197,7 @@ class JobStore:
         return self._observation(job) if job else None
 
     def read_status(self, job_id: str) -> JobStatusInfo | None:
-        """Return status and durable IDs without reading tables or reports."""
+        """Return queue status without reading retained tables or reports."""
         job = self._fetch(job_id)
         observation = self._observation(job) if job else None
         return observation.snapshot if observation else None

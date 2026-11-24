@@ -1,7 +1,6 @@
 """Remote lookups share immutable native values with local retained access."""
 
 from copy import deepcopy
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
@@ -37,17 +36,10 @@ def test_captured_owners_and_expired_jobs(
     description = publish_values(writer, keys, spatial=True)
     reference = publish_result(ResultDescriptions(writer), description)
     path.touch()
-    jobs = Mock(
-        read_job=Mock(
-            return_value=observation(
-                reference,
-                ResultDescriptions(writer).read_complete(reference)[1].execution_id,
-            )
-        )
-    )
+    jobs = Mock(read_job=Mock(return_value=observation(reference)))
     service = ResultService(jobs, path)
     before = deepcopy(database.rows)
-    retained = service.read_observation("job")
+    retained = service.read_observation(reference)
     assert retained is not None
     assert retained.retained_result is not None
     metadata = retained.retained_result.metadata
@@ -56,15 +48,13 @@ def test_captured_owners_and_expired_jobs(
     assert retained.retained_result.tables["b"].crs.to_epsg() == 4326
     result = service.read_result(retained)
     assert isinstance(result, TableJobResult)
-    assert result.execution_id == metadata.execution_id
-    assert result.result_ref == metadata.result_ref == reference
+    assert result.job_id == metadata.job_id == reference
     inspection = service.inspect(retained)
     assert isinstance(inspection, TerminalResultOutput)
-    assert inspection.execution_id == metadata.execution_id
-    assert inspection.result_ref == metadata.result_ref
+    assert inspection.job_id == metadata.job_id
     assert set(result.output_metadata) == {"a", "b"}
     jobs.read_job.return_value = None
-    assert service.read_observation("job") is None
+    assert service.read_observation(reference) is None
     with ResultStore.open(path) as reader:
         assert reader.read_result(reference).metadata == metadata
         for name, frame in retained.retained_result.tables.items():
@@ -72,7 +62,7 @@ def test_captured_owners_and_expired_jobs(
     assert database.rows == before
 
 
-@pytest.mark.parametrize("damage", ["malformed", "missing", "backing", "file"])
+@pytest.mark.parametrize("damage", ["missing", "backing", "file"])
 def test_broken_retained_reference_is_integrity_failure(
     database: Database, tmp_path: Path, damage: str
 ) -> None:
@@ -82,9 +72,7 @@ def test_broken_retained_reference_is_integrity_failure(
         ResultDescriptions(writer), publish_values(writer, ("one",))
     )
     path.touch()
-    if damage == "malformed":
-        reference = "invalid"
-    elif damage == "missing":
+    if damage == "missing":
         reference = "f" * 32
     elif damage == "backing":
         database.rows[writer.layout.results.name].clear()
@@ -96,44 +84,29 @@ def test_broken_retained_reference_is_integrity_failure(
         path,
     )
     with pytest.raises(InvalidJobResultError):
-        service.read_observation("job")
+        service.read_observation(reference)
     assert database.rows == before
     assert path.exists() is (damage != "file")
 
 
-def observation(reference: str, execution_id: str = "b" * 32) -> JobObservation:
+def observation(job_id: str) -> JobObservation:
     now = datetime.now(UTC)
     return JobObservation(
         snapshot=JobStatusInfo(
-            job_id="job",
+            job_id=job_id,
             status="succeeded",
             created_at=now,
             updated_at=now,
-            result_ref="a" * 32 if reference == "invalid" else reference,
-            execution_id=execution_id,
         ),
-        result_ref=reference,
-        execution_id=execution_id,
     )
 
 
-@pytest.mark.parametrize("identity", [None, "c" * 32])
-def test_job_execution_must_match_retained_pair(
-    database: Database, tmp_path: Path, identity: str | None
-) -> None:
-    path = tmp_path / "results.sqlite"
-    writer = SQLiteStore(path)
-    reference = publish_result(ResultDescriptions(writer), publish_values(writer, ()))
-    path.touch()
-    saved = observation(reference)
-
+def test_successful_queue_record_must_match_request(tmp_path: Path) -> None:
     service = ResultService(
-        Mock(read_job=Mock(return_value=replace(saved, execution_id=identity))), path
+        Mock(read_job=Mock(return_value=observation("a" * 32))), tmp_path
     )
-    before = deepcopy(database.rows)
-    with pytest.raises(InvalidJobResultError, match="execution"):
-        service.read_observation("job")
-    assert database.rows == before
+    with pytest.raises(InvalidJobResultError, match="identity"):
+        service.read_observation("b" * 32)
 
 
 @pytest.mark.usefixtures("database")

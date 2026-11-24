@@ -21,6 +21,7 @@ from tests.client_helpers import (
     _result_response,
     _status_response,
 )
+from tests.job_id_helpers import CLIENT_JOB_ID
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -136,6 +137,6 @@ def test_async_run_to_file_downloads_once_after_completion(
     assert target.read_bytes() == b"result"
     assert sessions[0].calls == [
         "https://example.test/jobs",
-        "https://example.test/jobs/job-1",
-        "https://example.test/jobs/job-1/result/download",
+        f"https://example.test/jobs/{CLIENT_JOB_ID}",
+        f"https://example.test/jobs/{CLIENT_JOB_ID}/result/download",
     ]

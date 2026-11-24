@@ -35,6 +35,7 @@ from tests.client_helpers import (
     _status_response,
 )
 from tests.client_scenarios import AsyncReply, Reply, Scenario
+from tests.job_id_helpers import CLIENT_JOB_ID
 from tests.provenance_helpers import result_provenance
 from tests.result_helpers import inspection_of
 
@@ -61,7 +62,7 @@ def test_request_failures_have_context_and_close(
             "metric", inputs={}, parameters={}
         ),
         "admin": scenario.admin.status,
-        "result": lambda: scenario.client.results.get("job-1"),
+        "result": lambda: scenario.client.results.get(CLIENT_JOB_ID),
     }
     with pytest.raises(DownloadError, match="Failed to") as error:
         scenario.resolve(operations[resource]())
@@ -93,7 +94,7 @@ def test_structured_unavailability(
         ),
         "admin": scenario.admin.status,
         "download": lambda: scenario.client.results.download(
-            "job-1", tmp_path / "result"
+            CLIENT_JOB_ID, tmp_path / "result"
         ),
     }
     with pytest.raises(ServiceUnavailableError) as error:
@@ -138,7 +139,7 @@ def test_transport_timeout_is_chained_without_retry(scenario: Scenario) -> None:
 @pytest.mark.parametrize("status", ["failed"])
 def test_failed_handle_and_raw_results(scenario: Scenario, status: str) -> None:
     payload: dict[str, Any] = {
-        "job_id": "job-1",
+        "job_id": CLIENT_JOB_ID,
         "status": status,
         "kind": status,
         "error": {"message": "stopped"},
@@ -154,7 +155,7 @@ def test_failed_handle_and_raw_results(scenario: Scenario, status: str) -> None:
     with pytest.raises(MetricRunError) as error:
         scenario.resolve(handle.result())
     assert error.value.status == status
-    assert scenario.resolve(scenario.client.results.get("job-1")).status == status
+    assert scenario.resolve(scenario.client.results.get(CLIENT_JOB_ID)).status == status
 
 
 @pytest.mark.parametrize("status", [404, 409, 500])
@@ -166,12 +167,12 @@ def test_download_error_preserves_destination(
     path = tmp_path / "result"
     path.write_bytes(b"original")
     with pytest.raises(DownloadError):
-        scenario.resolve(scenario.client.results.download("job-1", path))
+        scenario.resolve(scenario.client.results.download(CLIENT_JOB_ID, path))
     assert path.read_bytes() == b"original"
     assert reply.closed
 
 
-@pytest.mark.parametrize("job_id", ["job-1", "another-job"])
+@pytest.mark.parametrize("job_id", [CLIENT_JOB_ID, "66666666666666666666666666666666"])
 def test_streaming_download_and_cleanup(
     scenario: Scenario, tmp_path: Path, job_id: str
 ) -> None:
@@ -191,7 +192,7 @@ def test_non_json_raw_result_is_rejected(scenario: Scenario) -> None:
         Reply(headers={"content-type": "application/octet-stream"}, text="bytes")
     ]
     with pytest.raises(DownloadError, match="response was not JSON"):
-        scenario.resolve(scenario.client.results.get("job-1"))
+        scenario.resolve(scenario.client.results.get(CLIENT_JOB_ID))
 
 
 @pytest.mark.parametrize("operation", ["request", "download"])
@@ -212,7 +213,7 @@ def test_async_invalid_response_encoding_is_chained(
     call = (
         client.health.liveness()
         if operation == "request"
-        else client.results.download("job-1", tmp_path / "result")
+        else client.results.download(CLIENT_JOB_ID, tmp_path / "result")
     )
     with pytest.raises(DownloadError) as error:
         asyncio.run(call)
@@ -289,7 +290,7 @@ def test_wait_exhausts_five_retries(scenario: Scenario) -> None:
     scenario.replies = [Reply(status=503)] * 6
     with pytest.raises(JobPollingError) as exc:
         scenario.resolve(submit_handle(scenario).wait())
-    assert exc.value.job_id == "job-1"
+    assert exc.value.job_id == CLIENT_JOB_ID
     assert exc.value.attempts == 5
     assert isinstance(exc.value.__cause__, DownloadError)
     assert len(scenario.sleeps) == 5
@@ -302,7 +303,7 @@ def test_wait_deadline_bounds_observations_and_sleep(
     scenario.replies = [status_reply()]
     with pytest.raises(JobWaitTimeoutError) as exc:
         scenario.resolve(submit_handle(scenario).wait(timeout=seconds))
-    assert exc.value.job_id == "job-1"
+    assert exc.value.job_id == CLIENT_JOB_ID
     assert scenario.now == seconds
     assert len(scenario.calls) == (1 if seconds == 0 else 2)
     if seconds:
@@ -338,7 +339,7 @@ def test_wait_raises_terminal_failure(scenario: Scenario, status: str) -> None:
         status_reply(status),
         Reply(
             payload={
-                "job_id": "job-1",
+                "job_id": CLIENT_JOB_ID,
                 "kind": status,
                 "status": status,
                 "error": {"type": "test"},
@@ -348,7 +349,7 @@ def test_wait_raises_terminal_failure(scenario: Scenario, status: str) -> None:
     with pytest.raises(MetricRunError) as exc:
         scenario.resolve(submit_handle(scenario).wait())
     assert exc.value.status == status
-    assert exc.value.job_id == "job-1"
+    assert exc.value.job_id == CLIENT_JOB_ID
 
 
 def test_progress_callback_failure_is_not_retried(scenario: Scenario) -> None:
@@ -494,7 +495,7 @@ def test_ambiguous_submission_explains_duplicate_risk_without_retry(
     assert len(scenario.calls) == 1
 
 
-@pytest.mark.parametrize("job_id", ["job-1", "another-job"])
+@pytest.mark.parametrize("job_id", [CLIENT_JOB_ID, "66666666666666666666666666666666"])
 @pytest.mark.parametrize("resource", [False, True])
 @pytest.mark.parametrize(
     "outputs",
@@ -525,10 +526,8 @@ def test_named_native_tables(
         {"code": "a", "date": None, "value": 2},
     ]
     payload: dict[str, Any] = {
-        "execution_id": "b" * 32,
-        "result_ref": "a" * 32,
         "kind": "table",
-        "job_id": "job-1",
+        "job_id": CLIENT_JOB_ID,
         "status": "succeeded",
         "outputs": {},
         "output_metadata": {},
@@ -596,7 +595,7 @@ def test_tables_lifecycle_errors(
         scenario.client.results.tables if resource else scenario.client.result_tables
     )
     with pytest.raises(DownloadError, match=f"HTTP {status}"):
-        scenario.resolve(method("job-1"))
+        scenario.resolve(method(CLIENT_JOB_ID))
     assert len(scenario.calls) == 1
 
 
@@ -606,13 +605,13 @@ def test_tables_failed_result(scenario: Scenario) -> None:
             payload={
                 "kind": "failed",
                 "status": "failed",
-                "job_id": "job-1",
+                "job_id": CLIENT_JOB_ID,
                 "error": {"message": "failed"},
             }
         )
     ]
     with pytest.raises(MetricRunError):
-        scenario.resolve(scenario.client.result_tables("job-1"))
+        scenario.resolve(scenario.client.result_tables(CLIENT_JOB_ID))
 
 
 @pytest.mark.parametrize(
@@ -640,7 +639,7 @@ def test_tables_malformed_output(scenario: Scenario, output: JsonValue) -> None:
     payload["outputs"] = {"result": output}
     scenario.replies = [Reply(payload=payload)]
     with pytest.raises(DownloadError) as error:
-        scenario.resolve(scenario.client.results.tables("job-1"))
+        scenario.resolve(scenario.client.results.tables(CLIENT_JOB_ID))
     assert error.value.__cause__ is not None
 
 
@@ -653,7 +652,7 @@ def test_tables_structured_unavailability(scenario: Scenario) -> None:
         )
     ]
     with pytest.raises(ServiceUnavailableError) as error:
-        scenario.resolve(scenario.client.result_tables("job-1"))
+        scenario.resolve(scenario.client.result_tables(CLIENT_JOB_ID))
     assert error.value.retry_after_seconds == 5
 
 
@@ -669,9 +668,11 @@ def test_pending_result_operations(
     call = getattr(scenario.client.results, operation)
     with pytest.raises(JobNotReadyError) as caught:
         scenario.resolve(
-            call("job-1", destination) if operation == "download" else call("job-1")
+            call(CLIENT_JOB_ID, destination)
+            if operation == "download"
+            else call(CLIENT_JOB_ID)
         )
-    assert caught.value.job_id == "job-1"
+    assert caught.value.job_id == CLIENT_JOB_ID
     assert caught.value.snapshot.status == "running"
     assert caught.value.snapshot.progress is not None
     assert caught.value.snapshot.progress.current == 2
@@ -682,7 +683,7 @@ def test_pending_result_operations(
 def test_malformed_pending_response(scenario: Scenario, payload: JsonValue) -> None:
     scenario.replies = [Reply(status=202, payload=payload)]
     with pytest.raises(DownloadError, match="invalid JSON response"):
-        scenario.resolve(scenario.client.results.get("job-1"))
+        scenario.resolve(scenario.client.results.get(CLIENT_JOB_ID))
 
 
 def test_terminal_pending_response_is_invalid(scenario: Scenario) -> None:
@@ -690,7 +691,7 @@ def test_terminal_pending_response_is_invalid(scenario: Scenario) -> None:
     pending.status = 202
     scenario.replies = [pending]
     with pytest.raises(DownloadError, match="invalid JSON response"):
-        scenario.resolve(scenario.client.results.get("job-1"))
+        scenario.resolve(scenario.client.results.get(CLIENT_JOB_ID))
 
 
 def test_wait_running_status_resets_retries_and_reports_progress(
@@ -766,7 +767,7 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
         )
     ]
     fetch = scenario.client.results.inspect if preview else scenario.client.results.get
-    result = scenario.resolve(fetch("job-1"))
+    result = scenario.resolve(fetch(CLIENT_JOB_ID))
     assert result.provenance is not None
     if preview:
         assert result.outputs["result"].metadata.declaration.columns == []
@@ -797,7 +798,7 @@ def test_jobs_helpers_submit_independent_jobs(
     original = deepcopy(sections)
     client = scenario.client
     for number in (1, 2):
-        job_id = f"job-{number}"
+        job_id = f"{number:032x}"
         scenario.replies = [
             Reply(status=202, payload=_job_response() | {"job_id": job_id})
         ]
@@ -875,28 +876,24 @@ def test_jobs_observation_only_reads_status(scenario: Scenario) -> None:
     completed = scenario.resolve(handle.wait())
     assert isinstance(current, JobStatusInfo)
     assert current.status == "running"
-    assert current.execution_id is None
-    assert current.result_ref is None
+    assert current.job_id == handle.job_id
     assert isinstance(completed, JobStatusInfo)
     assert completed.status == "succeeded"
-    assert completed.execution_id == "b" * 32
-    assert completed.result_ref == "a" * 32
+    assert completed.job_id == handle.job_id
     assert [call[:2] for call in scenario.calls] == [
-        ("GET", "https://example.test/jobs/job-1"),
-        ("GET", "https://example.test/jobs/job-1"),
+        ("GET", f"https://example.test/jobs/{CLIENT_JOB_ID}"),
+        ("GET", f"https://example.test/jobs/{CLIENT_JOB_ID}"),
     ]
     scenario.replies = [Reply(payload=_result_response())]
     result = scenario.resolve(handle.result())
-    assert result.execution_id == completed.execution_id
-    assert result.result_ref == completed.result_ref
+    assert result.job_id == completed.job_id
     scenario.replies = [
         Reply(status=202, payload=_job_response()),
         Reply(payload=_status_response("succeeded")),
         Reply(payload=_result_response()),
     ]
     run = scenario.resolve(client.jobs.run("heavy_metric"))
-    assert run.execution_id == completed.execution_id
-    assert run.result_ref == completed.result_ref
+    assert run.job_id == completed.job_id
 
 
 @pytest.mark.parametrize(
@@ -957,7 +954,7 @@ def test_deadlines_check_after_operations_settle(
     else:
         with pytest.raises(JobWaitTimeoutError) as error:
             execute()
-        assert error.value.job_id == "job-1"
+        assert error.value.job_id == CLIENT_JOB_ID
     assert submission.closed
     assert observation.closed
     fetched = operation != "wait" and expiry != "observation"
@@ -969,7 +966,7 @@ def test_deadlines_check_after_operations_settle(
         assert target.read_bytes() == b"result"
     # The client remains usable for later observation/retrieval after a timeout.
     scenario.replies = [Reply(payload=_result_response())]
-    assert scenario.resolve(client.results.get("job-1")).job_id == "job-1"
+    assert scenario.resolve(client.results.get(CLIENT_JOB_ID)).job_id == CLIENT_JOB_ID
     assert scenario.timeouts[-1].read == 30
 
 

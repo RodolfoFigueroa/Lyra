@@ -36,7 +36,7 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
 ) -> None:
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions())
     envelope = accepted_envelope(
-        job_id="graph-job",
+        job_id="33333333333333333333333333333333",
         metric="root",
         inputs=request()["inputs"],
         catalog=runtime.catalog.compiled,
@@ -47,7 +47,7 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
         definitions({change: "alternate" if change == "preference" else "2"}),
     )
     assert current.config.build_revision == envelope.accepted.plan.build_revision
-    native = native_job(monkeypatch)
+    native = native_job(monkeypatch, job_id=envelope.job_id)
     acquire = Mock(side_effect=AssertionError("acquisition"))
     lookup = Mock(side_effect=AssertionError("cache lookup"))
     monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
@@ -66,7 +66,7 @@ def test_worker_rejects_changed_serialized_receiving_acceptance(
 ) -> None:
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions())
     envelope = accepted_envelope(
-        job_id="graph-job",
+        job_id="33333333333333333333333333333333",
         metric="root",
         inputs=request()["inputs"],
         catalog=runtime.catalog.compiled,
@@ -78,7 +78,7 @@ def test_worker_rejects_changed_serialized_receiving_acceptance(
         plan["parameter_uses"][route_key(key, 0)]["count"] = "invalid"
     else:
         del plan["parameter_uses"][route_key(key, 0)]
-    native = native_job(monkeypatch)
+    native = native_job(monkeypatch, job_id=envelope.job_id)
     acquire = Mock(side_effect=AssertionError("acquisition"))
     lookup = Mock(side_effect=AssertionError("cache lookup"))
     monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
@@ -114,7 +114,7 @@ def test_submission_carries_route_defaults_through_worker_preflight(
             JobCreateRequest.model_validate(submitted),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: "graph-job",
+            job_id_factory=lambda: "33333333333333333333333333333333",
         )
     )
     envelope = enqueue.call_args.args[0]
@@ -132,15 +132,15 @@ def test_submission_carries_route_defaults_through_worker_preflight(
     ) -> SimpleNamespace:
         # This phase verifies the worker acceptance boundary; routing execution is
         # deliberately outside this test's boundary.
-        assert len(report.execution_id) == 32
+        assert len(report.job_id) == 32
         seen.append(executor.validate_plan(plan))
-        return SimpleNamespace(result_ref="a" * 32, report_state=report)
+        return SimpleNamespace(committed_report=SimpleNamespace(job_id=report.job_id))
 
     monkeypatch.setattr(GraphExecutor, "execute", preflight)
-    native_job(monkeypatch)
+    native_job(monkeypatch, job_id=envelope.job_id)
     result = worker.run_metric_task(envelope.model_dump(mode="json"))
-    assert result["result_ref"] == "a" * 32
-    assert len(str(result["execution_id"])) == 32
+    assert result["job_id"] == envelope.job_id
+    assert len(str(result["job_id"])) == 32
     assert len(seen) == 1
     route = seen[0].dependencies["left"].locations["places"].upstream
     assert route is not None

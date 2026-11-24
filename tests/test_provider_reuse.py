@@ -11,6 +11,7 @@ from typing_extensions import override
 
 from lyra.contracts.errors import LocationProviderContractError, LocationSelectionError
 from lyra.contracts.locations import LocationSelection
+from lyra.contracts.references import new_job_id
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.provider_records import ProviderRecords
@@ -86,6 +87,7 @@ def test_declared_reuse_across_executions(
         events.clear()
         inputs = {"places": {"provider": "places", "ids": ids}}
         if entry == "worker":
+            native.id = new_job_id()
             envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)
             result = run_and_read(
                 worker.run_metric_task, envelope.model_dump(mode="json")

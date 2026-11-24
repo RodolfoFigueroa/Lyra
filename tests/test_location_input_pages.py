@@ -186,7 +186,7 @@ def test_invalid_limit_does_not_reach_sql(
     ):
         pass
     assert vars(caught.value) == {
-        "result_ref": "a" * 32,
+        "job_id": "a" * 32,
         "input_name": "input",
         "output_name": None,
         "parameter": "limit",
@@ -219,7 +219,7 @@ def test_malformed_cursor_does_not_reach_sql(
         {"key": [1, "a"]},
         {"interface": "output"},
         {"input_name": "a"},
-        {"result_ref": "f" * 32},
+        {"job_id": "f" * 32},
     ],
 )
 def test_cursor_positions_and_context(tmp_path: Path, change: dict) -> None:
@@ -300,7 +300,7 @@ def test_encoded_boundaries_preserve_prefetched_row(
                 reference, "pairs", 1, singles[0].next_cursor
             )
         assert vars(caught.value) == {
-            "result_ref": reference,
+            "job_id": reference,
             "input_name": "pairs",
             "output_name": None,
             "download_url": (

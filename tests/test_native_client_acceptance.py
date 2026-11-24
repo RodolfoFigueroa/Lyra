@@ -30,7 +30,7 @@ from tests.client_helpers import (
     _result_response,
     _status_response,
 )
-from tests.job_id_helpers import INVALID_IDS
+from tests.job_id_helpers import CLIENT_JOB_ID, INVALID_IDS
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -108,7 +108,7 @@ def test_native_submission_workflow(
     requests: list[httpx.Request] = []
     responses: list[httpx.Response] = []
     original = _expected_body(sections)
-    job_id = "lyra://results/λ?#"
+    job_id = "a" * 32
     result_payload = _result_response() | {"job_id": job_id}
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -217,15 +217,8 @@ def test_native_submission_failure_is_never_retried(
 @pytest.mark.parametrize(
     "job_id",
     [
-        "job-1",
-        "λ/结果?#",
-        "lyra://results/job",
-        " padded ",
-        " ",
-        "\t\n",
-        ".",
-        "..",
-        "%2F",
+        CLIENT_JOB_ID,
+        "0123456789abcdef" * 2,
     ],
 )
 def test_native_job_identity(

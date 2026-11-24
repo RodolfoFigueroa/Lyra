@@ -87,7 +87,7 @@ class ReportCollection:
     The index contains only the selected graph and does not own native tables.
     """
 
-    execution_id: str = field(default_factory=lambda: uuid4().hex, init=False)
+    job_id: str
     root_use_id: str | None = field(default=None, init=False)
     uses: dict[str, ResolvedUse] = field(default_factory=dict, init=False)
     request: SubmittedRequest | None = field(default=None, init=False)
@@ -117,8 +117,7 @@ class ReportCollection:
     def finalize(self) -> None:
         """Assemble complete private node data after successful managed computation.
 
-        Publication will bind the result reference to these descriptions and the
-        captured request. No successful ExecutionReport exists at this boundary.
+        Publication stores these descriptions and the captured request under the job ID.
         """
         if self.request is None:
             return
@@ -165,7 +164,7 @@ class ReportCollection:
             )
         self.nodes = tuple(nodes)
 
-    def complete(self, result_ref: str) -> ExecutionReport:
+    def complete(self) -> ExecutionReport:
         """Bind finalized observations to the attempted final result.
 
         Returns:
@@ -179,8 +178,7 @@ class ReportCollection:
             raise ValueError(msg)
         return ExecutionReport(
             request=self.request,
-            execution_id=self.execution_id,
-            result_ref=result_ref,
+            job_id=self.job_id,
             status="succeeded",
             root_use_id=self.root_use_id,
             nodes=list(self.nodes),

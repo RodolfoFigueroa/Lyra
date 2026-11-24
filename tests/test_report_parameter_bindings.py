@@ -104,7 +104,7 @@ def test_direct_chains_shared_and_separate_uses_without_execution(
     for plugin in catalog.implementations.values():
         monkeypatch.setattr(plugin, "prepare_parameters", handler)
     before = invocation.demand().computation_keys
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.capture(invocation, catalog, plan)
     first = invocation.dependencies["first"]
     shared = report.use_id(first)
@@ -158,7 +158,7 @@ def test_direct_chains_shared_and_separate_uses_without_execution(
 @pytest.mark.parametrize("ids", [[], ["a", "b"]])
 def test_nested_operation_forwarding_uses_declaring_caller(ids: list[str]) -> None:
     catalog, plan, root = bound(ids)
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.capture(root, catalog, plan)
     assert len(report.parameter_bindings) == 1
     connection = report.parameter_bindings[0]

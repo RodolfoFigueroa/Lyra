@@ -189,15 +189,17 @@ def test_managed_operations_round_trip(
     runtime.config.resources = config
     worker.initialize_worker("heavy", config=runtime.config)
     runtime.jobs.enqueue = Mock()
-    calls_before_submission = len(native.mock_calls)
-    assert asyncio.run(
-        submit(
-            runtime, "http", {"metric": "root", "inputs": inputs, "parameters": values}
+    for _ in range(2):
+        calls_before_submission = len(native.mock_calls)
+        assert asyncio.run(
+            submit(
+                runtime,
+                "http",
+                {"metric": "root", "inputs": inputs, "parameters": values},
+            )
         )
-    )
-    assert len(native.mock_calls) == calls_before_submission
-    execute_queued(runtime, monkeypatch, values, len(set(ids)))
-    execute_queued(runtime, monkeypatch, values, len(set(ids)))
+        assert len(native.mock_calls) == calls_before_submission
+        execute_queued(runtime, monkeypatch, values, len(set(ids)))
     assert seen == (
         (["selector", "mapping"] if selected else ["mapping"])
         * (2 if policy == "full" else 4)
@@ -225,7 +227,7 @@ def execute_queued(
     job = native_job(monkeypatch)
     job.id = envelope.job_id
     artifact = worker.run_metric_task(payload)
-    tables = read_retained(str(artifact["result_ref"])).tables
+    tables = read_retained(str(artifact["job_id"])).tables
     assert tables["data"].value.tolist() == [2 * count]
     assert payload == original
 

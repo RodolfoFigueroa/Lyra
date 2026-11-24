@@ -74,18 +74,13 @@ class Database:
                     assert all(
                         row.get(key) is not None
                         for key in (
-                            "execution_id",
-                            "result_ref",
+                            "job_id",
                             "description",
                             "report",
                         )
                     )
-                    if any(
-                        old[key] == row[key]
-                        for old in existing
-                        for key in ("execution_id", "result_ref")
-                    ):
-                        msg = "Duplicate execution or result identity"
+                    if any(old["job_id"] == row["job_id"] for old in existing):
+                        msg = "Duplicate job ID"
                         raise ValueError(msg)
             existing.extend(deepcopy(batch))
         elif isinstance(statement, sa.sql.Select):

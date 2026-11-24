@@ -25,6 +25,7 @@ from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import PluginDefinition, metric
 from lyra.sdk.output_schema import compile_output
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.retained_table_helpers import retained_service
 from tests.sqlite_helpers import database
 
@@ -77,7 +78,7 @@ def test_declared_types_and_independent_reads(
     path = tmp_path / "results.sqlite"
     service, key = retained_service(path, schema, frame)
     assert_batched_frame(path, key, frame)
-    observation = service.read_observation("native")
+    observation = service.read_observation(key)
     assert observation is not None
     result = service.read_result(observation)
     assert isinstance(result, TableJobResult)
@@ -104,7 +105,7 @@ def test_declared_types_and_independent_reads(
     assert result.model_dump_json() == original
     assert observation.retained_result is not None
     observation.retained_result.metadata.outputs["rows"].table_schema.columns.clear()
-    repeated = service.read_observation("native")
+    repeated = service.read_observation(key)
     assert repeated is not None
     assert repeated.retained_result is not None
     assert repeated.retained_result.metadata.outputs["rows"].table_schema == description
@@ -160,9 +161,7 @@ def test_malformed_declared_columns_raise_useful_error() -> None:
         strict=True,
     )
     result = TableJobResult(
-        result_ref="a" * 32,
-        execution_id="b" * 32,
-        job_id="invalid",
+        job_id="f" * 32,
         outputs={"rows": [{"unexpected": 1}]},
         output_metadata={"rows": compile_output(schema)[1]},
     )
@@ -198,9 +197,7 @@ def test_nullable_scalar_reconstruction(
     declared: str, native: str, *, empty: bool
 ) -> None:
     result = TableJobResult(
-        result_ref="a" * 32,
-        execution_id="b" * 32,
-        job_id="job",
+        job_id=TEST_JOB_ID,
         outputs={"rows": [] if empty else [{"value": None}]},
         output_metadata={
             "rows": OutputMetadata(
@@ -279,7 +276,7 @@ def test_geometry_only_native_and_arrow_after_reopen(
     runner = LocalRunner.from_definitions(
         {"survey": PluginDefinition(metrics=[survey])}, result_store_path=path
     )
-    reference = runner.run("survey").report.result_ref
+    reference = runner.run("survey").report.job_id
     assert reference is not None
     path.touch()
     for _ in range(2):

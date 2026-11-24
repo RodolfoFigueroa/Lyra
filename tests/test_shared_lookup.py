@@ -12,7 +12,6 @@ from rq.serializers import JSONSerializer
 
 from lyra.contracts.config import JobsConfig
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
@@ -23,7 +22,7 @@ from lyra.sdk import loading
 from lyra.server import job_store
 from lyra.server.job_store import InvalidJobResultError, JobStore
 from lyra.server.results import ResultService
-from tests.job_id_helpers import INVALID_IDS
+from tests.job_id_helpers import INVALID_IDS, TEST_JOB_ID
 from tests.retained_job_helpers import retain
 
 
@@ -35,9 +34,7 @@ def retained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         path,
         monkeypatch,
         {
-            "execution_id": "b" * 32,
-            "result_ref": "a" * 32,
-            "job_id": "job",
+            "job_id": TEST_JOB_ID,
             "outputs": {"result": [{"value": 1}]},
             "output_metadata": {"result": {"columns": []}},
         },
@@ -72,8 +69,8 @@ def test_missing_targets(
     else:
         service.jobs.connection.ttl.return_value = -2
         job.args = ()  # Expired data needs no acceptance or result validation.
-    assert service.read_observation("job") is None
-    assert service.jobs.read_status("job") is None
+    assert service.read_observation(TEST_JOB_ID) is None
+    assert service.jobs.read_status(TEST_JOB_ID) is None
 
 
 @pytest.mark.parametrize(
@@ -92,7 +89,7 @@ def test_required_job_relationships(retained: tuple, damage: str, entry: str) ->
     else:
         job.args = ()
     with pytest.raises(InvalidJobResultError):
-        getattr(service.jobs, entry)("job")
+        getattr(service.jobs, entry)(TEST_JOB_ID)
 
 
 @pytest.mark.parametrize(
@@ -125,7 +122,7 @@ def test_lifecycle_reads_are_targeted_and_read_only(
     ]:
         monkeypatch.setattr(Path, name, forbidden)
     monkeypatch.setattr(Path, "iterdir", forbidden)
-    observation = service.read_observation("job")
+    observation = service.read_observation(TEST_JOB_ID)
     assert observation is not None
     assert (
         observation.snapshot.status
@@ -137,10 +134,10 @@ def test_lifecycle_reads_are_targeted_and_read_only(
         }[state]
     )
     inspection = service.inspect(observation)
-    assert inspection.job_id == "job"
+    assert inspection.job_id == TEST_JOB_ID
     if state in {JobStatus.FAILED, JobStatus.FINISHED}:
         result = service.read_result(observation)
-        assert result.job_id == "job"
+        assert result.job_id == TEST_JOB_ID
         assert result.status == observation.snapshot.status
         if state == JobStatus.FINISHED:
             assert result.outputs == {"result": [{"value": 1}]}
@@ -149,18 +146,16 @@ def test_lifecycle_reads_are_targeted_and_read_only(
     forbidden.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "error", [InvalidResultReferenceError, ResultNotFoundError, ResultIntegrityError]
-)
+@pytest.mark.parametrize("error", [ResultNotFoundError, ResultIntegrityError])
 def test_required_retained_relationships(
     retained: tuple, monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
     service, _ = retained
     with ResultStore.open(service.result_store_path) as reader:
         monkeypatch.setattr(reader, "read_result", Mock(side_effect=error("a" * 32)))
-    assert service.jobs.read_status("job").status == "succeeded"
+    assert service.jobs.read_status(TEST_JOB_ID).status == "succeeded"
     with pytest.raises(InvalidJobResultError):
-        service.read_observation("job")
+        service.read_observation(TEST_JOB_ID)
 
 
 @pytest.mark.parametrize("status", [None, JobStatus.CANCELED, JobStatus.STOPPED])
@@ -170,9 +165,9 @@ def test_retained_unsupported_state_is_integrity_failure(
     service, job = retained
     job.get_status.return_value = status
     with pytest.raises(InvalidJobResultError, match="lifecycle"):
-        service.read_observation("job")
+        service.read_observation(TEST_JOB_ID)
     with pytest.raises(InvalidJobResultError, match="lifecycle"):
-        service.jobs.read_status("job")
+        service.jobs.read_status(TEST_JOB_ID)
 
 
 @pytest.mark.parametrize(
@@ -184,37 +179,42 @@ def test_corrupt_native_record_is_integrity_failure(
     service, _ = retained
     monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=error))
     with pytest.raises(InvalidJobResultError):
-        service.read_observation("job")
+        service.read_observation(TEST_JOB_ID)
 
 
 def test_corrupt_serialized_acceptance_is_integrity_failure(
     retained: tuple, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     service, _ = retained
-    native = Job("job", connection=Mock(), serializer=JSONSerializer)
+    native = Job(TEST_JOB_ID, connection=Mock(), serializer=JSONSerializer)
     native.data = b"broken"
     monkeypatch.setattr(native, "get_status", Mock(return_value=JobStatus.QUEUED))
     monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=native))
     with pytest.raises(InvalidJobResultError, match="acceptance"):
-        service.read_observation("job")
+        service.read_observation(TEST_JOB_ID)
 
 
 @pytest.mark.parametrize("entry", ["read_job", "read_status", "get_job_detail"])
-@pytest.mark.parametrize("field", ["execution_id", "result_ref"])
-@pytest.mark.parametrize("damage", ["missing", "null", "malformed", "no_record"])
+@pytest.mark.parametrize(
+    "damage", ["missing", "null", "malformed", "mismatched", "no_record"]
+)
 def test_invalid_success_metadata_rejects_observation(
-    retained: tuple, entry: str, field: str, damage: str
+    retained: tuple, entry: str, damage: str
 ) -> None:
     service, job = retained
     payload = job.latest_result.return_value.return_value
     if damage == "no_record":
         job.latest_result.return_value = None
     elif damage == "missing":
-        del payload[field]
+        del payload["job_id"]
     else:
-        payload[field] = None if damage == "null" else "invalid"
+        payload["job_id"] = {
+            "null": None,
+            "malformed": "invalid",
+            "mismatched": "0" * 32,
+        }[damage]
     with pytest.raises(InvalidJobResultError):
-        getattr(service.jobs, entry)("job")
+        getattr(service.jobs, entry)(TEST_JOB_ID)
 
 
 @pytest.mark.parametrize("entry", ["read_job", "read_status", "get_job_detail"])
@@ -228,13 +228,15 @@ def test_corrupt_serialized_success_is_integrity_failure(
     cause = error("invalid serialized success metadata")
     job.latest_result.side_effect = cause
     with pytest.raises(InvalidJobResultError) as caught:
-        getattr(service.jobs, entry)("job")
+        getattr(service.jobs, entry)(TEST_JOB_ID)
     assert caught.value.__cause__ is cause
 
 
 @pytest.mark.parametrize("job_id", ["a/b", " ", "a:b", "雪"])
-def test_unrepresentable_rq_job_is_absent_without_alias_lookup(job_id: str) -> None:
+def test_malformed_id_precedes_queue_access(job_id: str) -> None:
     connection = Mock(spec=[])
     store = JobStore(connection, JobsConfig())
-    assert store.read_job(job_id) is None
-    assert store.read_status(job_id) is None
+    with pytest.raises(ValidationError):
+        store.read_job(job_id)
+    with pytest.raises(ValidationError):
+        store.read_status(job_id)

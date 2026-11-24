@@ -19,6 +19,7 @@ from tests.client_helpers import (
     _result_response,
     _status_response,
 )
+from tests.job_id_helpers import CLIENT_JOB_ID
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -147,7 +148,7 @@ def test_handle_workflow_and_file_writes_stay_in_caller(
     assert threads == [threading.get_ident()] * 3
     assert all(call.headers["Authorization"] == "Bearer agent" for call in native.calls)
     assert [call.url.path for call in native.calls].count(
-        "/jobs/job-1/result/download"
+        f"/jobs/{CLIENT_JOB_ID}/result/download"
     ) == 2
     for operation in (handle.status, handle.result, handle.wait):
         with pytest.raises(RuntimeError, match="closed"):

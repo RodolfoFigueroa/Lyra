@@ -51,19 +51,15 @@ def assert_remote_outputs(
     metadata = retained[1].metadata
     now = datetime.now(UTC)
     status = JobStatusInfo(
-        job_id="job",
+        job_id=metadata.job_id,
         status="succeeded",
         created_at=now,
         updated_at=now,
-        result_ref=metadata.result_ref,
-        execution_id=metadata.execution_id,
     )
     jobs = Mock(
         read_job=Mock(
             return_value=JobObservation(
                 snapshot=status,
-                result_ref=status.result_ref,
-                execution_id=status.execution_id,
             )
         ),
         get_job_status_async=AsyncMock(return_value=status),
@@ -82,19 +78,18 @@ def assert_remote_outputs(
     with native.serve(public, monkeypatch) as http:
         with native.connect() as client:
             for response in (
-                native.resolve(client.jobs.get("job")),
-                native.resolve(client.results.get("job")),
-                native.resolve(client.results.inspect("job")),
+                native.resolve(client.jobs.get(metadata.job_id)),
+                native.resolve(client.results.get(metadata.job_id)),
+                native.resolve(client.results.inspect(metadata.job_id)),
             ):
                 assert isinstance(
                     response, JobStatusInfo | TableJobResult | TerminalResultOutput
                 )
-                assert response.result_ref == metadata.result_ref
-                assert response.execution_id == metadata.execution_id
+                assert response.job_id == metadata.job_id
         jobs.read_job.return_value = None
         jobs.get_job_status_async.return_value = None
         with native.connect() as client, pytest.raises(DownloadError, match="404"):
-            native.resolve(client.results.get("job"))
+            native.resolve(client.results.get(metadata.job_id))
         jobs.read_job.side_effect = AssertionError(
             "Durable reads must not observe expired jobs"
         )
@@ -106,10 +101,10 @@ def assert_remote_outputs(
             for result in retained:
                 with native.connect() as client:
                     assert_exports(
-                        client.results, result.metadata.result_ref, path.parent, native
+                        client.results, result.metadata.job_id, path.parent, native
                     )
                     assert (
-                        native.resolve(client.reports.get(result.metadata.execution_id))
+                        native.resolve(client.reports.get(result.metadata.job_id))
                         == result.report
                     )
             return
@@ -125,16 +120,16 @@ def assert_remote_outputs(
 
 
 def assert_remote_run(result: RunResult, native: NativeAPI, directory: Path) -> None:
-    reference, execution_id = result.metadata.result_ref, result.metadata.execution_id
+    reference, job_id = result.metadata.job_id, result.metadata.job_id
     with native.connect() as client:
         assert_exports(client.results, reference, directory, native)
         description = native.resolve(client.results.describe(reference))
-        report = native.resolve(client.reports.get(execution_id))
-        inspection = native.resolve(client.reports.inspect(execution_id))
+        report = native.resolve(client.reports.get(job_id))
+        inspection = native.resolve(client.reports.inspect(job_id))
         assert inspection.kind == "complete"
         assert inspection.report == report == result.report
         assert description.outputs == result.metadata.outputs
-        assert description.execution_id == execution_id
+        assert description.job_id == job_id
         frame = native.resolve(client.results.table(reference, "area"))
         rows = []
         cursor = None
@@ -152,7 +147,7 @@ def assert_remote_run(result: RunResult, native: NativeAPI, directory: Path) -> 
         native.resolve(
             client.results.download_table(reference, "area", directory / "values.any")
         )
-        native.resolve(client.reports.download(execution_id, directory / "report.any"))
+        native.resolve(client.reports.download(job_id, directory / "report.any"))
     expected = result.tables["area"].astype(
         {"location_id": "string", "row_key": "string", "value": "Int64"}
     )
@@ -174,20 +169,20 @@ def assert_remote_run(result: RunResult, native: NativeAPI, directory: Path) -> 
             native.resolve(client.results.describe(reference)).outputs
             == result.metadata.outputs
         )
-        assert native.resolve(client.reports.get(execution_id)) == result.report
+        assert native.resolve(client.reports.get(job_id)) == result.report
         pd.testing.assert_frame_equal(
             native.resolve(client.results.table(reference, "area")), expected
         )
 
 
 async def assert_scope_tools(http: httpx.AsyncClient, result: RunResult) -> None:
-    reference = result.metadata.result_ref
+    reference = result.metadata.job_id
     responses = {}
     for name, arguments in (
-        ("lyra_describe_result", {"result_ref": reference}),
-        ("lyra_inspect_report", {"execution_id": result.metadata.execution_id}),
-        ("lyra_get_result_rows", {"result_ref": reference, "output_name": "area"}),
-        ("lyra_download_table", {"result_ref": reference, "output_name": "area"}),
+        ("lyra_describe_result", {"job_id": reference}),
+        ("lyra_inspect_report", {"job_id": result.metadata.job_id}),
+        ("lyra_get_result_rows", {"job_id": reference, "output_name": "area"}),
+        ("lyra_download_table", {"job_id": reference, "output_name": "area"}),
     ):
         response = await http.post(
             BASE + "/mcp/",
@@ -255,7 +250,7 @@ def assert_exports(
             )
             expected = resolve(read(reference, name))
             edited = resolve(read(reference, name))
-            edited.attrs["lyra"] = {"result_ref": "forged"}
+            edited.attrs["lyra"] = {"job_id": "forged"}
             if not edited.empty:
                 edited["geometry"] = None
             changed = resolve(access.describe(reference))
@@ -289,15 +284,13 @@ def assert_exports(
             assert actual.attrs == {
                 "lyra": {
                     "kind": kind,
-                    "result_ref": reference,
-                    "execution_id": description.execution_id,
+                    "job_id": reference,
                     "output_name" if kind == "metric_output" else "input_name": name,
                     "description": selected.model_dump(mode="json"),
                 }
             }
             assert (
-                resolve(access.describe(actual.attrs["lyra"]["result_ref"]))
-                == description
+                resolve(access.describe(actual.attrs["lyra"]["job_id"])) == description
             )
             actual.attrs.clear()
             actual.to_parquet(directory / "ordinary.parquet", index=False)

@@ -97,7 +97,7 @@ def test_hit_skips_dependency_work(tmp_path: Path) -> None:
     runner.context_factory = Mock(side_effect=AssertionError("context acquired"))
     again = runner.execute(root)
     assert events == []
-    assert first.report_state.execution_id != again.report_state.execution_id
+    assert first.report_state.job_id != again.report_state.job_id
     for result in (first, again):
         report = result.report_state
         assert {use.node for use in report.uses.values()} == {"source", "consumer"}

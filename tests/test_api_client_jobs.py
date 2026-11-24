@@ -43,6 +43,7 @@ from tests.client_helpers import (
     _workers_response,
     install_sync_handler,
 )
+from tests.job_id_helpers import CLIENT_JOB_ID
 from tests.result_helpers import inspection_of
 
 if TYPE_CHECKING:
@@ -124,7 +125,7 @@ def test_sync_client_uses_job_api_for_job_lifecycle(
         "parameters": {"value": 3},
     }
     assert posted[0]["headers"] == {"Authorization": "Bearer agent-secret"}
-    assert job.job_id == "job-1"
+    assert job.job_id == CLIENT_JOB_ID
     assert "reused" not in job.model_dump()
     assert status.status == "succeeded"
     assert result.kind == "table"
@@ -150,7 +151,7 @@ def test_sync_client_uses_admin_job_operations(
         )
         return FakeSyncResponse(
             payload=_job_detail_response()
-            if url.endswith("job-1")
+            if url.endswith(CLIENT_JOB_ID)
             else _job_list_response()
         )
 
@@ -173,7 +174,7 @@ def test_sync_client_uses_admin_job_operations(
     )
 
     jobs = client.jobs.list(limit=10, status="running", queue="heavy", offset=3)
-    detail = client.jobs.get("job-1")
+    detail = client.jobs.get(CLIENT_JOB_ID)
 
     assert requests_seen == [
         {
@@ -188,14 +189,14 @@ def test_sync_client_uses_admin_job_operations(
             "headers": {"Authorization": "Bearer admin-secret"},
         },
         {
-            "url": "http://example.test/admin/jobs/job-1",
+            "url": f"http://example.test/admin/jobs/{CLIENT_JOB_ID}",
             "params": None,
             "timeout": 12.0,
             "headers": {"Authorization": "Bearer admin-secret"},
         },
     ]
-    assert [job.job_id for job in jobs.jobs] == ["job-1"]
-    assert detail.snapshot.job_id == "job-1"
+    assert [job.job_id for job in jobs.jobs] == [CLIENT_JOB_ID]
+    assert detail.snapshot.job_id == CLIENT_JOB_ID
     assert detail.queue == "heavy"
 
 
@@ -251,7 +252,7 @@ def test_sync_client_uses_observability_routes(
     assert catalog.installed_plugins[0].distribution == "lyra-smoke-plugin"
     assert workers.workers[0].state == "busy"
     assert workers.workers[0].stale is False
-    assert worker.current_job == "job-1"
+    assert worker.current_job == CLIENT_JOB_ID
     assert worker.heartbeat_age_seconds == pytest.approx(0.25)
     assert queues.queues[0].pending_depth_unknown is True
 
@@ -438,7 +439,7 @@ def test_sync_client_downloads_file_result(
         headers: dict[str, str],  # ruff:ignore[unused-function-argument]
         stream: bool,
     ) -> FakeSyncResponse:
-        assert url == "http://example.test/jobs/job-1/result/download"
+        assert url == f"http://example.test/jobs/{CLIENT_JOB_ID}/result/download"
         assert stream is True
         return FakeSyncResponse(
             headers={"content-type": "application/json"},
@@ -449,7 +450,7 @@ def test_sync_client_downloads_file_result(
     output = tmp_path / "result.json"
 
     LyraClient("example.test", secure=False).results.download(
-        "job-1",
+        CLIENT_JOB_ID,
         output,
     )
 
@@ -465,15 +466,15 @@ def test_sync_client_fetches_named_result_metadata(
         timeout: float,  # ruff:ignore[unused-function-argument]
         headers: dict[str, str],  # ruff:ignore[unused-function-argument]
     ) -> FakeSyncResponse:
-        assert url == "http://example.test/jobs/job-1/result"
+        assert url == f"http://example.test/jobs/{CLIENT_JOB_ID}/result"
         return FakeSyncResponse(payload=_result_response())
 
     _mock_sync_http(monkeypatch, get=get)
 
-    result = LyraClient("example.test", secure=False).results.get("job-1")
+    result = LyraClient("example.test", secure=False).results.get(CLIENT_JOB_ID)
 
     assert isinstance(result, TableJobResult)
-    assert result.execution_id == "b" * 32
+    assert result.job_id == "2" * 32
     assert result.outputs == {"result": [{"value": 6}]}
 
 
@@ -503,9 +504,9 @@ def test_sync_client_fetches_result_descriptor_by_job_id(
         "example.test",
         secure=False,
         agent_api_key="agent-secret",
-    ).results.inspect("job-1")
+    ).results.inspect(CLIENT_JOB_ID)
 
-    assert seen == ["GET http://example.test/jobs/job-1/result/inspection"]
+    assert seen == [f"GET http://example.test/jobs/{CLIENT_JOB_ID}/result/inspection"]
     assert isinstance(descriptor, TerminalResultOutput)
     assert descriptor.outputs["result"].metadata is not None
     assert descriptor.completed_at is not None
@@ -528,7 +529,7 @@ def test_sync_client_downloads_json_result_from_raw_job_id(
         headers: dict[str, str],
         stream: bool,
     ) -> FakeSyncResponse:
-        assert url == "http://example.test/jobs/job-1/result/download"
+        assert url == f"http://example.test/jobs/{CLIENT_JOB_ID}/result/download"
         assert headers == {"Authorization": "Bearer agent-secret"}
         assert stream is True
         return FakeSyncResponse(
@@ -543,7 +544,7 @@ def test_sync_client_downloads_json_result_from_raw_job_id(
         "example.test",
         secure=False,
         agent_api_key="agent-secret",
-    ).results.download("job-1", output)
+    ).results.download(CLIENT_JOB_ID, output)
 
     assert json.loads(output.read_text()) == _result_response()
 
@@ -568,7 +569,7 @@ def test_sync_client_reports_result_download_http_errors(
         match=r"Failed to download result\. HTTP 409: result is not a table",
     ):
         LyraClient("example.test", secure=False).results.download(
-            "job-1",
+            CLIENT_JOB_ID,
             tmp_path / "result.json",
         )
 
@@ -624,7 +625,7 @@ def test_async_client_submits_independently(
         )
     )
 
-    assert response.job_id == "job-1"
+    assert response.job_id == CLIENT_JOB_ID
     assert RecordingSession.posted_json == {
         "metric": "heavy_metric",
         "inputs": {},
@@ -667,7 +668,7 @@ def test_async_client_uses_admin_job_operations(
     jobs = client_runtime.run(
         client.jobs.list(limit=10, status="running", queue="heavy", offset=3)
     )
-    detail = client_runtime.run(client.jobs.get("job-1"))
+    detail = client_runtime.run(client.jobs.get(CLIENT_JOB_ID))
 
     assert RecordingSession.requests_seen == [
         {
@@ -685,12 +686,12 @@ def test_async_client_uses_admin_job_operations(
         },
         {
             "method": "GET",
-            "args": ("http://example.test/admin/jobs/job-1",),
+            "args": (f"http://example.test/admin/jobs/{CLIENT_JOB_ID}",),
             "kwargs": {"headers": {"Authorization": "Bearer admin-secret"}},
         },
     ]
-    assert [job.job_id for job in jobs.jobs] == ["job-1"]
-    assert detail.snapshot.job_id == "job-1"
+    assert [job.job_id for job in jobs.jobs] == [CLIENT_JOB_ID]
+    assert detail.snapshot.job_id == CLIENT_JOB_ID
     assert detail.queue == "heavy"
 
 
@@ -762,7 +763,7 @@ def test_async_client_uses_observability_routes(
     assert catalog.installed_plugins[0].distribution == "lyra-smoke-plugin"
     assert workers.workers[0].state == "busy"
     assert workers.workers[0].stale is False
-    assert worker.current_job == "job-1"
+    assert worker.current_job == CLIENT_JOB_ID
     assert worker.heartbeat_age_seconds == pytest.approx(0.25)
     assert queues.queues[0].pending_depth_unknown is True
 
@@ -961,13 +962,13 @@ def test_async_client_downloads_complete_job_result(
 
     client_runtime.run(
         AsyncLyraClient("example.test", secure=False).results.download(
-            "job-1",
+            CLIENT_JOB_ID,
             output,
         )
     )
 
     assert RecordingSession.urls == [
-        "http://example.test/jobs/job-1/result/download",
+        f"http://example.test/jobs/{CLIENT_JOB_ID}/result/download",
     ]
     assert json.loads(output.read_bytes()) == _result_response()
 
@@ -982,11 +983,11 @@ def test_async_client_fetches_named_result_metadata(
     monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     result = client_runtime.run(
-        AsyncLyraClient("example.test", secure=False).results.get("job-1")
+        AsyncLyraClient("example.test", secure=False).results.get(CLIENT_JOB_ID)
     )
 
     assert isinstance(result, TableJobResult)
-    assert result.execution_id == "b" * 32
+    assert result.job_id == "2" * 32
     assert result.outputs == {"result": [{"value": 6}]}
 
 
@@ -1014,11 +1015,14 @@ def test_async_client_fetches_result_descriptor_from_raw_job_id(
         agent_api_key="agent-secret",
     )
 
-    descriptor = client_runtime.run(client.results.inspect("job-1"))
+    descriptor = client_runtime.run(client.results.inspect(CLIENT_JOB_ID))
 
     assert RecordingSession.requests_seen == [
         {
-            "args": ("GET", "http://example.test/jobs/job-1/result/inspection"),
+            "args": (
+                "GET",
+                f"http://example.test/jobs/{CLIENT_JOB_ID}/result/inspection",
+            ),
             "kwargs": {
                 "params": None,
                 "json": None,
@@ -1060,14 +1064,14 @@ def test_async_client_downloads_json_result_from_ref(
             secure=False,
             agent_api_key="agent-secret",
         ).results.download(
-            "job-1",
+            CLIENT_JOB_ID,
             output,
         )
     )
 
     assert RecordingSession.requests_seen == [
         {
-            "args": ("http://example.test/jobs/job-1/result/download",),
+            "args": (f"http://example.test/jobs/{CLIENT_JOB_ID}/result/download",),
             "kwargs": {
                 "headers": {"Authorization": "Bearer agent-secret"},
             },
@@ -1097,7 +1101,7 @@ def test_async_client_reports_result_download_http_errors(
     ):
         client_runtime.run(
             AsyncLyraClient("example.test", secure=False).results.download(
-                "job-1",
+                CLIENT_JOB_ID,
                 tmp_path / "result.json",
             )
         )
@@ -1130,8 +1134,11 @@ def test_capability_client_workflow(
             "metrics": _metric_catalog_response(),
             "metrics/heavy_metric": _metric_response(),
             "jobs": _job_response(),
-            "jobs/job-1": {**_status_response(), "status": "failed"},
-            "jobs/job-1/result/inspection": inspection_of(
+            f"jobs/{CLIENT_JOB_ID}": {
+                **_status_response(),
+                "status": "failed",
+            },
+            f"jobs/{CLIENT_JOB_ID}/result/inspection": inspection_of(
                 TableJobResult.model_validate(
                     {**_result_response(), "outputs": {"result": []}}
                 )

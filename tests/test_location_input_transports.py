@@ -102,7 +102,7 @@ def test_authenticated_pages_links_and_streams(
                 cursor = None
                 while True:
                     args = {
-                        "result_ref": ref,
+                        "job_id": ref,
                         "input_name": name,
                         "limit": 1,
                         "cursor": cursor,
@@ -132,7 +132,7 @@ def test_authenticated_pages_links_and_streams(
                     "lyra_download_location_input",
                 ):
                     payload = tool_call_payload(
-                        tool, {"result_ref": ref, "input_name": name}
+                        tool, {"job_id": ref, "input_name": name}
                     )
                     assert (await tools.post("/", json=payload)).status_code == 401
                     assert (
@@ -146,7 +146,7 @@ def test_authenticated_pages_links_and_streams(
                     headers=mcp_headers(),
                     json=tool_call_payload(
                         "lyra_download_location_input",
-                        {"result_ref": ref, "input_name": name},
+                        {"job_id": ref, "input_name": name},
                     ),
                 )
                 assert all(
@@ -156,7 +156,7 @@ def test_authenticated_pages_links_and_streams(
                 )
                 link = tool_payload(response)
                 assert link == {
-                    "result_ref": ref,
+                    "job_id": ref,
                     "input_name": name,
                     "download_url": f"{BASE}{path}/download",
                 }
@@ -184,7 +184,7 @@ def test_authenticated_pages_links_and_streams(
 @pytest.mark.parametrize(
     "case",
     [
-        ("a", "bad", {}, 422, "invalid_result_reference"),
+        ("a", "bad", {}, 422, "validation"),
         ("a", "f" * 32, {}, 404, "result_not_found"),
         ("metric_dependency", None, {}, 404, "result_not_found"),
         ("skipped", None, {}, 409, "location_input_unavailable"),
@@ -222,20 +222,26 @@ def test_domain_errors(
                 )
                 assert rest.status_code == status
                 error = rest.json()["detail"]
-                assert error["code"] == code
-                assert error["input_name"] == name
-                assert error["result_ref"] == reference
-                if code != "location_input_unavailable":
-                    assert error["output_name"] is None
+                if code == "validation":
+                    assert error[0]["loc"] == ["path", "job_id"]
+                else:
+                    assert error["code"] == code
+                    assert error["input_name"] == name
+                    assert error["job_id"] == reference
+                    if code != "location_input_unavailable":
+                        assert error["output_name"] is None
                 response = await tools.post(
                     "/",
                     headers=mcp_headers(),
                     json=tool_call_payload(
-                        tool, {"result_ref": reference, "input_name": name, **query}
+                        tool, {"job_id": reference, "input_name": name, **query}
                     ),
                 )
                 assert response.json()["result"]["isError"]
-                assert tool_payload(response) == {"error": error}
+                if code == "validation":
+                    assert not response.json()["result"].get("structuredContent")
+                else:
+                    assert tool_payload(response) == {"error": error}
 
     asyncio.run(run())
 
@@ -269,13 +275,13 @@ def test_tool_schemas_and_argument_validation(transport: Transport) -> None:
                 definition = definitions[name]
                 assert definition["annotations"]["readOnlyHint"]
                 assert definition["inputSchema"]["required"] == [
-                    "result_ref",
+                    "job_id",
                     "input_name",
                 ]
                 invalid = await tools.post(
                     "/",
                     headers=mcp_headers(),
-                    json=tool_call_payload(name, {"result_ref": ref, "input_name": 1}),
+                    json=tool_call_payload(name, {"job_id": ref, "input_name": 1}),
                 )
                 result = invalid.json()["result"]
                 assert result["isError"]
@@ -323,7 +329,7 @@ def test_complete_or_preview_input_descriptions(
             wire = await tools.post(
                 "/",
                 headers=mcp_headers(),
-                json=tool_call_payload("lyra_describe_result", {"result_ref": ref}),
+                json=tool_call_payload("lyra_describe_result", {"job_id": ref}),
             )
             assert len(rest.content) <= MAX_RETRIEVAL_BYTES
             assert len(wire.content) <= MAX_RETRIEVAL_BYTES
@@ -419,7 +425,7 @@ def test_oversized_row_arrow_fallback(transport: Transport, database: Database) 
                     headers=mcp_headers(),
                     json=tool_call_payload(
                         "lyra_get_location_input_rows",
-                        {"result_ref": ref, "input_name": "a"},
+                        {"job_id": ref, "input_name": "a"},
                     ),
                 )
                 assert tool_payload(wire) == {"error": error}

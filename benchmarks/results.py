@@ -6,6 +6,7 @@ from typing import ClassVar
 from unittest.mock import Mock, patch
 
 from lyra.contracts.config import LyraConfig
+from lyra.contracts.references import new_job_id
 from lyra.server import worker
 from lyra.server.result_projection import project_observation
 from test_support.worker_workloads import result_workload
@@ -38,7 +39,11 @@ class ResultSuite:
 
     def time_worker(self, _rows: int) -> None:
         """Validate accepted job bindings, execute, and serialize native outputs."""
-        worker.execute_job(self.fixture.envelope, self.fixture.native)
+        job_id = new_job_id()
+        self.fixture.native.id = job_id
+        worker.execute_job(
+            self.fixture.envelope | {"job_id": job_id}, self.fixture.native
+        )
 
     def peakmem_worker(self, rows: int) -> None:
         """Measure process memory including worker persistence and fixtures."""
@@ -46,12 +51,16 @@ class ResultSuite:
 
     def time_preview(self, _rows: int) -> None:
         """Build bounded MCP previews and output summaries."""
-        project_observation("benchmark", self.fixture.observation).model_dump_json()
+        project_observation(
+            self.fixture.observation.snapshot.job_id, self.fixture.observation
+        ).model_dump_json()
 
     def track_preview_bytes(self, _rows: int) -> int:
         """Return the size of the bounded public projection."""
         return len(
-            project_observation("benchmark", self.fixture.observation)
+            project_observation(
+                self.fixture.observation.snapshot.job_id, self.fixture.observation
+            )
             .model_dump_json()
             .encode()
         )

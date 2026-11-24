@@ -27,6 +27,7 @@ from lyra.contracts.jobs import (
     JobEnvelope,
     JobProgress,
 )
+from lyra.contracts.references import validate_job_id
 from lyra.contracts.types import JsonObject
 from lyra.runtime.execution import (
     GraphExecutionError,
@@ -185,13 +186,6 @@ def _runner_temp_base() -> Path:
     raise RuntimeError(msg)
 
 
-def _safe_path_segment(value: str) -> str:
-    return "".join(
-        character if character.isalnum() or character in {"-", "_", "."} else "_"
-        for character in value
-    )
-
-
 def build_run_context(
     job_id: str,
     *,
@@ -205,7 +199,7 @@ def build_run_context(
     Returns:
         A context with node identity and job-scoped scratch storage.
     """
-    temp_dir = _runner_temp_base() / _safe_path_segment(job_id)
+    temp_dir = _runner_temp_base() / validate_job_id(job_id)
     temp_dir.mkdir(parents=True, exist_ok=True)
     return WorkerRunContext(
         job_id=job_id,
@@ -321,7 +315,7 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
     """Execute the required accepted plan within one resource scope.
 
     Returns:
-        The retained result reference for native job storage.
+        The committed job ID for native job storage.
 
     Raises:
         BoundPlanError: If the accepted job identity differs.
@@ -357,7 +351,7 @@ def _execute_bound_job(
     """Prepare normalized values against the compatible live worker catalog.
 
     Returns:
-        The retained result reference.
+        The committed job ID in the RQ return payload.
 
     Raises:
         BoundPlanError: If this installation cannot honor the accepted computation.
@@ -397,7 +391,7 @@ def _execute_bound_job(
     ):
         msg = "Selected computation differs from acceptance"
         raise BoundPlanError(msg)
-    report = ReportCollection()
+    report = ReportCollection(native.id)
     progress = WorkerProgress(native.id, runtime.config.jobs)
     with SQLiteStore(runtime.config.result_store_path) as store:
         executor = GraphExecutor(
@@ -409,13 +403,10 @@ def _execute_bound_job(
         )
         try:
             outcome = executor.execute(live, report=report)
-            if outcome.result_ref is None:
+            if outcome.committed_report is None:
                 message = "Executor did not retain the terminal result"
                 raise RuntimeError(message)
-            return {
-                "result_ref": outcome.result_ref,
-                "execution_id": outcome.report_state.execution_id,
-            }
+            return {"job_id": outcome.committed_report.job_id}
         finally:
             progress.flush_progress()
             _capture_observations(native, executor)

@@ -97,7 +97,7 @@ def test_complete_hit_precedes_acquisition(
         assert events == []
         for name in ("a", "b"):
             assert_logical_equal(first.tables[name], again.tables[name])
-        assert first.metadata.result_ref != again.metadata.result_ref
+        assert first.metadata.job_id != again.metadata.job_id
         with pytest.raises(GraphExecutionError, match="acquisition"):
             run(["b", "c"])
     run(["b", "c"])

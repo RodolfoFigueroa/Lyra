@@ -35,7 +35,7 @@ Add this inspection to the same file to read the attached [execution report](../
 
 ```python title="inspect_tutorial.py" {1,4-7}
 report = result.report
-print(result.metadata.execution_id, result.metadata.result_ref)
+print(result.metadata.job_id)
 print(report.request.inputs["streets"])
 for node in report.nodes:
     print(node.use_id, node.node_id, node.outcome)
@@ -45,7 +45,7 @@ for node in report.nodes:
 
 Run `uv run python inspect_tutorial.py`. The request records your two selected block IDs, and the operation’s target identifies the street provider. The node bindings describe how Lyra converts those blocks into streets and supplies tables to the maintenance calculation.
 
-Keep the store path with the execution ID to [reopen the report and result](../../../use/results/#reopen-a-local-result) later. Reading the attached report needs no further lookup.
+Save the store path and job ID to [reopen the report and tables](../../../use/results/#reopen-a-local-result) later. You can inspect `result.report` directly during this run.
 
 To count the input records or diagnose the latest attempt, call `runner.inspect()`. These transient diagnostics describe the latest run and can include observations from a failed attempt:
 
@@ -99,14 +99,14 @@ def run_block_selection():
 
 Use the helper to verify that the report identifies the result and preserves your block selection:
 
-```python title="tests/test_tutorial.py" {4-10}
+```python title="tests/test_tutorial.py" {4-5,8}
 def test_report_preserves_block_selection():
     result, _ = run_block_selection()
     report = result.report
-    assert report.execution_id == result.metadata.execution_id
-    assert report.result_ref == result.metadata.result_ref
+    assert report.job_id == result.metadata.job_id
     assert report.request.inputs["streets"].ids == ["block-1", "block-2"]
-    root = next(node for node in report.nodes if node.use_id == report.root_use_id)
+    root_id = report.root_use_id
+    root = next(node for node in report.nodes if node.use_id == root_id)
     assert root.outcome == "executed"
 ```
 

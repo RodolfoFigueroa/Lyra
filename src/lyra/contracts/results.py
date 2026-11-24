@@ -6,7 +6,7 @@ from pydantic import Field, model_validator
 
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.provider_scope import DatasetScope
-from lyra.contracts.references import ExecutionID, ResultReference, RetrievalName
+from lyra.contracts.references import JobId, RetrievalName
 from lyra.contracts.reports import ReportOutput
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonObject
@@ -49,10 +49,9 @@ class ExecutionMetadata(StrictBaseModel):
 
 
 class ResultDescription(ExecutionMetadata):
-    """Complete caller-owned root metadata addressed by durable identifiers."""
+    """Complete caller-owned root metadata addressed by job ID."""
 
-    result_ref: ResultReference
-    execution_id: ExecutionID
+    job_id: JobId
 
 
 class CompleteResultDescription(StrictBaseModel):
@@ -66,8 +65,7 @@ class ResultDescriptionPreview(StrictBaseModel):
     """Fixed summary linking to the complete authenticated JSON download."""
 
     kind: Literal["preview"] = "preview"
-    result_ref: ResultReference
-    execution_id: ExecutionID
+    job_id: JobId
     omitted: tuple[Literal["description"]] = ("description",)
     download_url: str
 
@@ -75,7 +73,7 @@ class ResultDescriptionPreview(StrictBaseModel):
 class TableDownload(StrictBaseModel):
     """Authenticated Arrow IPC stream address for one validated retained output."""
 
-    result_ref: ResultReference
+    job_id: JobId
     output_name: str
     download_url: str
 
@@ -83,7 +81,7 @@ class TableDownload(StrictBaseModel):
 class LocationInputDownload(StrictBaseModel):
     """Authenticated Arrow address for one validated retained location input."""
 
-    result_ref: ResultReference
+    job_id: JobId
     input_name: RetrievalName
     download_url: str
 

@@ -79,8 +79,8 @@ def test_related_shared_target_groups(
         result = run("consumer", inputs={"source": {"provider": "source", "ids": ids}})
         result.metadata.store_path.touch()
         with ResultStore.open(result.metadata.store_path) as store:
-            projection = store.describe(result.metadata.result_ref)
-            snapshots.append((result.metadata.result_ref, projection.model_dump()))
+            projection = store.describe(result.metadata.job_id)
+            snapshots.append((result.metadata.job_id, projection.model_dump()))
             captured = projection.location_inputs["mapped"]
             assert captured.provider_scope.description in {
                 f"Description {index}" for index in range(iteration + 1)
@@ -96,8 +96,8 @@ def test_related_shared_target_groups(
             )
             result.metadata.location_inputs["mapped"].table_schema.columns.clear()
             result.metadata.outputs["data"].table_schema.columns.clear()
-            assert store.describe(result.metadata.result_ref) == projection
-            pairs = store.read_location_input(result.metadata.result_ref, "mapped")
+            assert store.describe(result.metadata.job_id) == projection
+            pairs = store.read_location_input(result.metadata.job_id, "mapped")
         assert set(zip(pairs.source_location_id, pairs.location_id, strict=True)) == {
             (key, "shared") for key in ids
         }

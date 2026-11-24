@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from lyra.api import AsyncLyraClient
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
     LocationInputUnavailableError,
     ResultAccessError,
     ResultIntegrityError,
@@ -33,7 +33,6 @@ __all__ = ["client", "database"]
 @pytest.mark.parametrize(
     "error_type",
     [
-        InvalidResultReferenceError,
         ResultNotFoundError,
         ResultIntegrityError,
         LocationInputUnavailableError,
@@ -82,8 +81,7 @@ def test_remote_lookup_errors(
             json={
                 "kind": "complete",
                 "description": {
-                    "result_ref": reference,
-                    "execution_id": "b" * 32,
+                    "job_id": reference,
                     "metric_name": "metric",
                     "parameters": {},
                     "outputs": {},
@@ -91,10 +89,7 @@ def test_remote_lookup_errors(
             },
         )
     )
-    assert (
-        client.resolve(client.client.results.describe(reference)).result_ref
-        == reference
-    )
+    assert client.resolve(client.client.results.describe(reference)).job_id == reference
 
 
 @pytest.mark.parametrize(
@@ -124,7 +119,7 @@ def test_lookup_and_destination_errors(
     name = "b" if failure == "empty-nonspatial" else "a"
     expected = ValueError
     if failure == "reference":
-        reference, expected = "bad", InvalidResultReferenceError
+        reference, expected = "bad", ValidationError
     elif failure == "name":
         name, expected = "missing", ResultNotFoundError
     elif failure == "missing":
@@ -198,7 +193,7 @@ def test_missing_selected_description(
     )
     with pytest.raises(ResultIntegrityError) as caught:
         client.resolve(export(reference, "a", path))
-    assert caught.value.result_ref == reference
+    assert caught.value.job_id == reference
     assert (
         caught.value.input_name if input_export else caught.value.output_name
     ) == "a"

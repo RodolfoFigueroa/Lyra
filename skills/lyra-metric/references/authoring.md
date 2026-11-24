@@ -398,11 +398,11 @@ Public ordinary tables encode as record arrays (`[]` when empty), without indice
 
 Missing cells encode as null; unsupported values fail validation. Empty spatial outputs have an empty `features` array.
 
-Use the identifiers from successful status to retrieve saved outputs:
+Use the job ID returned at submission to retrieve saved outputs:
 
-- **Native table**: `client.results.table(result_ref, output_name)`
-- **Schema and provider ownership**: `client.results.describe(result_ref)`
-- **Complete report**: `client.reports.get(execution_id)`
+- **Native table**: `client.results.table(job_id, output_name)`
+- **Schema and provider ownership**: `client.results.describe(job_id)`
+- **Complete report**: `client.reports.get(job_id)`
 
 With an async client, await each method. While the job remains available, read JSON tables with `client.result_tables(job_id)[output_name]` or `client.results.tables(job_id)[output_name]`.
 
@@ -788,7 +788,7 @@ Lyra combines the handler’s output with retained partitions to return each com
 | `second` | C | B and C |
 | `third` | Handler skipped | B and C |
 
-The table describes sets, without promising row order or invocation counts. Each run receives a distinct result reference.
+The table shows the records each handler needs. Row order and the number of calls can vary.
 
 With `cache="full"` and an initially empty store, the second call computes the complete B/C selection; the third reuses it. With `cache="off"`, each invoked computation receives its complete bound selection.
 
@@ -813,12 +813,11 @@ Lyra creates the parent directory and initializes the store when needed. Give it
 Keep these fields from `result.metadata` together:
 
 - `store_path`: SQLite file path
-- `execution_id`: identifier for the complete report
-- `result_ref`: identifier for the saved final result
+- `job_id`: ID for the run, its saved report, and its tables
 
-Every successful execution gets both identifiers, including private development runs and empty or cached results. Several results can select the same immutable stored values.
+Each run gets a fresh job ID, including private development runs, empty results, and full cache hits. Different jobs can reuse the same stored rows.
 
-Import `ExecutionPersistenceError` from `lyra.contracts.errors` to handle required storage or publication failures. The exception identifies the attempted `execution_id` and chains the underlying storage error. The run returns no `RunResult`, and the ID doesn’t guarantee a saved report. Complete cache values saved earlier can remain reusable.
+Catch `lyra.contracts.errors.ExecutionPersistenceError` when local storage or publication fails. Read `job_id` to identify the attempt and `__cause__` for the storage error. The run raises the exception before returning a result. Previously committed cache values remain available for reuse.
 
 Remote publication failures fail the job. Job-handle result and wait methods raise `MetricRunError` for that failed job.
 
@@ -827,14 +826,14 @@ Use `ResultStore` to read the saved result without loading plugins, acquiring pr
 ```python {5-7}
 from lyra.runtime.results import ResultStore
 
-result_ref = result.metadata.result_ref
+job_id = result.metadata.job_id
 with ResultStore.open(result.metadata.store_path) as store:
-    description = store.describe(result_ref)
-    report = store.read_report(result.metadata.execution_id)
-    restored = store.read_result(result_ref)
-    table = store.read_table(result_ref, "your_output_name_here")
+    description = store.describe(job_id)
+    report = store.read_report(job_id)
+    restored = store.read_result(job_id)
+    table = store.read_table(job_id, "your_output_name_here")
 assert restored.report == report
-assert report.result_ref == result_ref
+assert report.job_id == job_id
 ```
 
 `describe()` returns the complete description without loading tables or the report body. `read_report()` returns the complete report without loading output tables. `read_result()` returns native tables, metadata, and a report attached as `restored.report`. You own these returned values independently of the saved data.
@@ -843,13 +842,11 @@ You can still use returned values after the context closes; nested edits don’t
 
 Lookup errors from `lyra.contracts.errors` share the `ResultAccessError` base:
 
-- `InvalidResultReferenceError`: malformed reference
-- `ResultNotFoundError`: well-formed reference without a result, or an undeclared output name
+- `ResultNotFoundError`: valid job ID without a saved result, or an undeclared output name
 - `ResultIntegrityError`: damaged required data or relationships
 
-These exceptions expose `result_ref` and `output_name`; whole-result reads set `output_name=None`. Report lookup exceptions share the same `ResultAccessError` base and expose `execution_id`:
+Both result exceptions identify the job and output name. Whole-result reads set `output_name=None`. Report exceptions also inherit from `ResultAccessError` and identify the job with `job_id`.
 
-- `InvalidExecutionIDError`: malformed execution ID
 - `ReportNotFoundError`: valid ID without a saved report
 - `ReportIntegrityError`: damaged report or required relationships
 
@@ -857,17 +854,17 @@ A missing required report during a result read raises `ResultIntegrityError`. Lo
 
 Lyra retains values, final descriptions, and reports indefinitely while the store’s schema remains compatible with the current version. Changed keys, cache policies, and job expiry don’t delete them. Closed alpha permits an explicit development-store reset for incompatible schemas without promising migrations or historical readers.
 
-Successful remote status, results, and inspections include matching `execution_id` and `result_ref` values. Keep both identifiers with the deployment address. You can use the [remote retrieval methods](#native-table-ownership-and-encoding) after job expiry, or reopen `ResultStore` with filesystem access.
+Save the job ID and deployment address when you submit a job. After queue expiry, use the same ID for [remote retained reads](#native-table-ownership-and-encoding). With filesystem access, you can also open the store using `ResultStore`.
 
-Both Python clients automatically download descriptions that exceed inspection limits. For reports, use `reports.inspect(execution_id)` for a bounded inspection or `reports.get(execution_id)` for the complete model. Save the complete JSON with `reports.download(execution_id, path)`.
+Both Python clients automatically download descriptions that exceed inspection limits. For reports, use `reports.inspect(job_id)` for a bounded inspection or `reports.get(job_id)` for the complete model. Save the complete JSON with `reports.download(job_id, path)`.
 
-Use `results.rows(result_ref, output_name)` for bounded JSON pages. Pass each `next_cursor` unchanged until it is `None`, including after short pages. Interpret cells using these encodings:
+Use `results.rows(job_id, output_name)` for bounded JSON pages. Pass each `next_cursor` unchanged until it is `None`, including after short pages. Interpret cells using these encodings:
 
 - **Integers**: decimal strings
 - **Geometry**: full-precision well-known text (WKT) in the declared CRS
 - **Missing cells**: `null`
 
-If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Download the complete table with `results.download_table(result_ref, output_name, path)`. The file contains an Arrow interprocess communication (IPC) stream, regardless of its filename extension.
+If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Download the complete table with `results.download_table(job_id, output_name, path)`. The file contains an Arrow interprocess communication (IPC) stream, regardless of its filename extension.
 
 Read saved streams with PyArrow or `GeoDataFrame.from_arrow()` to restore declared scalar types and GeoArrow WKB/CRS metadata. Both file-download methods replace destinations only after success. On failure or cancellation, they preserve the destination and remove temporary files.
 
@@ -990,7 +987,7 @@ The metadata describes:
 - The concrete metric name
 - Effective parameters, including defaults and nulls
 - Each output’s `scope`, `table_schema`, and `owner_scope`
-- The `execution_id`, `result_ref`, and resolved `store_path`
+- The job ID (`job_id`) and SQLite file path (`store_path`)
 
 Unpartitioned outputs have `owner_scope=None`. Empty location-scoped outputs retain their owning provider scope. For a run that declares an output named `area`, inspect its table and description together:
 
@@ -1107,26 +1104,20 @@ Unversioned identities also promise fixed contents. Revision labels identify con
 
 ### Inspect retained location inputs
 
-`result.metadata.location_inputs` describes every named root `LocationDependency`.
-`ResultStore.describe_result(result_ref)` returns complete metadata without table or
-report reads. Use `read_location_input(result_ref, input_name)` for an independent
-GeoDataFrame; `RunResult.tables` remains the named metric outputs.
+Inspect `result.metadata.location_inputs` for the requested metric’s named location inputs. Use `ResultStore.describe_result(job_id)` for metadata or `read_location_input(job_id, input_name)` for an independent GeoDataFrame. Read named metric outputs from `RunResult.tables`.
 
-Inputs retain complete logical selections across cached and fresh partitions and
-complete shared references. Correspondences retain immediate source/target pairs
-with target geometry, qualified by the captured provider scopes. They have no metric
-`row_key`. Known empty inputs are available; skipped unresolved inputs are
-`not_materialized` and raise `LocationInputUnavailableError` on read. Availability
-is fixed at publication. Damaged available inputs raise `ResultIntegrityError`
-without acquisition fallback. Retaining records does not change declared cache
-policies. Required input persistence failures prevent successful publication.
+Each input contains its complete selection across cached and freshly computed partitions. Correspondences include the immediate source and target scopes, with the target’s attributes and geometry. The pair identifies the records without a metric `row_key`.
+
+A known empty input remains available. Reading a skipped input with `availability="not_materialized"` raises `LocationInputUnavailableError`. A damaged available input raises `ResultIntegrityError`. Neither read contacts a provider.
+
+Lyra fixes availability at publication and keeps each node’s declared cache policy. If Lyra can’t save a required input, publication fails.
 
 ## Export retained spatial tables
 
 Publish native tables with their declared schema and location scope. Consumers can export retained spatial selections through `ResultStore` or `client.results`:
 
-- `export_geoparquet(result_ref, output_name, path)` for a named spatial output
-- `export_location_input_geoparquet(result_ref, input_name, path)` for a direct provider or correspondence input
+- `export_geoparquet(job_id, output_name, path)` for a named spatial output
+- `export_location_input_geoparquet(job_id, input_name, path)` for a direct provider or correspondence input
 
 Use `await` with `AsyncLyraClient`. Each method accepts a local `str` or `Path` destination and returns `None`. Install the dependencies for the chosen access method:
 
@@ -1139,7 +1130,7 @@ Each export reads retained originals and complete descriptions independently of 
 After GeoPandas readback, inspect the JSON-compatible dictionary at `attrs["lyra"]`:
 
 - `kind`: `metric_output` or `location_input`
-- `result_ref` and `execution_id`: originating retained result and execution
+- `job_id`: job that produced the retained data
 - `output_name` or `input_name`: selected name
 - `description`: complete selected description serialized with `model_dump(mode="json")`, including null scopes
 

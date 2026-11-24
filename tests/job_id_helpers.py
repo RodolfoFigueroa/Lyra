@@ -1,6 +1,9 @@
-"""Invalid job identifiers shared by contract and client tests."""
+"""Job ID fixtures shared by contract, transport, and client tests."""
 
 import pytest
+
+TEST_JOB_ID = "1" * 32
+CLIENT_JOB_ID = "2" * 32
 
 
 class ConversionTrap:
@@ -15,15 +18,21 @@ class ConversionTrap:
 
 INVALID_IDS = [
     pytest.param("", id="empty"),
+    "x" * 32,
+    "A" * 32,
+    "a" * 31,
+    "a" * 33,
+    "a" * 32 + "\n",
+    " ",
     pytest.param(None, id="null"),
     pytest.param(True, id="boolean"),
     pytest.param(42, id="integer"),
     pytest.param(1.5, id="float"),
-    pytest.param(b"job", id="bytes"),
-    pytest.param(bytearray(b"job"), id="bytearray"),
+    pytest.param(TEST_JOB_ID.encode(), id="bytes"),
+    pytest.param(bytearray(TEST_JOB_ID.encode()), id="bytearray"),
     pytest.param([], id="list"),
     pytest.param({}, id="dict"),
-    pytest.param(("job",), id="tuple"),
-    pytest.param({"job"}, id="set"),
+    pytest.param((TEST_JOB_ID,), id="tuple"),
+    pytest.param({TEST_JOB_ID}, id="set"),
     pytest.param(ConversionTrap(), id="conversion-trap"),
 ]

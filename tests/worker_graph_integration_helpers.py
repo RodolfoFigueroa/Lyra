@@ -8,6 +8,7 @@ from unittest.mock import Mock
 import pandera.pandas as pa
 import pytest
 
+from lyra.contracts.references import new_job_id
 from lyra.sdk import loading
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.resources import BaseIO
@@ -75,10 +76,12 @@ def install_definitions(
     return plugins, runtime
 
 
-def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNamespace:
+def native_job(
+    monkeypatch: pytest.MonkeyPatch, root: str = "root", *, job_id: str | None = None
+) -> SimpleNamespace:
     catalog = worker.require_worker_runtime().catalog
     native = SimpleNamespace(
-        id="graph-job",
+        id=job_id or new_job_id(),
         origin=catalog.metric_queues[root],
         worker_name="fake-worker",
         meta={},

@@ -171,7 +171,7 @@ def test_worker_resolves_inline_sources_and_id_only_targets(
         envelope = enqueue.call_args.args[0]
         native_job(monkeypatch).id = envelope.job_id
         saved = worker.run_metric_task(envelope.model_dump(mode="json"))
-        return read_retained(str(saved["result_ref"]))
+        return read_retained(str(saved["job_id"]))
 
     payload = plan.request.submission_payload()
     assert execute("http", payload).tables["rows"].value.tolist() == [18]

@@ -5,13 +5,13 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from shapely.errors import GEOSException
 from sqlalchemy import exc
 
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.provider_scope import DatasetScope
-from lyra.contracts.references import ExecutionID, ResultReference
+from lyra.contracts.references import validate_job_id
 from lyra.contracts.reports import ExecutionReport, ReportOutput
 from lyra.contracts.results import ResultDescription as PublicResultDescription
 from lyra.contracts.types import JsonObject
@@ -28,7 +28,11 @@ from lyra.runtime.pagination import (
     validate_pagination,
     validate_position,
 )
-from lyra.runtime.sqlite_store import DamagedDataError, MissingValueError
+from lyra.runtime.sqlite_store import (
+    DamagedDataError,
+    MissingValueError,
+    select_from_optional_store,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -37,9 +41,6 @@ if TYPE_CHECKING:
     from lyra.data.results import NativeOutputs
     from lyra.runtime.sqlite_schema import Registration
     from lyra.runtime.sqlite_store import Header, SQLiteStore
-
-_EXECUTION_ID = TypeAdapter(ExecutionID)
-_RESULT_REFERENCE = TypeAdapter(ResultReference)
 
 
 class ComputationSelection(BaseModel):
@@ -100,15 +101,14 @@ class ResultDescriptions:
         self.store = store
 
     def publish(self, description: ResultDescription, report: ExecutionReport) -> str:
-        """Validate required relationships and atomically publish a fresh reference.
+        """Validate and publish the report and final selections in one transaction.
 
         Returns:
-            A distinct opaque reference after a successful commit.
+            The job ID after the transaction commits.
         """
-        reference, _ = _ResultPublication(self.store).publish_metadata(
-            description, report
+        return (
+            _ResultPublication(self.store).publish_metadata(description, report).job_id
         )
-        return reference
 
     @staticmethod
     def _check_pair(
@@ -145,49 +145,30 @@ class ResultDescriptions:
         """
         description = ResultDescription.model_validate_json(row["description"])
         report = ExecutionReport.model_validate_json(row["report"])
-        if (
-            report.execution_id != row["execution_id"]
-            or report.result_ref != row["result_ref"]
-        ):
+        if report.job_id != row["job_id"]:
             msg = "Final report identity differs from its record"
             raise DamagedDataError(msg)
         cls._check_pair(description, report)
         return description, report
 
-    def read_report(self, execution_id: str) -> ExecutionReport:
-        """Decode the complete retained pair without accessing output values.
-
-        Returns:
-            An independently decoded report.
-
-        Raises:
-            MissingValueError: If the execution has no retained report.
-        """
-        table = self.store.layout.final_results
+    def read_report(self, job_id: str) -> ExecutionReport:
+        """Return the retained report without reading output values."""
         with self.store.engine.connect() as connection:
-            row = (
-                connection.execute(
-                    sa.select(table).where(table.c.execution_id == execution_id)
-                )
-                .mappings()
-                .one_or_none()
-            )
-        if row is None:
-            raise MissingValueError(execution_id)
+            row = self._result_record(connection, job_id, include_report=True)
         _, report = self.decode(row)
         return report
 
     def read(
-        self, reference: str, output_name: str | None = None
+        self, job_id: str, output_name: str | None = None
     ) -> tuple[ResultDescription, "NativeOutputs"]:
         """Return selected native tables without decoding the complete report."""
         with self.store.engine.connect() as connection:
-            row = self._description_record(connection, reference)
+            row = self._result_record(connection, job_id)
             description = ResultDescription.model_validate_json(row["description"])
             return description, self._read_outputs(connection, description, output_name)
 
     @contextmanager
-    def select(self, reference: str, output_name: str) -> "Generator[OutputSelection]":
+    def select(self, job_id: str, output_name: str) -> "Generator[OutputSelection]":
         """Yield a validated named SQL selection with an owned connection.
 
         Required metadata and aggregate completion checks finish before yielding.
@@ -197,7 +178,7 @@ class ResultDescriptions:
             Retained schema, concrete scope, and bounded row traversal.
         """
         with self.store.engine.connect() as connection:
-            row = self._description_record(connection, reference)
+            row = self._result_record(connection, job_id)
             description = ResultDescription.model_validate_json(row["description"])
             self._load_outputs(description, output_name)
             yield self._selection(connection, description, output_name)
@@ -205,7 +186,7 @@ class ResultDescriptions:
     @contextmanager
     def page_candidates(
         self,
-        result_ref: str,
+        job_id: str,
         output_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -215,11 +196,11 @@ class ResultDescriptions:
         Consumers must keep this context open while iterating. Early exits close
         the iterator and connection, including when a byte budget rejects a row.
         """
-        after = validate_pagination(result_ref, output_name, limit, cursor)
-        with self.select(result_ref, output_name) as selected:
-            validate_position(selected, result_ref, output_name, after)
+        after = validate_pagination(job_id, output_name, limit, cursor)
+        with self.select(job_id, output_name) as selected:
+            validate_position(selected, job_id, output_name, after)
             with closing(
-                candidates(selected, result_ref, output_name, limit, after)
+                candidates(selected, job_id, output_name, limit, after)
             ) as rows:
                 yield CandidatePage(selected.registration, selected.owner_scope, rows)
 
@@ -258,29 +239,29 @@ class ResultDescriptions:
             connection, registration, output.owner_scope, tuple(computations)
         )
 
-    def _description_record(
-        self, connection: sa.Connection, reference: str
+    def _result_record(
+        self, connection: sa.Connection, job_id: str, *, include_report: bool = False
     ) -> sa.RowMapping:
         table = self.store.layout.final_results
+        report = (
+            table.c.report
+            if include_report
+            else table.c.report.is_not(None).label("report_present")
+        )
+        query = sa.select(table.c.job_id, table.c.description, report).where(
+            table.c.job_id == job_id
+        )
         row = (
-            connection.execute(
-                sa.select(
-                    table.c.result_ref,
-                    table.c.execution_id,
-                    table.c.description,
-                    table.c.report.is_not(None).label("report_present"),
-                ).where(table.c.result_ref == reference)
-            )
+            select_from_optional_store(connection, table, query)
             .mappings()
             .one_or_none()
         )
         if row is None:
-            raise MissingValueError(reference)
-        _RESULT_REFERENCE.validate_python(row["result_ref"])
-        _EXECUTION_ID.validate_python(row["execution_id"])
+            raise MissingValueError(job_id)
+        validate_job_id(row["job_id"])
         # The report belongs to this unique execution/result record. Its body is
         # validated only by report and complete-result reads.
-        if not row["report_present"]:
+        if not include_report and not row["report_present"]:
             msg = "Missing required execution report"
             raise DamagedDataError(msg)
         return row
@@ -329,7 +310,7 @@ class ResultDescriptions:
         result.validate_inventory()
         return result
 
-    def input_bindings(self, reference: str) -> InputBindings:
+    def input_bindings(self, job_id: str) -> InputBindings:
         """Load the declared input inventory without outputs or the report body.
 
         Returns:
@@ -339,24 +320,24 @@ class ResultDescriptions:
             self.store.engine.connect() as connection,
             _input_traversal(self.store, connection) as inputs,
         ):
-            return self.input_bindings_connection(connection, reference, inputs)
+            return self.input_bindings_connection(connection, job_id, inputs)
 
     def input_bindings_connection(
-        self, connection: sa.Connection, reference: str, inputs: _InputTraversal
+        self, connection: sa.Connection, job_id: str, inputs: _InputTraversal
     ) -> InputBindings:
         """Assemble inputs within an existing private metadata traversal.
 
         Returns:
             An independently owned merged inventory.
         """
-        row = self._description_record(connection, reference)
+        row = self._result_record(connection, job_id)
         description = ResultDescription.model_validate_json(row["description"])
         return self._inputs(connection, description, inputs)
 
-    def validate_output_metadata(self, reference: str, name: str) -> None:
+    def validate_output_metadata(self, job_id: str, name: str) -> None:
         """Resolve a named output using only its retained metadata."""
         with self.store.engine.connect() as connection:
-            row = self._description_record(connection, reference)
+            row = self._result_record(connection, job_id)
             description = ResultDescription.model_validate_json(row["description"])
             self._load_outputs(description, name)
             self._check_output_metadata(connection, description, name)
@@ -381,21 +362,19 @@ class ResultDescriptions:
                 msg = "Missing retained output completion"
                 raise DamagedDataError(msg)
 
-    def describe(self, reference: str) -> PublicResultDescription:
+    def describe(self, job_id: str) -> PublicResultDescription:
         """Return complete retained metadata without reading reports or value rows."""
         with self.store.engine.connect() as connection:
-            row = self._description_record(connection, reference)
+            row = self._result_record(connection, job_id)
             description = ResultDescription.model_validate_json(row["description"])
             self._load_outputs(description, None)
             for name in description.outputs:
                 self._check_output_metadata(connection, description, name)
             with _input_traversal(self.store, connection) as inputs:
-                return self._metadata(
-                    connection, inputs, description, reference, row["execution_id"]
-                )
+                return self._metadata(connection, inputs, description, job_id)
 
     def metadata(
-        self, description: ResultDescription, reference: str, execution_id: str
+        self, description: ResultDescription, job_id: str
     ) -> PublicResultDescription:
         """Project loaded registrations into independent public output metadata.
 
@@ -406,17 +385,14 @@ class ResultDescriptions:
             self.store.engine.connect() as connection,
             _input_traversal(self.store, connection) as inputs,
         ):
-            return self._metadata(
-                connection, inputs, description, reference, execution_id
-            )
+            return self._metadata(connection, inputs, description, job_id)
 
     def _metadata(
         self,
         connection: sa.Connection,
         retained: _InputTraversal,
         description: ResultDescription,
-        reference: str,
-        execution_id: str,
+        job_id: str,
     ) -> PublicResultDescription:
         outputs = {}
         for name, output in description.outputs.items():
@@ -436,12 +412,11 @@ class ResultDescriptions:
             parameters=deepcopy(description.parameters),
             outputs=outputs,
             location_inputs=inputs,
-            result_ref=reference,
-            execution_id=execution_id,
+            job_id=job_id,
         )
 
     def read_complete(
-        self, reference: str, output_name: str | None = None
+        self, job_id: str, output_name: str | None = None
     ) -> tuple[ResultDescription, ExecutionReport, "NativeOutputs"]:
         """Reopen detached metadata and native tables without producer code.
 
@@ -449,21 +424,11 @@ class ResultDescriptions:
             The execution description and its selected named tables.
 
         Raises:
-            MissingValueError: If the description is absent.
             DamagedDataError: If required metadata or values are damaged.
         """
-        table = self.store.layout.final_results
         with self.store.engine.connect() as connection:
             try:
-                row = (
-                    connection.execute(
-                        sa.select(table).where(table.c.result_ref == reference)
-                    )
-                    .mappings()
-                    .one_or_none()
-                )
-                if row is None:
-                    raise MissingValueError(reference)
+                row = self._result_record(connection, job_id, include_report=True)
                 description, report = self.decode(row)
                 return (
                     description,
@@ -563,25 +528,23 @@ class _ResultPublication(ResultDescriptions):
 
     def publish_metadata(
         self, description: ResultDescription, report: ExecutionReport
-    ) -> tuple[str, PublicResultDescription]:
-        """Validate once and release the reference and projection after commit.
+    ) -> PublicResultDescription:
+        """Publish the final selections and report under their job ID.
 
         Returns:
-            The committed reference and independently owned public description.
+            The independently owned public description after commit.
 
         Raises:
             DamagedDataError: If registered and reported output schemas differ.
         """
-        reference = report.result_ref
+        job_id = report.job_id
         root = self._check_pair(description, report)
         with self.store.transaction() as connection:
             for name, output in description.outputs.items():
                 self.store.read_registration(connection, output.registration_key)
                 self._selection(connection, description, name, check_overlap=True)
             with _input_traversal(self.store, connection) as inputs:
-                projection = self._metadata(
-                    connection, inputs, description, reference, report.execution_id
-                )
+                projection = self._metadata(connection, inputs, description, job_id)
             if any(
                 output.scope != root.outputs[name].scope
                 or not same_json(
@@ -605,10 +568,9 @@ class _ResultPublication(ResultDescriptions):
             connection.execute(
                 self.store.layout.final_results.insert(),
                 {
-                    "result_ref": reference,
-                    "execution_id": report.execution_id,
+                    "job_id": job_id,
                     "report": report.model_dump_json(),
                     "description": description.model_dump_json(),
                 },
             )
-        return reference, projection
+        return projection

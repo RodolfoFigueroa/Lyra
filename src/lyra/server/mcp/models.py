@@ -17,15 +17,15 @@ MAX_METRIC_PAGE_SIZE = 20
 
 
 class InspectReportInput(StrictBaseModel):
-    """An exact durable execution ID; domain lookup validates its format."""
+    """Identify a retained report by job ID."""
 
-    execution_id: str = Field(strict=True)
+    job_id: JobId
 
 
 class DescribeResultInput(StrictBaseModel):
-    """An exact durable result reference; domain lookup validates its format."""
+    """Identify a retained result by job ID."""
 
-    result_ref: str = Field(strict=True)
+    job_id: JobId
 
 
 class DownloadTableInput(DescribeResultInput):

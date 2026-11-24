@@ -181,7 +181,7 @@ def assert_retained_comparison(
     *,
     routed: bool,
 ) -> None:
-    ref = result.metadata.result_ref
+    ref = result.metadata.job_id
     primary = reader.read_location_input(ref, "places")
     assert sorted(primary.location_id) == ["b", "c"]
     shared = reader.read_location_input(ref, "references").sort_values("location_id")
@@ -199,4 +199,4 @@ def assert_retained_comparison(
     assert exported.attrs["lyra"]["description"]["owner_scope"] == scope.model_dump(
         mode="json"
     )
-    assert exported.attrs["lyra"]["result_ref"] == ref
+    assert exported.attrs["lyra"]["job_id"] == ref

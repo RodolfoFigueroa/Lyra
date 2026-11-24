@@ -15,15 +15,20 @@ from sqlalchemy.sql.dml import Insert
 from lyra.api.client.results import successful_result
 from lyra.api.exceptions import MetricRunError
 from lyra.contracts.config import JobsConfig
-from lyra.contracts.errors import ExecutionPersistenceError, ReportNotFoundError
+from lyra.contracts.errors import (
+    ExecutionPersistenceError,
+    ReportNotFoundError,
+    ResultNotFoundError,
+)
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES
 from lyra.contracts.jobs import FailedJobResult, TableJobResult
+from lyra.contracts.references import new_job_id
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
-from lyra.sdk import MetricParameters, PluginDefinition, metric
+from lyra.sdk import MetricParameters, PluginDefinition, RunContext, metric
 from lyra.server import worker
 from lyra.server.job_store import JobStore
 from lyra.server.results import ResultService
@@ -49,8 +54,8 @@ def test_worker_local_and_development_report_parity(
     calls = []
 
     @metric(name="root", description="Root", outputs={"answer": VALUES}, cache="full")
-    def root(*, parameters: Parameters) -> pd.DataFrame:
-        calls.append(parameters.value)
+    def root(*, parameters: Parameters, context: RunContext) -> pd.DataFrame:
+        calls.append((context.job_id, parameters.value))
         return pd.DataFrame(
             {"value": pd.Series([] if empty else [parameters.value], dtype="int64")}
         )
@@ -64,20 +69,18 @@ def test_worker_local_and_development_report_parity(
     local = runner.run("root", parameters={"label": label})
     development = runner.run_development("root", parameters={"label": label})
     native = native_job(monkeypatch)
-    envelope = accepted_envelope(
-        job_id=native.id, metric="root", inputs={"parameters": {"label": label}}
-    )
     reports = []
     for _ in range(2):
-        handoff = worker.run_metric_task(envelope.model_dump(mode="json"))
-        restored = read_retained(str(handoff["result_ref"]))
-        report = restored.report
-        assert (
-            handoff["execution_id"]
-            == report.execution_id
-            == restored.metadata.execution_id
+        native.id = new_job_id()
+        envelope = accepted_envelope(
+            job_id=native.id, metric="root", inputs={"parameters": {"label": label}}
         )
-        assert report.execution_id != native.id
+
+        handoff = worker.run_metric_task(envelope.model_dump(mode="json"))
+        restored = read_retained(str(handoff["job_id"]))
+        report = restored.report
+        assert handoff["job_id"] == report.job_id == restored.metadata.job_id
+        assert report.job_id == native.id
         assert report.build_revision == runtime.config.build_revision
         assert report.request == envelope.accepted.plan.request == local.report.request
         assert report.request.parameters == {"value": 7, "label": label}
@@ -91,12 +94,12 @@ def test_worker_local_and_development_report_parity(
             native, runtime.config.result_store_path, handoff, monkeypatch
         )
         reports.append(report)
-    assert reports[0].execution_id != reports[1].execution_id
+    assert reports[0].job_id != reports[1].job_id
     assert [report.nodes[0].outcome for report in reports] == ["executed", "reused"]
     assert development.report.nodes[0].outcome == "reused"
-    assert calls == [7, 7]
+    assert calls == [(local.metadata.job_id, 7), (reports[0].job_id, 7)]
     native.meta.clear()
-    assert read_retained(reports[0].result_ref).report == reports[0]
+    assert read_retained(reports[0].job_id).report == reports[0]
 
 
 def assert_public_job_identity(
@@ -124,15 +127,15 @@ def assert_public_job_identity(
     inspection = service.inspect(observation)
     assert status is not None
     assert observation.retained_result is not None
-    for identity in ("execution_id", "result_ref"):
-        assert (
-            getattr(status, identity)
-            == getattr(result, identity)
-            == getattr(inspection, identity)
-            == getattr(observation.retained_result.report, identity)
-            == getattr(observation.retained_result.metadata, identity)
-            == handoff[identity]
-        )
+    assert (
+        status.job_id
+        == result.job_id
+        == inspection.job_id
+        == observation.retained_result.report.job_id
+        == observation.retained_result.metadata.job_id
+        == handoff["job_id"]
+        == native.id
+    )
 
 
 @pytest.mark.parametrize("boundary", ["setup", "values", "publication", "commit"])
@@ -185,13 +188,18 @@ def test_worker_persistence_failure_uses_failed_job_path(
     persistence_error = caught.value.__cause__
     assert persistence_error is not None
     assert isinstance(persistence_error, ExecutionPersistenceError)
-    assert isinstance(persistence_error.execution_id, str)
+    assert persistence_error.job_id == failed.job_id == native.id
     path = runtime.config.result_store_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch()
-    with ResultStore.open(path) as reader, pytest.raises(ReportNotFoundError) as absent:
-        reader.read_report(persistence_error.execution_id)
-    assert absent.value.execution_id == persistence_error.execution_id
+    with ResultStore.open(path) as reader:
+        with pytest.raises(ReportNotFoundError) as absent_report:
+            reader.read_report(failed.job_id)
+        with pytest.raises(ResultNotFoundError) as absent_description:
+            reader.describe(failed.job_id)
+    assert (
+        absent_report.value.job_id == absent_description.value.job_id == failed.job_id
+    )
 
 
 def test_worker_revalidated_parameters_are_retained(
@@ -211,7 +219,7 @@ def test_worker_revalidated_parameters_are_retained(
         result = worker.execute_job(
             envelope.model_dump(mode="json"), cast("Job", native)
         )
-        retained = read_retained(str(result["result_ref"]))
+        retained = read_retained(str(result["job_id"]))
         assert retained.report.request.parameters["value"] == 7
         assert retained.tables["answer"].value.tolist() == [7]
     finally:

@@ -21,6 +21,7 @@ from lyra.api.exceptions import DownloadError, ServiceUnavailableError
 from lyra.contracts.errors import ResultIntegrityError
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.runtime.results import ResultStore
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server import job_store
 from lyra.server.job_submission import job_links
 from lyra.server.main import create_app
@@ -32,8 +33,12 @@ from lyra.server.mcp.tools import (
     get_job_result,
 )
 from tests.config_helpers import api_credentials, load_test_config
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.retained_job_helpers import retain
 from tests.runtime_helpers import make_runtime
+from tests.sqlite_helpers import Database, database, schema_database
+
+__all__ = ["database", "schema_database"]
 
 PATHS = [
     "/jobs/{job_id}",
@@ -42,6 +47,48 @@ PATHS = [
     "/jobs/{job_id}/result/download",
     "/admin/jobs/{job_id}",
 ]
+
+RETAINED_PATHS = [
+    "/results/{job_id}",
+    "/results/{job_id}/description/download",
+    "/results/{job_id}/tables/answer/download",
+    "/results/{job_id}/tables/answer/rows",
+    "/results/{job_id}/location-inputs/places/download",
+    "/results/{job_id}/location-inputs/places/rows",
+    "/executions/{job_id}/report/inspection",
+    "/executions/{job_id}/report/download",
+]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("damaged", [False, True], ids=["first-rollback", "damaged"])
+async def test_retained_lookups_with_missing_final_table(
+    app: FastAPI, schema_database: Database, *, damaged: bool
+) -> None:
+    path = app.state.runtime.results.result_store_path
+    with SQLiteStore(path) as store:
+        if damaged:
+            store.initialize()
+            del schema_database.rows["final_results"]
+        else:
+            schema_database.fail_commit = True
+            with pytest.raises(RuntimeError, match="commit failure"):
+                store.initialize()
+    # Opening SQLite creates the file even if its first schema transaction fails.
+    path.touch()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for route in RETAINED_PATHS:
+            response = await client.get(
+                route.format(job_id=TEST_JOB_ID), headers=headers(app, route)
+            )
+            assert response.status_code == (500 if damaged else 404), route
+            detail = response.json()["detail"]
+            resource = "report" if route.startswith("/executions/") else "result"
+            outcome = "integrity_error" if damaged else "not_found"
+            assert detail["code"] == f"{resource}_{outcome}"
+            assert detail["job_id"] == TEST_JOB_ID
 
 
 @pytest.fixture
@@ -77,10 +124,8 @@ def stored(
         runtime.results.result_store_path,
         monkeypatch,
         {
-            "execution_id": "b" * 32,
-            "result_ref": "a" * 32,
             "kind": "table",
-            "job_id": "job",
+            "job_id": TEST_JOB_ID,
             "outputs": {"result": [{"value": 1}]},
             "output_metadata": {"result": {"columns": []}},
         },
@@ -106,13 +151,14 @@ async def test_lifecycle(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.get(
-            path.format(job_id="job"), headers=headers(app, path)
+            path.format(job_id=TEST_JOB_ID),
+            headers=headers(app, path),
         )
     pending = status in {JobStatus.QUEUED, JobStatus.STARTED}
     assert response.status_code == (202 if pending and "/result" in path else 200)
     body = response.json()
     snapshot = body["snapshot"] if path.startswith("/admin") else body
-    assert snapshot["job_id"] == "job"
+    assert snapshot["job_id"] == TEST_JOB_ID
     assert (
         snapshot["status"]
         == {
@@ -158,7 +204,8 @@ async def test_lookup_outcomes(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.get(
-            path.format(job_id="job"), headers=headers(app, path)
+            path.format(job_id=TEST_JOB_ID),
+            headers=headers(app, path),
         )
     expected = 404 if damage in {"missing", "expired"} else 500
     if damage == "table" and "/result" not in path:
@@ -185,7 +232,7 @@ async def test_lookup_outcomes(
     else:
         with pytest.raises(error_type) as error:
             endpoints.validate_response(
-                specs[path]("job"),
+                specs[path](TEST_JOB_ID),
                 response.status_code,
                 response.text,
                 "application/json",
@@ -197,11 +244,13 @@ async def test_lookup_outcomes(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("path", PATHS)
+@pytest.mark.parametrize("path", PATHS + RETAINED_PATHS)
 @pytest.mark.parametrize("job_id", [" ", " job ?#%+é ", "123", "null"])
-async def test_encoded_identifier_is_preserved(
+async def test_malformed_identifier_precedes_lookup(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, path: str, job_id: str
 ) -> None:
+    open_store = Mock(side_effect=AssertionError("unexpected retained lookup"))
+    monkeypatch.setattr(ResultStore, "open", open_store)
     fetch = Mock(return_value=None)
     monkeypatch.setattr(app.state.runtime.jobs, "_fetch", fetch)
     async with httpx.AsyncClient(
@@ -210,28 +259,38 @@ async def test_encoded_identifier_is_preserved(
         response = await client.get(
             path.format(job_id=quote(job_id, safe="")), headers=headers(app, path)
         )
-    assert response.status_code == 404
-    assert fetch.call_args.args == (job_id,)
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["path", "job_id"]
+    fetch.assert_not_called()
+    open_store.assert_not_called()
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("path", PATHS)
+@pytest.mark.parametrize("path", PATHS + RETAINED_PATHS)
 async def test_authentication_precedes_lookup(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
+    open_store = Mock(side_effect=AssertionError("unexpected retained lookup"))
+    monkeypatch.setattr(ResultStore, "open", open_store)
     fetch = Mock(side_effect=AssertionError("unauthorized lookup"))
     monkeypatch.setattr(job_store.Job, "fetch", fetch)
-    opposite = "/jobs/job" if path.startswith("/admin") else "/admin/jobs/job"
+    opposite = (
+        f"/jobs/{TEST_JOB_ID}"
+        if path.startswith("/admin")
+        else f"/admin/jobs/{TEST_JOB_ID}"
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        missing = await client.get(path.format(job_id="job"))
+        missing = await client.get(path.format(job_id=TEST_JOB_ID))
         wrong = await client.get(
-            path.format(job_id="job"), headers=headers(app, opposite)
+            path.format(job_id=TEST_JOB_ID),
+            headers=headers(app, opposite),
         )
     assert missing.status_code in {401, 403}
     assert wrong.status_code == 403
     fetch.assert_not_called()
+    open_store.assert_not_called()
 
 
 def test_openapi_job_inputs_and_outcomes(app: FastAPI) -> None:
@@ -241,7 +300,7 @@ def test_openapi_job_inputs_and_outcomes(app: FastAPI) -> None:
         parameter = next(p for p in operation["parameters"] if p["name"] == "job_id")
         assert parameter["required"] is True
         assert parameter["schema"]["type"] == "string"
-        assert parameter["schema"]["minLength"] == 1
+        assert parameter["schema"]["pattern"] == "^[0-9a-f]{32}$"
         assert {"200", "404", "422", "500"} <= operation["responses"].keys()
 
 
@@ -252,7 +311,6 @@ def test_openapi_job_inputs_and_outcomes(app: FastAPI) -> None:
 async def test_empty_path_segment_does_not_lookup(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, suffix: str
 ) -> None:
-    # Empty is the only invalid string; it cannot match a required path segment.
     fetch = Mock(side_effect=AssertionError("empty identifier lookup"))
     monkeypatch.setattr(job_store.Job, "fetch", fetch)
     async with httpx.AsyncClient(
@@ -268,71 +326,6 @@ async def test_empty_path_segment_does_not_lookup(
     fetch.assert_not_called()
 
 
-OPAQUE_IDS = [
-    "a/b",
-    "lyra://results/job",
-    ".",
-    "..",
-    "a%2Fb",
-    "λ/结果?#",
-    " ",
-    "a/result",
-    "a/result/download",
-    "/leading/",
-    "a//b",
-]
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("path", PATHS)
-@pytest.mark.parametrize("job_id", OPAQUE_IDS)
-@pytest.mark.parametrize("outcome", ["retained", "missing", "damaged", "unauthorized"])
-async def test_opaque_identifier_lookup(
-    app: FastAPI,
-    monkeypatch: pytest.MonkeyPatch,
-    path: str,
-    job_id: str,
-    outcome: str,
-) -> None:
-    job = stored(app, monkeypatch)
-    job.id = job_id
-    job.args[0]["job_id"] = job_id
-    fetch = Mock(return_value=job)
-    if outcome == "missing":
-        fetch.return_value = None
-    elif outcome == "damaged":
-        job.args = ()
-    monkeypatch.setattr(app.state.runtime.jobs, "_fetch", fetch)
-    auth = headers(app, path)
-    if outcome == "unauthorized":
-        auth = {"Authorization": "Bearer wrong"}
-    component = endpoints.job_path(job_id).removeprefix("jobs/")
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.get(path.format(job_id=component), headers=auth)
-    assert (
-        response.status_code
-        == {
-            "retained": 200,
-            "missing": 404,
-            "damaged": 500,
-            "unauthorized": 403,
-        }[outcome]
-    )
-    if outcome == "unauthorized":
-        fetch.assert_not_called()
-    else:
-        assert fetch.call_args.args == (job_id,)
-    if outcome == "retained":
-        body = response.json()
-        assert (body["snapshot"] if path.startswith("/admin") else body)[
-            "job_id"
-        ] == job_id
-    elif outcome == "damaged":
-        assert response.json()["detail"]["code"] == "invalid_job_result"
-
-
 @pytest.mark.anyio
 @pytest.mark.parametrize("mode", ["mount", "proxy", "stripped_proxy", "no_raw_path"])
 @pytest.mark.parametrize("prefix", ["/api", "/área"])
@@ -342,7 +335,7 @@ async def test_job_routing_prefixes(
     mode: str,
     prefix: str,
 ) -> None:
-    job_id = "plain" if mode == "no_raw_path" else "a/result/download"
+    job_id = TEST_JOB_ID
     job = stored(app, monkeypatch)
     monkeypatch.setattr(app.state.runtime.jobs, "_fetch", Mock(return_value=job))
     job.id = job_id
@@ -375,7 +368,7 @@ async def test_job_routing_prefixes(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("job_id", OPAQUE_IDS)
+@pytest.mark.parametrize("job_id", [TEST_JOB_ID])
 async def test_download_links_reach_retained_job(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
@@ -413,9 +406,9 @@ async def test_download_links_reach_retained_job(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("job_id", ["a/result/download", ".", "..", "a%2Fb"])
+@pytest.mark.parametrize("job_id", [TEST_JOB_ID])
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
-async def test_python_clients_reach_encoded_job(
+async def test_python_clients_reach_job(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
     job_id: str,
@@ -473,13 +466,12 @@ async def test_python_clients_reach_encoded_job(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("job_id", ["a:b", "a/b", " "])
+@pytest.mark.parametrize("job_id", ["f" * 32])
 async def test_native_lookup_preserves_absence_across_transports(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, job_id: str
 ) -> None:
-    native = stored(app, monkeypatch)
-    native.id = "a"
-    native.args[0]["job_id"] = "a"
+    stored(app, monkeypatch)
+    monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=NoSuchJobError))
     backend = InProcessLyraBackend(lambda: app.state.runtime)
     with pytest.raises(ToolCallError) as error:
         await get_job_result(GetJobResultInput(job_id=job_id), backend)

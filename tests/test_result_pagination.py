@@ -11,11 +11,11 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 import sqlalchemy as sa
+from pydantic import ValidationError
 from sqlalchemy.dialects import sqlite
 
 from lyra.contracts.errors import (
     InvalidPaginationError,
-    InvalidResultReferenceError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
@@ -178,7 +178,7 @@ def test_invalid_limits_preserve_context_without_storage(
     with pytest.raises(InvalidPaginationError) as caught:
         page(reader, "a" * 32, "snow", limit)
     assert vars(caught.value) == {
-        "result_ref": "a" * 32,
+        "job_id": "a" * 32,
         "output_name": "snow",
         "input_name": None,
         "parameter": "limit",
@@ -194,7 +194,7 @@ def test_malformed_cursors_preserve_context_without_storage(
     with pytest.raises(InvalidPaginationError) as caught:
         page(reader, "a" * 32, "snow", cursor=cursor)
     assert vars(caught.value) == {
-        "result_ref": "a" * 32,
+        "job_id": "a" * 32,
         "output_name": "snow",
         "input_name": None,
         "parameter": "cursor",
@@ -213,7 +213,7 @@ def test_cursors_are_bound_to_exact_result_and_output(
     requested_output = "other" if target == "output" else "a"
     with pytest.raises(InvalidPaginationError) as caught:
         page(reader, requested_ref, requested_output, cursor=cursor)
-    assert caught.value.result_ref == requested_ref
+    assert caught.value.job_id == requested_ref
     assert caught.value.output_name == requested_output
     assert caught.value.parameter == "cursor"
 
@@ -228,7 +228,7 @@ def test_numeric_cursor_keys_must_fit_sql_integers(
         json.dumps(
             {
                 "version": 1,
-                "result_ref": "a" * 32,
+                "job_id": "a" * 32,
                 "output_name": "rows",
                 "computation": 0,
                 "key": [key],
@@ -357,7 +357,7 @@ def test_pagination_preserves_required_integrity_checks(
         database.rows["stored_partitions"].clear()
     with pytest.raises(ResultIntegrityError) as caught:
         page(ResultStore(store), reference)
-    assert caught.value.result_ref == reference
+    assert caught.value.job_id == reference
     assert caught.value.output_name == "a"
 
 
@@ -369,7 +369,7 @@ def test_pagination_preserves_lookup_failures(tmp_path: Path, target: str) -> No
     if target == "closed":
         reader.close()
     expected = {
-        "malformed": InvalidResultReferenceError,
+        "malformed": ValidationError,
         "missing": ResultNotFoundError,
         "output": ResultNotFoundError,
         "closed": RuntimeError,
@@ -377,7 +377,7 @@ def test_pagination_preserves_lookup_failures(tmp_path: Path, target: str) -> No
     with pytest.raises(expected):
         page(
             reader,
-            "job"
+            "bad"
             if target == "malformed"
             else "f" * 32
             if target == "missing"

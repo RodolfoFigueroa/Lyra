@@ -46,10 +46,6 @@ def result_observation(
         inspection = None
     return JobObservation(
         snapshot=snapshot,
-        result_ref=result.result_ref if isinstance(result, TableJobResult) else None,
-        execution_id=result.execution_id
-        if isinstance(result, TableJobResult)
-        else None,
         inspection=inspection,
         retained_result=Mock(
             metadata=SimpleNamespace(
@@ -79,12 +75,6 @@ def inspection_of(
             snapshot=JobStatusInfo(
                 job_id=result.job_id,
                 status=result.status,
-                execution_id=result.execution_id
-                if isinstance(result, TableJobResult)
-                else None,
-                result_ref=result.result_ref
-                if isinstance(result, TableJobResult)
-                else None,
                 created_at=now,
                 updated_at=now,
                 completed_at=now,

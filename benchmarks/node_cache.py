@@ -72,7 +72,7 @@ class AssemblySuite:
         self.execution = NodeCacheSuite()
         self.execution.setup(graph, "partial")
         result = self.execution.runner.run("root", inputs=self.execution.inputs)
-        self.reference = result.metadata.result_ref
+        self.reference = result.metadata.job_id
 
     def time_read(self, _graph: str) -> None:
         """Open storage and reconstruct all groups from the durable reference."""

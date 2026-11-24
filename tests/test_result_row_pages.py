@@ -145,7 +145,7 @@ def test_oversized_row_retry_and_complete_fallback(
         for _ in range(2):
             with pytest.raises(RowTooLargeError) as caught:
                 builder.build(reference, "rows", cursor=cursor)
-            assert caught.value.result_ref == reference
+            assert caught.value.job_id == reference
             assert caught.value.output_name == "rows"
             assert (
                 caught.value.download_url

@@ -171,8 +171,7 @@ def test_shared_operation_and_finalized_data_are_complete_and_detached() -> None
     # Publication only needs to bind a final result reference to this complete data.
     report = ExecutionReport(
         request=state.request,
-        execution_id=state.execution_id,
-        result_ref="a" * 32,
+        job_id="a" * 32,
         status="succeeded",
         root_use_id=state.root_use_id,
         nodes=list(state.nodes),
@@ -253,5 +252,5 @@ def test_distinct_operations_report_overlapping_mapping_reuse(
     ]
     result.metadata.store_path.touch()
     with ResultStore.open(result.metadata.store_path) as reader:
-        assert reader.read_report(result.metadata.execution_id) == result.report
-        assert reader.read_result(result.metadata.result_ref).report == result.report
+        assert reader.read_report(result.metadata.job_id) == result.report
+        assert reader.read_result(result.metadata.job_id).report == result.report

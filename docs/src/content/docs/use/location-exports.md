@@ -19,11 +19,11 @@ Install the dependencies for your access method:
 
 The `data` extra includes GeoPandas with Parquet attribute persistence and PyArrow. The `runtime` extra includes these dependencies too.
 
-Use `export_geoparquet()` for a named spatial output or `export_location_input_geoparquet()` for a retained location input. Pass the result reference, selected name, and destination path as shown below. Both methods accept `str` or `pathlib.Path` destinations, write GeoParquet, and return `None`. Create the destination’s parent directory first.
+Call `export_geoparquet()` for a named spatial output or `export_location_input_geoparquet()` for a saved input. Both take the job ID, table name, and a local destination (`str` or `pathlib.Path`). Create the parent directory first. On success, each method writes one file and returns `None`.
 
 ### Export from a local store
 
-Pass `result.metadata.store_path` and `result.metadata.result_ref` from your local execution to this function. Choose a spatial output name and a retained input name:
+Use the store path and job ID from `result.metadata`. This function writes one spatial output and one location input to separate files.
 
 ```python title="export_local.py" {8-11}
 from pathlib import Path
@@ -31,11 +31,11 @@ from pathlib import Path
 from lyra.runtime.results import ResultStore
 
 
-def export_local(store_path, result_ref, output_name, input_name):
+def export_local(store_path, job_id, output_name, input_name):
     with ResultStore.open(store_path) as store:
-        store.export_geoparquet(result_ref, output_name, Path("output.parquet"))
+        store.export_geoparquet(job_id, output_name, Path("output.parquet"))
         store.export_location_input_geoparquet(
-            result_ref,
+            job_id,
             input_name,
             "input.parquet",
         )
@@ -45,19 +45,15 @@ def export_local(store_path, result_ref, output_name, input_name):
 
 Supply the deployment address and your agent credential. These methods write files on your computer:
 
-```python title="export_remote.py" {8-13}
-from pathlib import Path
-
+```python title="export_remote.py" {6-9}
 from lyra.api import LyraClient
 
 
-def export_remote(server, agent_api_key, result_ref, output_name, input_name):
+def export_remote(server, agent_api_key, job_id, output_name, input_name):
     with LyraClient(server, agent_api_key=agent_api_key) as client:
-        client.results.export_geoparquet(
-            result_ref, output_name, Path("output.parquet")
-        )
+        client.results.export_geoparquet(job_id, output_name, "output.parquet")
         client.results.export_location_input_geoparquet(
-            result_ref, input_name, "input.parquet"
+            job_id, input_name, "input.parquet"
         )
 ```
 
@@ -71,13 +67,13 @@ from pathlib import Path
 from lyra.api import AsyncLyraClient
 
 
-async def export_async(server, agent_api_key, result_ref, output_name, input_name):
+async def export_async(server, agent_api_key, job_id, output_name, input_name):
     async with AsyncLyraClient(server, agent_api_key=agent_api_key) as client:
         await client.results.export_geoparquet(
-            result_ref, output_name, Path("output.parquet")
+            job_id, output_name, Path("output.parquet")
         )
         await client.results.export_location_input_geoparquet(
-            result_ref, input_name, "input.parquet"
+            job_id, input_name, "input.parquet"
         )
 ```
 
@@ -111,7 +107,7 @@ Failure or cancellation removes temporary files and preserves an existing destin
 
 Handle the same lookup errors as other [result retrieval methods](../results/):
 
-- Malformed references raise validation errors
+- A malformed job ID raises a validation error
 - Missing targets raise not-found errors
 - Broken required relationships in stored data raise integrity errors
 
@@ -129,7 +125,7 @@ import geopandas as gpd
 output = gpd.read_parquet("output.parquet")
 metadata = output.attrs["lyra"]
 selected = metadata["description"]
-print(metadata["result_ref"], metadata["execution_id"])
+print(metadata["job_id"])
 print(selected["table_schema"], output.crs)
 
 locations = gpd.read_parquet("input.parquet")
@@ -137,13 +133,13 @@ input_description = locations.attrs["lyra"]["description"]
 print(input_description["kind"], input_description["provider_scope"])
 ```
 
-Use `attrs["lyra"]` to find the selected description and its result and execution references. The [GeoParquet metadata reference](../../reference/location-artifacts/#geoparquet-metadata) explains the fields, provider scopes, and structural IDs.
+Use `attrs["lyra"]` to find the selected description and its job ID. The [GeoParquet metadata reference](../../reference/location-artifacts/#geoparquet-metadata) explains the fields, provider scopes, and structural IDs.
 
 GeoParquet preserves declared columns and CRS, including for empty tables. Lyra writes with `index=False`; don’t use a reconstructed pandas index as record identity.
 
-## Follow references to reports
+## Read the report for an exported table
 
-Supply the associated store path to retrieve the description and report identified by the file’s metadata:
+Read the job ID from the file’s metadata. Pass it to the original store to retrieve the full description and execution report.
 
 ```python title="follow_export.py" {6-7}
 from lyra.runtime.results import ResultStore
@@ -151,15 +147,15 @@ from lyra.runtime.results import ResultStore
 
 def follow_export(store_path, metadata):
     with ResultStore.open(store_path) as store:
-        description = store.describe(metadata["result_ref"])
-        report = store.read_report(metadata["execution_id"])
+        description = store.describe(metadata["job_id"])
+        report = store.read_report(metadata["job_id"])
     return description, report
 ```
 
 For remote access, connect to the associated deployment and call these methods:
 
-- `client.results.describe(metadata["result_ref"])` for the complete description
-- `client.reports.get(metadata["execution_id"])` for the execution report
+- `client.results.describe(metadata["job_id"])` for the complete description
+- `client.reports.get(metadata["job_id"])` for the execution report
 
 Await both calls with the async client. You can retrieve reports after transient jobs expire, while the retained store remains available and compatible.
 

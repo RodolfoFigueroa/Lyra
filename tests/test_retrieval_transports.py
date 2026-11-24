@@ -7,12 +7,10 @@ import httpx
 import pytest
 from jsonschema import validate
 from mcp.types import CallToolResult
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, ValidationError
 
 from lyra.contracts.errors import (
-    InvalidExecutionIDError,
     InvalidPaginationError,
-    InvalidResultReferenceError,
     LocationInputUnavailableError,
     ReportIntegrityError,
     ReportNotFoundError,
@@ -47,7 +45,6 @@ _REFERENCE = "a" * 32
 _EXECUTION = "b" * 32
 _ERRORS = [
     LocationInputUnavailableError(_REFERENCE, "reference_blocks"),
-    InvalidResultReferenceError("malformed", input_name="blocks"),
     ResultNotFoundError(_REFERENCE, input_name="blocks"),
     ResultIntegrityError(_REFERENCE, input_name="blocks"),
     InvalidPaginationError(_REFERENCE, None, "cursor", input_name="blocks"),
@@ -58,9 +55,6 @@ _ERRORS = [
     RowTooLargeError(_REFERENCE, "snow", "https://example.test/api/table/download"),
     InvalidPaginationError(_REFERENCE, "snow", "cursor"),
     InvalidPaginationError(_REFERENCE, "snow", "limit"),
-    InvalidResultReferenceError("malformed"),
-    InvalidResultReferenceError(None, "a"),
-    InvalidExecutionIDError(123),
     ResultNotFoundError(_REFERENCE),
     ResultNotFoundError(_REFERENCE, '雪/"?'),
     ResultIntegrityError(_REFERENCE),
@@ -76,8 +70,6 @@ def test_error_payload_round_trip(error: ResultAccessError) -> None:
     http_response = retrieval_error_response(error)
     assert http_response.status_code == error_status(payload)
     expected_statuses: dict[type[ResultAccessError], int] = {
-        InvalidResultReferenceError: 422,
-        InvalidExecutionIDError: 422,
         InvalidPaginationError: 422,
         RowTooLargeError: 422,
         ResultNotFoundError: 404,
@@ -107,9 +99,9 @@ def test_error_payload_round_trip(error: ResultAccessError) -> None:
         ({"code": "result_not_found", "message": "absent"}, 404),
         ({"code": "unknown", "message": "ResultNotFoundError"}, 404),
         ({"message": "ResultNotFoundError"}, 404),
-        ({"code": "result_not_found", "message": "absent", "result_ref": "x"}, 404),
-        ({"code": "report_not_found", "message": "absent", "execution_id": "x"}, 401),
-        ({"code": "report_not_found", "message": 2, "execution_id": "x"}, 404),
+        ({"code": "result_not_found", "message": "absent", "job_id": "x"}, 404),
+        ({"code": "report_not_found", "message": "absent", "job_id": "x"}, 401),
+        ({"code": "report_not_found", "message": 2, "job_id": "x"}, 404),
         (None, 500),
     ],
 )
@@ -118,7 +110,7 @@ def test_unrecognized_errors_are_not_guessed(payload: object, status: int) -> No
 
 
 @pytest.mark.parametrize(
-    "field", ["code", "message", "result_ref", "output_name", "parameter"]
+    "field", ["code", "message", "job_id", "output_name", "parameter"]
 )
 def test_pagination_error_requires_every_field(field: str) -> None:
     payload = error_payload(
@@ -156,10 +148,9 @@ def test_paths_keep_resource_kinds_and_encoded_segments() -> None:
     assert absolute_api_url("https://example.test/public/api/", f"/{result}") == (
         f"https://example.test/public/api/{result}"
     )
-    with pytest.raises(InvalidResultReferenceError) as captured:
+    with pytest.raises(ValidationError):
         table_download_path("bad", "snow")
-    assert captured.value.output_name == "snow"
-    with pytest.raises(InvalidExecutionIDError):
+    with pytest.raises(ValidationError):
         report_download_path("bad")
 
 
@@ -352,7 +343,7 @@ def test_sdk_domain_errors_preserve_context_and_validation_is_distinct(
 
 
 @pytest.mark.parametrize(
-    "field", ["code", "message", "result_ref", "output_name", "download_url"]
+    "field", ["code", "message", "job_id", "output_name", "download_url"]
 )
 def test_oversized_error_requires_every_field(field: str) -> None:
     payload = error_payload(

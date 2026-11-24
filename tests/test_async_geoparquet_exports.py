@@ -80,8 +80,7 @@ def test_remote_export(
                 httpx.Response(
                     200,
                     json=ResultDescriptionPreview(
-                        result_ref=reference,
-                        execution_id=description.execution_id,
+                        job_id=reference,
                         download_url=f"https://example.test/api/results/{reference}/description/download",
                     ).model_dump(mode="json"),
                 ),
@@ -221,8 +220,7 @@ def test_cancelled_retrieval_closes_response(
                 return httpx.Response(
                     200,
                     json=ResultDescriptionPreview(
-                        result_ref="a" * 32,
-                        execution_id="b" * 32,
+                        job_id="a" * 32,
                         download_url="https://example.test/api/description/download",
                     ).model_dump(mode="json"),
                 )

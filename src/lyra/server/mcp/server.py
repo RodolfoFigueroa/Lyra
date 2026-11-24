@@ -164,8 +164,8 @@ SERVER_INSTRUCTIONS = (
     "IDs and unavailable pinned revisions fail accepted jobs. Empty conversions "
     "remain valid selections. Inspecting failed job state succeeds as a tool call. "
     "Metric runs "
-    "return plain job_id identifiers. Pass the exact nonempty string to job result "
-    "tools. Lyra preserves whitespace. Read inspection from structuredContent.result "
+    "return a job_id of 32 lowercase hexadecimal characters. Pass it to job result "
+    "tools. Read inspection from structuredContent.result "
     "and submission and download fields directly from structuredContent. "
     "When a job is queued or running, "
     "call lyra_get_job_result every two seconds until terminal, then use "
@@ -181,17 +181,17 @@ SERVER_INSTRUCTIONS = (
     "jobs return result_not_ready; downloads of failed jobs return "
     "result_not_downloadable. Invalid arguments produce validation errors "
     "in text content with isError true. "
-    "Use lyra_describe_result with the durable result_ref for retained metadata "
+    "Use lyra_describe_result with the durable job_id for retained metadata "
     "independently of job expiry. Read structuredContent.result.kind: complete "
     "contains the whole description; preview omits it and supplies an authenticated "
     "download_url for complete JSON. Descriptions never load tables or report bodies. "
-    "Use lyra_inspect_report with the durable execution_id for a complete report "
+    "Use lyra_inspect_report with the durable job_id for a complete report "
     "or fixed preview under structuredContent.result. Preview download_url links "
     "provide the complete authenticated report JSON. Report reads never load tables. "
-    "Use lyra_download_table with result_ref and output_name for an authenticated "
+    "Use lyra_download_table with job_id and output_name for an authenticated "
     "Arrow IPC stream download_url. Read the link from structuredContent; creating "
     "the link validates the retained output without materializing its rows. "
-    "Use lyra_get_location_input_rows with result_ref and input_name for bounded "
+    "Use lyra_get_location_input_rows with job_id and input_name for bounded "
     "retained input pages, and lyra_download_location_input for an authenticated "
     "Arrow link. Descriptions include every location input and its availability. "
     "Unavailable inputs return location_input_unavailable; reads never acquire data. "
@@ -421,7 +421,7 @@ def _register_retained_tools(
 
     @server.tool(annotations=read_only)
     async def lyra_get_result_rows(
-        result_ref: Annotated[str, GetResultRowsInput.model_fields["result_ref"]],
+        job_id: JobId,
         output_name: Annotated[str, GetResultRowsInput.model_fields["output_name"]],
         limit: Annotated[int, GetResultRowsInput.model_fields["limit"]] = 100,
         cursor: Annotated[str | None, GetResultRowsInput.model_fields["cursor"]] = None,
@@ -435,10 +435,10 @@ def _register_retained_tools(
         Returns:
             Rows and next_cursor directly in structuredContent.
         """
-        del result_ref, output_name, limit, cursor
+        del job_id, output_name, limit, cursor
         arguments = _arguments(GetResultRowsInput)
         return await backend.rows(
-            arguments.result_ref,
+            arguments.job_id,
             arguments.output_name,
             arguments.limit,
             arguments.cursor,
@@ -449,7 +449,7 @@ def _register_retained_tools(
 
     @server.tool(annotations=read_only)
     async def lyra_download_table(
-        result_ref: Annotated[str, DownloadTableInput.model_fields["result_ref"]],
+        job_id: JobId,
         output_name: Annotated[str, DownloadTableInput.model_fields["output_name"]],
     ) -> TableDownload:
         """Get a download URL for one retained output.
@@ -459,17 +459,17 @@ def _register_retained_tools(
         stream. Read the stream with PyArrow or GeoPandas.
 
         Returns:
-            Validated result_ref, output_name, and absolute download_url.
+            Validated job_id, output_name, and absolute download_url.
         """
-        del result_ref, output_name
+        del job_id, output_name
         arguments = _arguments(DownloadTableInput)
-        await backend.validate_table(arguments.result_ref, arguments.output_name)
+        await backend.validate_table(arguments.job_id, arguments.output_name)
         link = TableDownload(
-            result_ref=arguments.result_ref,
+            job_id=arguments.job_id,
             output_name=arguments.output_name,
             download_url=absolute_api_url(
                 public_api_base_url,
-                table_download_path(arguments.result_ref, arguments.output_name),
+                table_download_path(arguments.job_id, arguments.output_name),
             ),
         )
         server.retrieval_budget("lyra_download_table").require_fits(link)
@@ -477,9 +477,7 @@ def _register_retained_tools(
 
     @server.tool(annotations=read_only)
     async def lyra_get_location_input_rows(
-        result_ref: Annotated[
-            str, GetLocationInputRowsInput.model_fields["result_ref"]
-        ],
+        job_id: JobId,
         input_name: Annotated[
             str, GetLocationInputRowsInput.model_fields["input_name"]
         ],
@@ -493,10 +491,10 @@ def _register_retained_tools(
         Returns:
             Complete rows and next_cursor directly in structuredContent.
         """
-        del result_ref, input_name, limit, cursor
+        del job_id, input_name, limit, cursor
         arguments = _arguments(GetLocationInputRowsInput)
         return await backend.location_input_rows(
-            arguments.result_ref,
+            arguments.job_id,
             arguments.input_name,
             arguments.limit,
             arguments.cursor,
@@ -508,9 +506,7 @@ def _register_retained_tools(
 
     @server.tool(annotations=read_only)
     async def lyra_download_location_input(
-        result_ref: Annotated[
-            str, DownloadLocationInputInput.model_fields["result_ref"]
-        ],
+        job_id: JobId,
         input_name: Annotated[
             str, DownloadLocationInputInput.model_fields["input_name"]
         ],
@@ -521,21 +517,17 @@ def _register_retained_tools(
         values before sending the Arrow stream.
 
         Returns:
-            Validated result_ref, input_name, and absolute download_url.
+            Validated job_id, input_name, and absolute download_url.
         """
-        del result_ref, input_name
+        del job_id, input_name
         arguments = _arguments(DownloadLocationInputInput)
-        await backend.validate_location_input(
-            arguments.result_ref, arguments.input_name
-        )
+        await backend.validate_location_input(arguments.job_id, arguments.input_name)
         link = LocationInputDownload(
-            result_ref=arguments.result_ref,
+            job_id=arguments.job_id,
             input_name=arguments.input_name,
             download_url=absolute_api_url(
                 public_api_base_url,
-                location_input_download_path(
-                    arguments.result_ref, arguments.input_name
-                ),
+                location_input_download_path(arguments.job_id, arguments.input_name),
             ),
         )
         server.retrieval_budget("lyra_download_location_input").require_fits(link)
@@ -543,9 +535,9 @@ def _register_retained_tools(
 
     @server.tool(annotations=read_only)
     async def lyra_describe_result(
-        result_ref: Annotated[str, DescribeResultInput.model_fields["result_ref"]],
+        job_id: JobId,
     ) -> ResultDescriptionInspection:
-        """Inspect retained metadata using a durable result_ref, independently of jobs.
+        """Inspect retained metadata using a durable job_id, independently of jobs.
 
         A complete response includes every output and location-input schema,
         plus effective parameters.
@@ -555,9 +547,9 @@ def _register_retained_tools(
         Returns:
             A complete description or fixed preview within the MCP response limit.
         """
-        del result_ref
+        del job_id
         arguments = _arguments(DescribeResultInput)
-        description = await backend.describe_result(arguments.result_ref)
+        description = await backend.describe_result(arguments.job_id)
         return inspect_description(
             description,
             public_api_base_url=public_api_base_url,
@@ -566,7 +558,7 @@ def _register_retained_tools(
 
     @server.tool(annotations=read_only)
     async def lyra_inspect_report(
-        execution_id: Annotated[str, InspectReportInput.model_fields["execution_id"]],
+        job_id: JobId,
     ) -> ExecutionReportInspection:
         """Inspect a retained execution report independently of job expiry.
 
@@ -577,9 +569,9 @@ def _register_retained_tools(
         Returns:
             A complete report or fixed preview within the MCP response limit.
         """
-        del execution_id
+        del job_id
         arguments = _arguments(InspectReportInput)
-        report = await backend.read_report(arguments.execution_id)
+        report = await backend.read_report(arguments.job_id)
         return inspect_report(
             report,
             public_api_base_url=public_api_base_url,

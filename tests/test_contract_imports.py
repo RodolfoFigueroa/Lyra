@@ -212,7 +212,7 @@ from lyra.contracts.observability import LivenessResponse
 
 plan = PreparedExecution.model_validate_json(PAYLOAD)
 assert PreparedExecution.model_validate_json(plan.model_dump_json()) == plan
-job = JobEnvelope(job_id="job", accepted=AcceptedJob(
+job = JobEnvelope(job_id="1" * 32, accepted=AcceptedJob(
     plan=WorkerRequest.from_plan(plan), catalog_fingerprint="catalog",
     plugin=PluginInfo(name="fixture", version="1"), created_at=datetime.now(UTC),
 ))

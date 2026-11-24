@@ -6,7 +6,7 @@ import builtins
 import logging
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Annotated
-from unittest.mock import Mock, create_autospec
+from unittest.mock import create_autospec
 
 import geopandas as gpd
 import pandas as pd
@@ -30,11 +30,11 @@ from lyra.contracts.resources import IOConfig, ResourceConfig
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
-from lyra.sdk.context import RunContext
+from lyra.sdk import RunContext, metric
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.parameters import MetricParameters
-from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.resources import BaseIO, Resource
 from test_support.canonical_execution import canonical_workload
 
@@ -168,12 +168,11 @@ def test_failure_cleanup(failure: str) -> None:
         assert isinstance(error.value.__cause__, ValidationError)
 
 
-def test_spatial_and_custom_context(tmp_path: Path) -> None:
+def test_spatial_output_uses_managed_context(tmp_path: Path) -> None:
     frame = gpd.GeoDataFrame(
         {"value": [1]}, geometry=[Point(1, 2)], crs=3857, index=[7]
     )
-    context = Mock(spec=RunContext, temp_dir=tmp_path)
-    factory = Mock(return_value=context)
+    observed = []
 
     @metric(
         cache="full",
@@ -200,7 +199,8 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     )
     def root(location: gpd.GeoDataFrame, context: RunContext) -> gpd.GeoDataFrame:
         assert len(location) == 1
-        assert context.temp_dir == tmp_path
+        assert context.temp_dir.is_dir()
+        observed.append((context.job_id, context.temp_dir))
         return frame
 
     definition = PluginDefinition(metrics=[root])
@@ -209,15 +209,16 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
             "plugin": definition,
             "geography": PluginDefinition(resources={"locations": Provider}),
         },
-        context_factory=factory,
+        result_store_path=tmp_path / "results.sqlite",
     )
     result = runner.run(
         "root",
         inputs={"location": selection("area").model_dump()},
-    ).tables
-    pd.testing.assert_frame_equal(result["root"], frame.reset_index(drop=True))
-    factory.assert_called_once_with("root")
-    assert tmp_path.exists()
+    )
+    pd.testing.assert_frame_equal(result.tables["root"], frame.reset_index(drop=True))
+    [(job_id, scratch)] = observed
+    assert job_id == result.report.job_id == result.metadata.job_id
+    assert not scratch.exists()
     with pytest.raises(PreparationError, match="Unknown public metric"):
         runner.run("unknown", inputs={})
     contract = runner.catalog.graph.nodes["root"].node.model_copy(deep=True)

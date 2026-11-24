@@ -32,7 +32,7 @@ def test_result_description_contract_without_runtime_dependencies() -> None:
         assertions="""
         from lyra.contracts.results import ResultDescription
         description = ResultDescription.model_validate({
-            "result_ref": "a" * 32, "execution_id": "b" * 32,
+            "job_id": "a" * 32,
             "metric_name": "metric", "parameters": {},
             "outputs": {"data": {
                 "scope": "unpartitioned", "owner_scope": None,
@@ -78,6 +78,7 @@ def test_basic_clients_without_native_dependencies() -> None:
             assert main(["config", "validate", str(config)]) == 0
             target = Path(directory) / "result.json"
             payload = _result_response()
+            job_id = payload["job_id"]
             def replies():
                 FakeSession.responses = [
                     FakeAsyncResponse(payload=payload),
@@ -96,14 +97,14 @@ def test_basic_clients_without_native_dependencies() -> None:
             ):
                 replies()
                 with LyraClient("example.test") as client:
-                    assert client.results.get("job-1").job_id == "job-1"
-                    client.results.download("job-1", target)
+                    assert client.results.get(job_id).job_id == job_id
+                    client.results.download(job_id, target)
                 assert target.read_bytes() == b'{"raw":true}'
                 async def run():
                     replies()
                     async with AsyncLyraClient("example.test") as client:
-                        assert (await client.results.get("job-1")).job_id == "job-1"
-                        await client.results.download("job-1", target)
+                        assert (await client.results.get(job_id)).job_id == job_id
+                        await client.results.download(job_id, target)
                 asyncio.run(run())
                 assert target.read_bytes() == b'{"raw":true}'
         assert "lyra.api.client._tables" not in sys.modules
@@ -124,7 +125,7 @@ def test_describe_clients_without_runtime_or_native_dependencies() -> None:
         from lyra.contracts.results import ResultDescription
 
         description = ResultDescription(
-            result_ref="a" * 32, execution_id="b" * 32,
+            job_id="a" * 32,
             metric_name="metric", parameters={"default": None}, outputs={},
         )
         for preview in (False, True):
@@ -132,8 +133,7 @@ def test_describe_clients_without_runtime_or_native_dependencies() -> None:
                 if request.url.path.endswith("/download"):
                     return httpx.Response(200, json=description.model_dump())
                 payload = {
-                    "kind": "preview", "result_ref": description.result_ref,
-                    "execution_id": description.execution_id,
+                    "kind": "preview", "job_id": description.job_id,
                     "omitted": ["description"],
                     "download_url": "https://example.test/description/download",
                 } if preview else {
@@ -148,11 +148,11 @@ def test_describe_clients_without_runtime_or_native_dependencies() -> None:
                 )),
             ):
                 with LyraClient("example.test") as client:
-                    result = client.results.describe(description.result_ref)
+                    result = client.results.describe(description.job_id)
                 assert result == description
                 async def run():
                     async with AsyncLyraClient("example.test") as client:
-                        result = await client.results.describe(description.result_ref)
+                        result = await client.results.describe(description.job_id)
                     assert result == description
                 asyncio.run(run())
         assert "lyra.api.client._tables" not in sys.modules
@@ -246,7 +246,7 @@ def test_arrow_download_without_native_dependencies() -> None:
             if '/missing/' in request.url.path:
                 return httpx.Response(404, json={'detail': {
                     'code': 'result_not_found', 'message': 'Absent',
-                    'result_ref': 'a' * 32, 'output_name': 'missing',
+                    'job_id': 'a' * 32, 'output_name': 'missing',
                 }})
             return httpx.Response(200, content=body, headers={
                 'Content-Type': 'application/vnd.apache.arrow.stream',

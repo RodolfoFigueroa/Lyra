@@ -7,8 +7,6 @@ from contextlib import closing
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
-from pydantic import TypeAdapter
-
 from lyra.contracts.errors import (
     ReportNotFoundError,
     ResultAccessError,
@@ -16,11 +14,10 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.jobs import (
     FailedJobResult,
-    JobId,
     TableJobResult,
     TerminalJobResult,
 )
-from lyra.contracts.references import validate_execution_id, validate_result_reference
+from lyra.contracts.references import validate_job_id
 from lyra.contracts.reports import (
     CompleteExecutionReport,
     ExecutionReport,
@@ -57,9 +54,6 @@ if TYPE_CHECKING:
     from lyra.server.response_budget import ResponseBudget
 
 
-_JOB_ID = TypeAdapter(JobId)
-
-
 def inspect_description(
     description: ResultDescription,
     *,
@@ -69,11 +63,10 @@ def inspect_description(
     """Return an intact complete description or fixed preview for this transport."""
     complete = CompleteResultDescription(description=description)
     preview = ResultDescriptionPreview(
-        result_ref=description.result_ref,
-        execution_id=description.execution_id,
+        job_id=description.job_id,
         download_url=absolute_api_url(
             public_api_base_url,
-            result_description_download_path(description.result_ref),
+            result_description_download_path(description.job_id),
         ),
     )
     return cast("ResultDescriptionInspection", budget.choose(complete, preview))
@@ -88,11 +81,11 @@ def inspect_report(
     """Return the whole report or a fixed preview within the transport budget."""
     complete = CompleteExecutionReport(report=report)
     preview = ExecutionReportPreview(
-        execution_id=report.execution_id,
+        job_id=report.job_id,
         metric=report.request.metric,
         status=report.status,
         download_url=absolute_api_url(
-            public_api_base_url, report_download_path(report.execution_id)
+            public_api_base_url, report_download_path(report.job_id)
         ),
     )
     return cast("ExecutionReportInspection", budget.choose(complete, preview))
@@ -108,7 +101,7 @@ class ResultService:
 
     def read_rows(
         self,
-        result_ref: str,
+        job_id: str,
         output_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -123,18 +116,18 @@ class ResultService:
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.
         """
-        validate_result_reference(result_ref, output_name)
+        validate_job_id(job_id)
         try:
             with ResultStore.open(self.result_store_path) as store:
                 return RowPageBuilder(
                     store, context.public_api_base_url, context.budget
-                ).build(result_ref, output_name, limit, cursor)
+                ).build(job_id, output_name, limit, cursor)
         except FileNotFoundError as error:
-            raise ResultNotFoundError(result_ref, output_name) from error
+            raise ResultNotFoundError(job_id, output_name) from error
 
     async def rows(
         self,
-        result_ref: str,
+        job_id: str,
         output_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -148,45 +141,45 @@ class ResultService:
         """
         return await asyncio.to_thread(
             self.read_rows,
-            result_ref,
+            job_id,
             output_name,
             limit,
             cursor,
             context=context,
         )
 
-    def validate_table(self, result_ref: str, output_name: str) -> None:
+    def validate_table(self, job_id: str, output_name: str) -> None:
         """Validate the selected output metadata before issuing its link.
 
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.
         """
-        validate_result_reference(result_ref, output_name)
+        validate_job_id(job_id)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                store.validate_table(result_ref, output_name)
+                store.validate_table(job_id, output_name)
         except FileNotFoundError as error:
-            raise ResultNotFoundError(result_ref, output_name) from error
+            raise ResultNotFoundError(job_id, output_name) from error
 
-    def stream_table(self, result_ref: str, output_name: str) -> Generator[bytes]:
+    def stream_table(self, job_id: str, output_name: str) -> Generator[bytes]:
         """Yield generated Arrow bytes, closing the store on every exit.
 
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.
         """
-        validate_result_reference(result_ref, output_name)
+        validate_job_id(job_id)
         try:
             with (
                 ResultStore.open(self.result_store_path) as store,
-                closing(store.stream_table(result_ref, output_name)) as stream,
+                closing(store.stream_table(job_id, output_name)) as stream,
             ):
                 yield from stream
         except FileNotFoundError as error:
-            raise ResultNotFoundError(result_ref, output_name) from error
+            raise ResultNotFoundError(job_id, output_name) from error
 
     def read_location_input_rows(
         self,
-        result_ref: str,
+        job_id: str,
         input_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -201,18 +194,18 @@ class ResultService:
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.
         """
-        validate_result_reference(result_ref, input_name=input_name)
+        validate_job_id(job_id)
         try:
             with ResultStore.open(self.result_store_path) as store:
                 return RowPageBuilder(
                     store, context.public_api_base_url, context.budget
-                ).build_location_input(result_ref, input_name, limit, cursor)
+                ).build_location_input(job_id, input_name, limit, cursor)
         except FileNotFoundError as error:
-            raise ResultNotFoundError(result_ref, input_name=input_name) from error
+            raise ResultNotFoundError(job_id, input_name=input_name) from error
 
     async def location_input_rows(
         self,
-        result_ref: str,
+        job_id: str,
         input_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -226,77 +219,75 @@ class ResultService:
         """
         return await asyncio.to_thread(
             self.read_location_input_rows,
-            result_ref,
+            job_id,
             input_name,
             limit,
             cursor,
             context=context,
         )
 
-    def validate_location_input(self, result_ref: str, input_name: str) -> None:
+    def validate_location_input(self, job_id: str, input_name: str) -> None:
         """Validate input lookup and availability before issuing a download link.
 
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.
         """
-        validate_result_reference(result_ref, input_name=input_name)
+        validate_job_id(job_id)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                store.validate_location_input(result_ref, input_name)
+                store.validate_location_input(job_id, input_name)
         except FileNotFoundError as error:
-            raise ResultNotFoundError(result_ref, input_name=input_name) from error
+            raise ResultNotFoundError(job_id, input_name=input_name) from error
 
-    def stream_location_input(
-        self, result_ref: str, input_name: str
-    ) -> Generator[bytes]:
+    def stream_location_input(self, job_id: str, input_name: str) -> Generator[bytes]:
         """Yield generated input Arrow bytes, closing the store on every exit.
 
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.
         """
-        validate_result_reference(result_ref, input_name=input_name)
+        validate_job_id(job_id)
         try:
             with (
                 ResultStore.open(self.result_store_path) as store,
-                closing(store.stream_location_input(result_ref, input_name)) as stream,
+                closing(store.stream_location_input(job_id, input_name)) as stream,
             ):
                 yield from stream
         except FileNotFoundError as error:
-            raise ResultNotFoundError(result_ref, input_name=input_name) from error
+            raise ResultNotFoundError(job_id, input_name=input_name) from error
 
-    def read_description(self, result_ref: str) -> ResultDescription:
+    def read_description(self, job_id: str) -> ResultDescription:
         """Return complete retained metadata independently of jobs and plugins.
 
         Raises:
             ResultNotFoundError: If the configured store does not exist yet.
         """
-        validate_result_reference(result_ref)
+        validate_job_id(job_id)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                return store.describe_result(result_ref)
+                return store.describe_result(job_id)
         except FileNotFoundError as error:
-            raise ResultNotFoundError(result_ref) from error
+            raise ResultNotFoundError(job_id) from error
 
-    async def describe(self, result_ref: str) -> ResultDescription:
+    async def describe(self, job_id: str) -> ResultDescription:
         """Return metadata without blocking the event loop or loading tables/reports."""
-        return await asyncio.to_thread(self.read_description, result_ref)
+        return await asyncio.to_thread(self.read_description, job_id)
 
-    def read_report(self, execution_id: str) -> ExecutionReport:
+    def read_report(self, job_id: str) -> ExecutionReport:
         """Return a complete retained report independently of jobs and plugins.
 
         Raises:
             ReportNotFoundError: If the configured store does not exist yet.
         """
-        validate_execution_id(execution_id)
+        validate_job_id(job_id)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                return store.read_report(execution_id)
+                return store.read_report(job_id)
         except FileNotFoundError as error:
-            raise ReportNotFoundError(execution_id) from error
+            raise ReportNotFoundError(job_id) from error
 
-    async def report(self, execution_id: str) -> ExecutionReport:
+    async def report(self, job_id: str) -> ExecutionReport:
         """Return a report without blocking the event loop or loading tables."""
-        return await asyncio.to_thread(self.read_report, execution_id)
+        return await asyncio.to_thread(self.read_report, job_id)
 
     def read_observation(self, job_id: str) -> JobObservation | None:
         """Return retained metadata and a bounded inspection of native outputs.
@@ -304,21 +295,21 @@ class ResultService:
         Raises:
             InvalidJobResultError: If required retained data is missing or invalid.
         """
-        job_id = _JOB_ID.validate_python(job_id)
+        job_id = validate_job_id(job_id)
         observation = self.jobs.read_job(job_id)
+        if observation is not None and observation.snapshot.job_id != job_id:
+            message = "Queue identity differs from requested job"
+            raise InvalidJobResultError(message)
         if observation is None or observation.snapshot.status != "succeeded":
             return observation
-        if observation.result_ref is None:
-            message = "Missing retained result reference"
-            raise InvalidJobResultError(message)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                result = store.read_result(observation.result_ref)
+                result = store.read_result(job_id)
             inspection = summarize_outputs(result.tables)
         except (ResultAccessError, OSError, ValueError) as error:
             message = "Invalid retained job result"
             raise InvalidJobResultError(message) from error
-        if observation.execution_id != result.metadata.execution_id:
+        if job_id != result.metadata.job_id:
             message = "Retained execution differs from job result"
             raise InvalidJobResultError(message)
         provenance = observation.provenance
@@ -360,8 +351,6 @@ class ResultService:
         return TableJobResult.model_validate(
             {
                 "job_id": snapshot.job_id,
-                "execution_id": retained.metadata.execution_id,
-                "result_ref": retained.metadata.result_ref,
                 "outputs": serialize_outputs(
                     retained.metadata.metric_name, retained.tables
                 ),

@@ -1,6 +1,6 @@
 {
   "result": {
-    "job_id": "job-1",
+    "job_id": "12345678901234567890123456789012",
     "status": "succeeded",
     "result_kind": "table",
     "completed_at": "2026-09-24T12:00:10Z",
@@ -135,6 +135,6 @@
       }
     },
     "metric": "city_street_maintenance",
-    "download": "/jobs/job-1/result/download"
+    "download": "/jobs/12345678901234567890123456789012/result/download"
   }
 }

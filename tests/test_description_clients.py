@@ -12,7 +12,6 @@ import pytest
 from lyra.api import AsyncLyraClient, LyraClient
 from lyra.api.exceptions import DownloadError
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
     ResultAccessError,
     ResultIntegrityError,
     ResultNotFoundError,
@@ -68,8 +67,7 @@ def _preview() -> httpx.Response:
     return httpx.Response(
         200,
         json=ResultDescriptionPreview(
-            result_ref=_REFERENCE,
-            execution_id="b" * 32,
+            job_id=_REFERENCE,
             download_url=_DOWNLOAD,
         ).model_dump(mode="json"),
     )
@@ -79,7 +77,6 @@ def _preview() -> httpx.Response:
 @pytest.mark.parametrize(
     "error",
     [
-        InvalidResultReferenceError(_REFERENCE),
         ResultNotFoundError(_REFERENCE),
         ResultIntegrityError(_REFERENCE),
     ],
@@ -132,8 +129,7 @@ def test_describe_returns_complete_independent_location_metadata(
     preview: bool,
 ) -> None:
     expected = ResultDescription(
-        result_ref=_REFERENCE,
-        execution_id="b" * 32,
+        job_id=_REFERENCE,
         metric_name="metric",
         parameters={},
         outputs={},

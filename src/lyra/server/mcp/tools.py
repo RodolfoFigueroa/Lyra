@@ -79,17 +79,17 @@ class LyraMCPBackend(Protocol):
         """Read retained state, raising on broken required result relationships."""
         ...
 
-    async def describe_result(self, result_ref: str) -> ResultDescription:
+    async def describe_result(self, job_id: str) -> ResultDescription:
         """Return complete retained metadata without jobs, tables, or reports."""
         ...
 
-    async def read_report(self, execution_id: str) -> ExecutionReport:
+    async def read_report(self, job_id: str) -> ExecutionReport:
         """Return the complete retained report without jobs, tables, or plugins."""
         ...
 
     async def rows(
         self,
-        result_ref: str,
+        job_id: str,
         output_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -99,13 +99,13 @@ class LyraMCPBackend(Protocol):
         """Return a page bounded by the active transport envelope."""
         ...
 
-    async def validate_table(self, result_ref: str, output_name: str) -> None:
+    async def validate_table(self, job_id: str, output_name: str) -> None:
         """Validate a retained output without materializing table values."""
         ...
 
     async def location_input_rows(
         self,
-        result_ref: str,
+        job_id: str,
         input_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -115,7 +115,7 @@ class LyraMCPBackend(Protocol):
         """Return input rows within the active transport envelope budget."""
         ...
 
-    async def validate_location_input(self, result_ref: str, input_name: str) -> None:
+    async def validate_location_input(self, job_id: str, input_name: str) -> None:
         """Validate retained input lookup and availability before issuing a link."""
         ...
 
@@ -152,17 +152,17 @@ class InProcessLyraBackend(LyraMCPBackend):
         return self.runtime().catalog.discovery
 
     @override
-    async def describe_result(self, result_ref: str) -> ResultDescription:
-        return await self.runtime().results.describe(result_ref)
+    async def describe_result(self, job_id: str) -> ResultDescription:
+        return await self.runtime().results.describe(job_id)
 
     @override
-    async def read_report(self, execution_id: str) -> ExecutionReport:
-        return await self.runtime().results.report(execution_id)
+    async def read_report(self, job_id: str) -> ExecutionReport:
+        return await self.runtime().results.report(job_id)
 
     @override
     async def rows(
         self,
-        result_ref: str,
+        job_id: str,
         output_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -170,7 +170,7 @@ class InProcessLyraBackend(LyraMCPBackend):
         context: RowPageContext,
     ) -> ResultRowPage:
         return await self.runtime().results.rows(
-            result_ref,
+            job_id,
             output_name,
             limit,
             cursor,
@@ -178,15 +178,15 @@ class InProcessLyraBackend(LyraMCPBackend):
         )
 
     @override
-    async def validate_table(self, result_ref: str, output_name: str) -> None:
+    async def validate_table(self, job_id: str, output_name: str) -> None:
         await asyncio.to_thread(
-            self.runtime().results.validate_table, result_ref, output_name
+            self.runtime().results.validate_table, job_id, output_name
         )
 
     @override
     async def location_input_rows(
         self,
-        result_ref: str,
+        job_id: str,
         input_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -194,13 +194,13 @@ class InProcessLyraBackend(LyraMCPBackend):
         context: RowPageContext,
     ) -> ResultRowPage:
         return await self.runtime().results.location_input_rows(
-            result_ref, input_name, limit, cursor, context=context
+            job_id, input_name, limit, cursor, context=context
         )
 
     @override
-    async def validate_location_input(self, result_ref: str, input_name: str) -> None:
+    async def validate_location_input(self, job_id: str, input_name: str) -> None:
         await asyncio.to_thread(
-            self.runtime().results.validate_location_input, result_ref, input_name
+            self.runtime().results.validate_location_input, job_id, input_name
         )
 
     @override

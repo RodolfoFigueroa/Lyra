@@ -43,7 +43,6 @@ from lyra.server.routes.job_errors import (
     JOB_LOOKUP_RESPONSES,
     InvalidJobResultHTTPError,
 )
-from lyra.server.routes.job_ids import JobIdRoute
 from lyra.server.runtime import RuntimeDependency
 from lyra.version import APP_VERSION
 
@@ -74,7 +73,6 @@ def require_admin_key(
 
 
 router = APIRouter(
-    route_class=JobIdRoute,
     prefix="/admin",
     tags=["Administration"],
     dependencies=[Depends(require_admin_key)],

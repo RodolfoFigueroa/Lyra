@@ -22,6 +22,7 @@ from lyra.contracts.jobs import (
 )
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.types import JsonValue
+from tests.job_id_helpers import CLIENT_JOB_ID
 
 
 class _FakeSyncResponseOptions(TypedDict):
@@ -126,23 +127,21 @@ def _mock_sync_http(
 
 def _job_response() -> dict[str, Any]:
     return {
-        "job_id": "job-1",
+        "job_id": CLIENT_JOB_ID,
         "metric": "heavy_metric",
         "status": "queued",
         "links": {
-            "self": "/jobs/job-1",
-            "result": "/jobs/job-1/result",
+            "self": f"/jobs/{CLIENT_JOB_ID}",
+            "result": f"/jobs/{CLIENT_JOB_ID}/result",
         },
     }
 
 
 def _status_response(status: str = "running") -> dict[str, Any]:
     return {
-        "job_id": "job-1",
+        "job_id": CLIENT_JOB_ID,
         "metric": "heavy_metric",
         "status": status,
-        "execution_id": "b" * 32 if status == "succeeded" else None,
-        "result_ref": "a" * 32 if status == "succeeded" else None,
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
     }
@@ -152,7 +151,7 @@ def _job_list_response() -> dict[str, Any]:
     return {
         "jobs": [
             {
-                "job_id": "job-1",
+                "job_id": CLIENT_JOB_ID,
                 "metric": "heavy_metric",
                 "status": "running",
                 "created_at": "2026-01-01T00:00:00Z",
@@ -253,7 +252,7 @@ def _workers_response() -> dict[str, Any]:
                 "queues": ["interactive"],
                 "state": "busy",
                 "stale": False,
-                "current_job": "job-1",
+                "current_job": CLIENT_JOB_ID,
                 "heartbeat_age_seconds": 0.25,
             }
         ],
@@ -304,10 +303,8 @@ def _plugin_routing_response() -> dict[str, Any]:
 
 def _result_response() -> dict[str, Any]:
     return {
-        "execution_id": "b" * 32,
-        "result_ref": "a" * 32,
         "kind": "table",
-        "job_id": "job-1",
+        "job_id": CLIENT_JOB_ID,
         "status": "succeeded",
         "outputs": {
             "result": [dict(zip(["value"], row, strict=True)) for row in [[6]]]

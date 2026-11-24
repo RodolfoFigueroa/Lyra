@@ -28,6 +28,7 @@ from lyra.server.agent_auth import require_agent_key
 from lyra.server.results import ResultService
 from lyra.server.routes.jobs import router
 from lyra.server.runtime import get_jobs, get_results
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.provenance_helpers import result_provenance
 from tests.retained_job_helpers import NOW, retain
 
@@ -102,9 +103,7 @@ def result_payload(*, empty: bool, spatial: bool, multiple: bool) -> dict:
     )
     return TableJobResult.model_validate(
         {
-            "job_id": "job",
-            "execution_id": "b" * 32,
-            "result_ref": "a" * 32,
+            "job_id": TEST_JOB_ID,
             "outputs": serialize_outputs("root", tables),
             "output_metadata": declarations,
             "provenance": provenance,
@@ -130,18 +129,17 @@ def test_complete_json_round_trip(
         payload,
         jobs=cast("FastAPI", client.app).state.jobs,
     )
-    response = client.get("/jobs/job/result")
+    response = client.get(f"/jobs/{TEST_JOB_ID}/result")
     assert response.status_code == 200
     assert response.json() == payload
-    download = client.get("/jobs/job/result/download")
+    download = client.get(f"/jobs/{TEST_JOB_ID}/result/download")
     assert download.status_code == 200
     assert download.json() == response.json()
     assert download.headers["content-type"] == "application/json"
     assert "attachment" in download.headers["content-disposition"]
-    descriptor = client.get("/jobs/job/result/inspection").json()
-    snapshot = client.get("/jobs/job").json()
-    for name in ("execution_id", "result_ref"):
-        assert snapshot[name] == descriptor[name] == payload[name]
+    descriptor = client.get(f"/jobs/{TEST_JOB_ID}/result/inspection").json()
+    snapshot = client.get(f"/jobs/{TEST_JOB_ID}").json()
+    assert snapshot["job_id"] == descriptor["job_id"] == payload["job_id"]
     assert (
         descriptor["provenance"]["catalog_fingerprint"]
         == payload["provenance"]["accepted"]["catalog_fingerprint"]
@@ -158,12 +156,12 @@ def test_complete_json_round_trip(
         == "producer_id"
     )
     assert descriptor["lifetime"]["expires_in_seconds"] == 60
-    assert descriptor["download"] == "/jobs/job/result/download"
+    assert descriptor["download"] == f"/jobs/{TEST_JOB_ID}/result/download"
     assert "request-boundary" not in json.dumps(payload["outputs"])
     if not empty:
         assert "parcel-b" in json.dumps(payload["outputs"])
-    assert client.get("/jobs/job").json()["status"] == "succeeded"
-    assert client.get("/jobs/job/result/table.jsonl").status_code == 404
+    assert client.get(f"/jobs/{TEST_JOB_ID}").json()["status"] == "succeeded"
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result/table.jsonl").status_code == 404
     assert "jsonl" not in json.dumps(client.get("/openapi.json").json())
 
 
@@ -178,9 +176,9 @@ def test_unfinished_result(
         jobs=cast("FastAPI", client.app).state.jobs,
         status=status,
     )
-    assert client.get("/jobs/job/result").status_code == 202
-    assert client.get("/jobs/job/result/download").status_code == 202
-    assert client.get("/jobs/job/result/inspection").status_code == 202
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result").status_code == 202
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result/download").status_code == 202
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result/inspection").status_code == 202
     job.latest_result.assert_not_called()
 
 
@@ -193,7 +191,7 @@ def test_failed_result_is_complete_json(
     payload = {
         "kind": "failed",
         "status": "failed",
-        "job_id": "job",
+        "job_id": TEST_JOB_ID,
         "error": {"message": "failed node", "node": "source"},
         "provenance": provenance,
     }
@@ -204,12 +202,12 @@ def test_failed_result_is_complete_json(
         jobs=cast("FastAPI", client.app).state.jobs,
         status=JobStatus.FAILED,
     )
-    assert client.get("/jobs/job/result").json() == payload
-    assert client.get("/jobs/job/result/download").json() == payload
-    assert client.get("/jobs/job/result/inspection").json()["outputs"] == {}
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result").json() == payload
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result/download").json() == payload
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result/inspection").json()["outputs"] == {}
 
 
-@pytest.mark.parametrize("missing", ["job", "expired", "result"])
+@pytest.mark.parametrize("missing", ["absent", "expired", "result"])
 def test_lifetime_and_missing_results(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
@@ -220,12 +218,12 @@ def test_lifetime_and_missing_results(
         jobs=cast("FastAPI", client.app).state.jobs,
         ttl=-2 if missing == "expired" else 60,
     )
-    if missing == "job":
+    if missing == "absent":
         monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=NoSuchJobError))
     if missing == "result":
         job.latest_result.return_value = None
     for suffix in ["", "/result", "/result/download", "/result/inspection"]:
-        assert client.get(f"/jobs/job{suffix}").status_code == (
+        assert client.get(f"/jobs/{TEST_JOB_ID}{suffix}").status_code == (
             500 if missing == "result" else 404
         )
 
@@ -237,7 +235,7 @@ def test_storage_unavailable_never_returns_success(
         job_store.Job, "fetch", Mock(side_effect=RedisConnectionError("unavailable"))
     )
     with pytest.raises(RedisConnectionError):
-        client.get("/jobs/job/result")
+        client.get(f"/jobs/{TEST_JOB_ID}/result")
 
 
 @pytest.mark.parametrize("invalid", ["subset", "string", "file", "geojson"])
@@ -250,7 +248,7 @@ def test_invalid_result_contract_is_rejected(invalid: str) -> None:
     elif invalid == "file":
         payload = {
             "kind": "file",
-            "job_id": "job",
+            "job_id": TEST_JOB_ID,
             "status": "succeeded",
             "file_path": "/private/artifact",
             "media_type": "text/plain",
@@ -268,23 +266,24 @@ def test_status_and_listing_do_not_load_retained_values(
     job = retain(
         cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
-        {"result_ref": "a" * 32, "execution_id": "b" * 32},
+        {
+            "job_id": "1" * 32,
+        },
         jobs=store,
     )
     forbidden = Mock(side_effect=AssertionError("status opened the retained store"))
     monkeypatch.setattr(ResultStore, "open", forbidden)
     job.origin, job.worker_name = "default", "worker"
-    snapshot = store.read_status("job")
+    snapshot = store.read_status(TEST_JOB_ID)
     assert snapshot.status == "succeeded"
-    assert snapshot.result_ref == "a" * 32
-    assert snapshot.execution_id == "b" * 32
-    registry = Mock(get_job_ids=Mock(return_value=["job"]))
+    assert snapshot.job_id == job.id
+    registry = Mock(get_job_ids=Mock(return_value=[TEST_JOB_ID]))
     monkeypatch.setattr(job_store, "FinishedJobRegistry", Mock(return_value=registry))
     assert (
         store.list_job_statuses(queue="default", status="succeeded")[0].status
         == "succeeded"
     )
-    assert store.get_job_detail("job").snapshot.status == "succeeded"
+    assert store.get_job_detail(TEST_JOB_ID).snapshot.status == "succeeded"
     forbidden.assert_not_called()
 
 
@@ -308,16 +307,16 @@ def test_corrupt_success_metadata_is_rejected(
         job.latest_result.return_value.return_value = {
             "kind": "failed",
             "status": "failed",
-            "job_id": "job",
+            "job_id": TEST_JOB_ID,
             "error": {},
         }
     else:
         job.latest_result.return_value.return_value["output_metadata"] = {}
-    assert client.get("/jobs/job").status_code == 500
+    assert client.get(f"/jobs/{TEST_JOB_ID}").status_code == 500
     for suffix in ["", "/download", "/inspection"]:
         job.latest_result.reset_mock()
         store.connection.ttl.reset_mock()
-        response = client.get(f"/jobs/job/result{suffix}")
+        response = client.get(f"/jobs/{TEST_JOB_ID}/result{suffix}")
         assert response.status_code == 500
         assert response.json()["detail"]["retryable"] is False
         assert "secret" not in response.text
@@ -338,9 +337,9 @@ def test_generic_failure_fallback(
         status=JobStatus.FAILED,
     )
     job.meta["failure"] = failure
-    observation = store.read_job("job")
+    observation = store.read_job(TEST_JOB_ID)
     assert observation.snapshot.status == "failed"
-    assert observation.snapshot.job_id == "job"
+    assert observation.snapshot.job_id == TEST_JOB_ID
     assert observation.snapshot.error["type"] == "worker"
     job.latest_result.assert_not_called()
 
@@ -366,10 +365,10 @@ def test_observation_is_sampled_once(
     store.connection.ttl.side_effect = ttl
     if transition == "missing_result":
         with pytest.raises(job_store.InvalidJobResultError):
-            store.read_job("job")
+            store.read_job(TEST_JOB_ID)
         observation = None
     else:
-        observation = store.read_job("job")
+        observation = store.read_job(TEST_JOB_ID)
     cast("Mock", job_store.Job.fetch).assert_called_once()
     job.get_status.assert_called_once_with(refresh=False)
     store.connection.ttl.assert_called_once_with(job.key)
@@ -381,7 +380,7 @@ def test_observation_is_sampled_once(
         assert observation.snapshot.status == (
             "queued" if transition == "completion" else "succeeded"
         )
-        assert observation.result_ref is None
+        assert observation.snapshot.job_id == job.id
 
 
 def test_pending_routes_share_status_and_openapi(
@@ -395,10 +394,10 @@ def test_pending_routes_share_status_and_openapi(
         jobs=store,
         status=JobStatus.STARTED,
     )
-    snapshot = client.get("/jobs/job").json()
+    snapshot = client.get(f"/jobs/{TEST_JOB_ID}").json()
     schema = client.get("/openapi.json").json()
     for suffix in ["", "/download", "/inspection"]:
-        response = client.get(f"/jobs/job/result{suffix}")
+        response = client.get(f"/jobs/{TEST_JOB_ID}/result{suffix}")
         assert response.status_code == 202
         if suffix == "/inspection":
             assert response.json()["status"] == snapshot["status"]
@@ -436,12 +435,12 @@ def test_provenance_uses_the_authoritative_envelope(
     monkeypatch.setattr(job_store.StoredResult, "model_validate", parse)
     if acceptance != "valid":
         with pytest.raises(job_store.InvalidJobResultError):
-            store.read_job("job")
+            store.read_job(TEST_JOB_ID)
         parse.assert_not_called()
         job.latest_result.assert_not_called()
         return
     before = json.dumps(job.args)
-    observation = store.read_job("job")
+    observation = store.read_job(TEST_JOB_ID)
     assert observation.provenance.model_dump(mode="json") == payload["provenance"]
     assert json.dumps(job.args) == before
     assert "provenance" not in job.meta
@@ -463,7 +462,7 @@ def test_failed_admin_details_fetch_diagnostics_once(
     )
     job.origin, job.worker_name = "default", "worker"
     job.latest_result.return_value = SimpleNamespace(exc_string="traceback")
-    assert store.get_job_detail("job").failure_diagnostics == "traceback"
+    assert store.get_job_detail(TEST_JOB_ID).failure_diagnostics == "traceback"
     job.latest_result.assert_called_once_with()
 
 
@@ -481,12 +480,12 @@ def test_preview_bounds_rows_without_mutating_result(
         payload,
         jobs=cast("FastAPI", client.app).state.jobs,
     )
-    response = client.get("/jobs/job/result/inspection")
+    response = client.get(f"/jobs/{TEST_JOB_ID}/result/inspection")
     assert response.status_code == 200
     assert response.json()["outputs"]["parcels"]["truncation"]["omitted_rows"] == 7
     preview = response.json()["outputs"]["parcels"]["preview"]
     assert len(preview["features"] if spatial else preview) == 5
-    assert client.get("/jobs/job/result").json() == payload
+    assert client.get(f"/jobs/{TEST_JOB_ID}/result").json() == payload
 
 
 def test_descriptor_preserves_current_execution_observations(
@@ -512,10 +511,12 @@ def test_descriptor_preserves_current_execution_observations(
         "succeeded": True,
     }
     job.meta["execution"] = execution
-    descriptor = client.get("/jobs/job/result/inspection")
+    descriptor = client.get(f"/jobs/{TEST_JOB_ID}/result/inspection")
     assert descriptor.status_code == 200
     assert "execution" not in descriptor.json()["provenance"]
     assert (
-        client.get("/jobs/job/result/download").json()["provenance"]["execution"]
+        client.get(f"/jobs/{TEST_JOB_ID}/result/download").json()["provenance"][
+            "execution"
+        ]
         == execution
     )

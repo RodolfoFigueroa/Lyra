@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from lyra.contracts.references import validate_execution_id
+from lyra.contracts.references import validate_job_id
 from lyra.runtime.execution import GraphExecutor, RunState
 from lyra.runtime.planning.bindings import bind_execution
 from lyra.runtime.planning.catalog import compile_live_catalog
@@ -17,7 +17,7 @@ from tests.dependency_route_helpers import definitions, request
 
 def test_shared_operations_and_distinct_parameter_uses() -> None:
     _, _, root = bound(["a", "b"])
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.index(root)
     first, second = root.dependencies.values()
     assert report.root_use_id == report.use_id(root)
@@ -37,7 +37,7 @@ def test_shared_operations_and_distinct_parameter_uses() -> None:
 
 def test_replacements_and_partial_demands_keep_original_attribution() -> None:
     _, _, root = bound(["a", "b"])
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.index(root)
     producer = root.dependencies["first"]
     symbolic = producer.locations["places"]
@@ -56,7 +56,7 @@ def test_routes_index_only_selected_operations_without_acquisition() -> None:
     catalog = compile_live_catalog(definitions(binding="matching"))
     plan = prepare_execution(catalog, request())
     root = bind_execution(catalog, plan)
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.index(root)
     operations = {use.node for use in report.uses.values() if use.kind == "operation"}
     assert operations == {"first", "finish", "reference_first"}
@@ -79,7 +79,7 @@ def test_empty_attempt_indexes_bypassed_dependencies_and_releases_bindings() -> 
     state.bound_root = executor.validate_plan(plan)
     state.report.index(state.bound_root)
     report = state.report
-    assert validate_execution_id(report.execution_id) == report.execution_id
+    assert validate_job_id(report.job_id) == report.job_id
     assert {use.node for use in report.uses.values()} == {
         "consumer",
         "producer",
@@ -103,7 +103,7 @@ def test_equivalent_metric_bindings_share_one_producer() -> None:
     producer = root.dependencies["first"]
     equivalent = replace(producer, report_token=object(), parameter_use_key="elsewhere")
     root = replace(root, dependencies={"first": producer, "second": equivalent})
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.index(root)
     assert report.use_id(producer) == report.use_id(equivalent)
     assert report.root_use_id is not None
@@ -116,7 +116,7 @@ def test_captured_graph_describes_named_outputs_and_direct_origins(
     ids: list[str],
 ) -> None:
     catalog, plan, root = bound(ids)
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.capture(root, catalog, plan)
     description = report.descriptions[report.use_id(root)]
     assert report.request == plan.request
@@ -162,7 +162,7 @@ def test_routed_request_preserves_source_selections() -> None:
     )
     plan = prepare_execution(catalog, request())
     root = bind_execution(catalog, plan)
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.capture(root, catalog, plan)
     assert report.request == plan.request
     assert report.build_revision == "build-3"

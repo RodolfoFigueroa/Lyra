@@ -10,7 +10,7 @@ from sqlalchemy.sql.dml import Insert
 
 from lyra.contracts.errors import ExecutionPersistenceError, ReportNotFoundError
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES
-from lyra.contracts.references import validate_execution_id
+from lyra.contracts.references import validate_job_id
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.result_descriptions import ResultDescriptions
@@ -59,7 +59,7 @@ def test_paths_are_captured_lazily(
     monkeypatch.chdir(other)
     result = runner.run("root")
     assert result.metadata.store_path == expected
-    assert result.metadata.result_ref
+    assert result.metadata.job_id
     assert expected.parent.is_dir()
     assert not (other / ".lyra").exists()
     database.engine.dispose.assert_called_once()
@@ -77,8 +77,7 @@ def test_consecutive_runs_retain_distinct_detached_results(
     )
     run = runner.run_development if private else runner.run
     first = run("root")
-    assert first.report.execution_id == first.metadata.execution_id
-    assert first.report.result_ref == first.metadata.result_ref
+    assert first.report.job_id == first.metadata.job_id
     assert first.report.request.parameters == first.metadata.parameters
     root = next(
         node for node in first.report.nodes if node.use_id == first.report.root_use_id
@@ -94,18 +93,18 @@ def test_consecutive_runs_retain_distinct_detached_results(
     items.append(99)
     first.tables["answer"]["value"] = 99
     second = run("root")
-    assert first.metadata.execution_id != second.metadata.execution_id
+    assert first.metadata.job_id != second.metadata.job_id
     assert second.report.request.parameters == {"items": [1]}
-    assert first.metadata.result_ref != second.metadata.result_ref
+    assert first.metadata.job_id != second.metadata.job_id
     assert second.metadata.parameters == {"items": [1]}
     assert second.tables["answer"].value.tolist() == ([] if empty else [1])
     assert len(calls) == (1 if cache == "full" else 2)
     with SQLiteStore(second.metadata.store_path) as store:
         description, saved_report, tables = ResultDescriptions(store).read_complete(
-            first.metadata.result_ref
+            first.metadata.job_id
         )
     assert saved_report.request.parameters == {"items": [1]}
-    assert saved_report.execution_id == first.metadata.execution_id
+    assert saved_report.job_id == first.metadata.job_id
     assert description.parameters == {"items": [1]}
     assert tables["answer"].value.tolist() == ([] if empty else [1])
     assert len(database.rows["final_results"]) == 2
@@ -135,7 +134,7 @@ def test_required_publication_failure_closes_store(
     with pytest.raises(ExecutionPersistenceError) as caught:
         run("root")
     assert caught.value.__cause__ is cause
-    validate_execution_id(caught.value.execution_id)
+    validate_job_id(caught.value.job_id)
     database.engine.dispose.assert_called_once()
     assert not database.rows.get("final_results")
     provenance = runner.inspect()
@@ -162,15 +161,15 @@ def test_disabling_cache_preserves_retained_results(
     assert (
         len(
             {
-                first.metadata.result_ref,
-                second.metadata.result_ref,
-                third.metadata.result_ref,
+                first.metadata.job_id,
+                second.metadata.job_id,
+                third.metadata.job_id,
             }
         )
         == 3
     )
     with SQLiteStore(path) as store:
-        _, retained = ResultDescriptions(store).read(first.metadata.result_ref)
+        _, retained = ResultDescriptions(store).read(first.metadata.job_id)
     assert retained["answer"].value.tolist() == [1]
     assert len(database.rows["final_results"]) == 3
 
@@ -189,7 +188,7 @@ def test_report_access_is_eager(
     monkeypatch.setattr(SQLiteStore, "__init__", forbidden)
     assert result.report is result.report
     assert result.report.model_dump() == retained_report
-    assert result.report.execution_id == result.metadata.execution_id
+    assert result.report.job_id == result.metadata.job_id
     forbidden.assert_not_called()
 
 
@@ -203,7 +202,7 @@ def test_store_construction_failure_has_attempt_identity(
     run = runner.run_development if private else runner.run
     with pytest.raises(ExecutionPersistenceError) as caught:
         run("root")
-    validate_execution_id(caught.value.execution_id)
+    validate_job_id(caught.value.job_id)
     assert caught.value.__cause__ is cause
 
 
@@ -246,7 +245,7 @@ def test_failed_transaction_and_fresh_retry(
         patch.setattr(database, "commit", commit)
         with pytest.raises(ExecutionPersistenceError) as caught:
             run("root")
-    failed_id = caught.value.execution_id
+    failed_id = caught.value.job_id
     assert isinstance(failed_id, str)
     assert caught.value.__cause__ is cause
     assert not database.rows.get("final_results")
@@ -255,7 +254,7 @@ def test_failed_transaction_and_fresh_retry(
     with ResultStore.open(path) as reader:
         with pytest.raises(ReportNotFoundError) as absent:
             reader.read_report(failed_id)
-        assert absent.value.execution_id == failed_id
+        assert absent.value.job_id == failed_id
 
     # A new runner can reuse complete values without any report for their producer.
     retry_runner = LocalRunner.from_definitions(
@@ -263,7 +262,7 @@ def test_failed_transaction_and_fresh_retry(
     )
     retry = retry_runner.run_development if private else retry_runner.run
     result = retry("root")
-    assert result.metadata.execution_id != failed_id
+    assert result.metadata.job_id != failed_id
     assert result.report.status == "succeeded"
     assert result.tables["answer"].value.tolist() == [1]
     assert len(calls) == (2 if boundary == "values" else 1)
@@ -271,10 +270,10 @@ def test_failed_transaction_and_fresh_retry(
         "executed" if boundary == "values" else "reused"
     )
     if attempted_pairs:
-        assert result.metadata.result_ref != attempted_pairs[0]["result_ref"]
+        assert result.metadata.job_id != attempted_pairs[0]["job_id"]
     with ResultStore.open(path) as reader:
-        assert reader.read_report(result.metadata.execution_id) == result.report
-        assert reader.read_result(result.metadata.result_ref).report == result.report
+        assert reader.read_report(result.metadata.job_id) == result.report
+        assert reader.read_result(result.metadata.job_id).report == result.report
 
 
 def test_large_reports_and_many_executions_share_immutable_values(
@@ -289,14 +288,13 @@ def test_large_reports_and_many_executions_share_immutable_values(
     results = [runner.run("root", parameters={"items": items}) for _ in range(12)]
     assert len(calls) == 1
     assert len(database.rows["stored_results"]) == 1
-    assert len({result.metadata.execution_id for result in results}) == len(results)
-    assert len({result.metadata.result_ref for result in results}) == len(results)
+    assert len({result.metadata.job_id for result in results}) == len(results)
     path.touch()
     for result in results:
         assert len(result.report.model_dump_json().encode()) > MAX_INSPECTION_BYTES
         with ResultStore.open(path) as reader:
-            report = reader.read_report(result.metadata.execution_id)
-            restored = reader.read_result(result.metadata.result_ref)
+            report = reader.read_report(result.metadata.job_id)
+            restored = reader.read_result(result.metadata.job_id)
         assert report == result.report == restored.report
         assert report.request.parameters["items"] == items
         assert restored.tables["answer"].value.tolist() == [1]

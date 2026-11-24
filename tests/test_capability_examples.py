@@ -197,10 +197,8 @@ def test_remote_consumer_with_in_process_transport(
                 parameters=request.get("parameters"),
             )
             result.update(
-                execution_id=execution.metadata.execution_id,
-                result_ref=execution.metadata.result_ref,
                 kind="table",
-                job_id="example-job",
+                job_id="44444444444444444444444444444444",
                 status="succeeded",
                 outputs=serialize_outputs("street_rating", execution.tables),
                 output_metadata={
@@ -211,29 +209,25 @@ def test_remote_consumer_with_in_process_transport(
                 },
             )
             body = {
-                "job_id": "example-job",
+                "job_id": "44444444444444444444444444444444",
                 "metric": "street_rating",
                 "status": "queued",
                 "links": {
-                    "self": "/jobs/example-job",
-                    "result": "/jobs/example-job/result",
+                    "self": "/jobs/44444444444444444444444444444444",
+                    "result": "/jobs/44444444444444444444444444444444/result",
                 },
             }
-        elif spec.path == "jobs/example-job":
+        elif spec.path == "jobs/44444444444444444444444444444444":
             status = next(statuses)
             body = {
-                "job_id": "example-job",
+                "job_id": "44444444444444444444444444444444",
                 "metric": "street_rating",
                 "status": status,
-                "execution_id": result["execution_id"]
-                if status == "succeeded"
-                else None,
-                "result_ref": result["result_ref"] if status == "succeeded" else None,
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
             }
         else:
-            assert spec.path == "jobs/example-job/result"
+            assert spec.path == "jobs/44444444444444444444444444444444/result"
             body = result
         return validate_response(
             spec,
@@ -259,5 +253,7 @@ def test_remote_consumer_with_in_process_transport(
         {"id": identifier, "score": 2.0} for identifier in ("s1", "s2", "s3")
     ]
     assert seen[1].params is None
-    assert sum(spec.path == "jobs/example-job" for spec in seen) == 3
+    assert (
+        sum(spec.path == "jobs/44444444444444444444444444444444" for spec in seen) == 3
+    )
     assert seen[-1].authenticated

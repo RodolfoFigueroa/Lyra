@@ -31,6 +31,7 @@ from test_support.location_resolution import Provider, Roads, frame_features, se
 from test_support.runtime_inputs import frame_ids
 from test_support.table_fixtures import value_frame
 from tests.frame_assertions import assert_logical_equal
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.worker_graph_integration_helpers import (
     TABLE,
@@ -584,7 +585,12 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
 def test_worker_retains_invocation_context_without_acquisition_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    native = SimpleNamespace(id="job", worker_name="worker", meta={}, save_meta=Mock())
+    native = SimpleNamespace(
+        id=TEST_JOB_ID,
+        worker_name="worker",
+        meta={},
+        save_meta=Mock(),
+    )
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
     secret = RuntimeError("password=private-token")
     acquisition = LocationAcquisitionError(

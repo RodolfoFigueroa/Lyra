@@ -15,6 +15,7 @@ from pydantic import Field, ValidationError, field_validator
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import JobEnvelope
+from lyra.contracts.references import new_job_id
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
@@ -206,6 +207,8 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
     assert payload["accepted"]["plan"]["request"]["parameters"] == {"value": 7}
     assert payload["accepted"]["plan"]["request"]["inputs"]["lots"]["ids"] == ["b"]
     for warm in (False, True):
+        native.id = new_job_id()
+        payload["job_id"] = native.id
         sentinel.reset_mock()
         result = run_and_read(worker.execute_job, payload, cast("Job", native))
         if warm:
@@ -353,7 +356,7 @@ def test_preflight_failure_clears_previous_observations(queued: Queued) -> None:
     run_and_read(worker.run_metric_task, payload)
     assert native.meta["execution"]["succeeded"]
     with pytest.raises(worker.BoundPlanError):
-        run_and_read(worker.run_metric_task, {**payload, "job_id": "different"})
+        run_and_read(worker.run_metric_task, {**payload, "job_id": "d" * 32})
     assert "execution" not in native.meta
     assert native.args[0] == payload
     assert native.meta["failure"]["error"]["type"] == "bound_plan"

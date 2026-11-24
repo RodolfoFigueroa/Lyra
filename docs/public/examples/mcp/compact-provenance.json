@@ -1,6 +1,6 @@
 {
   "result": {
-    "job_id": "mixed-1",
+    "job_id": "12345678901234567890123456789013",
     "status": "succeeded",
     "result_kind": "table",
     "lifetime": {},
@@ -102,6 +102,6 @@
         }
       }
     },
-    "download": "/jobs/mixed-1/result/download"
+    "download": "/jobs/12345678901234567890123456789013/result/download"
   }
 }

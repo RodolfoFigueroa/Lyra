@@ -58,9 +58,9 @@ The worker resolves IDs and canonical routes, then executes dependencies sequent
 
 Lyra gives handlers independent parameter models and returns independent values through inspection. Changes to these values, including nested containers and models, cannot alter retained execution state.
 
-The worker validates output tables, then saves required final values and a result description in the shared SQLite store. Each execution gets a distinct reference to its result description. RQ retains that reference, and the worker records execution observations.
+The worker saves validated output values in SQLite. It commits the result description and execution report together under the job ID you received at submission. Each submission gets a fresh ID, even when every node reuses cached values.
 
-The API serves tables and provenance by job ID until the job expires. SQLite retains the saved values and descriptions indefinitely.
+Once SQLite commits, you can read the description, report, and named tables by job ID. These reads work even if the worker stops before RQ records success. When the queue record expires, you lose access to job status and job-result downloads. The retained data stays available.
 
 ## Know each component’s responsibility
 
@@ -77,7 +77,7 @@ Use this table to identify which component handles discovery, execution, or resu
 | `lyra.api` | Synchronous and asynchronous HTTP clients and the administrative command-line interface |
 | `lyra.utils` | Date and geometry helpers, plus Earth Engine helpers with the `earth-engine` extra |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
-| Redis | Queues, registries, job metadata, and retained result references |
+| Redis | Queues, registries, job metadata, and completion records |
 | SQLite | Shared immutable values, completion, schemas, and final-result descriptions |
 | PostGIS | Optional plugin-owned spatial data and queries |
 | Model Context Protocol (MCP) adapter | Agent tools using the same submission and result services |

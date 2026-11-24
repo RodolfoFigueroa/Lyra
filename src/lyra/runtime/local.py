@@ -10,11 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Self
-from uuid import uuid4
 
 from lyra.contracts.config import normalize_distribution_name
 from lyra.contracts.errors import ExecutionPersistenceError
 from lyra.contracts.jobs import JobCreateRequest, JobProgress
+from lyra.contracts.references import new_job_id
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.native_inputs import copy_frame
 from lyra.runtime.persistence import persistence_boundary
@@ -70,15 +70,13 @@ class LocalRunner:
     """Run installed or in-memory plugins without application services.
 
     Factories are loaded and the graph is validated once at construction. Each
-    run has fresh execution state. Custom context factories own their context
-    services. Injected I/O resources are initialized and closed by each run.
+    run has fresh execution state. Each run initializes and closes its I/O resources.
     """
 
     def __init__(
         self,
         plugins: Sequence[str],
         *,
-        context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
         resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
         result_store_path: Path | None = None,
@@ -99,7 +97,6 @@ class LocalRunner:
             )
         self._initialize(
             plugins_by_name,
-            context_factory,
             resource_config,
             resource_overrides,
             result_store_path,
@@ -110,7 +107,6 @@ class LocalRunner:
         cls,
         plugins: Mapping[str, PluginDefinition],
         *,
-        context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
         resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
         result_store_path: Path | None = None,
@@ -133,7 +129,6 @@ class LocalRunner:
         cls._initialize(
             runner,
             plugins_by_name,
-            context_factory,
             resource_config,
             resource_overrides,
             result_store_path,
@@ -143,7 +138,6 @@ class LocalRunner:
     def _initialize(
         self,
         plugins: Mapping[str, PluginDefinition],
-        context_factory: ContextFactory | None,
         resource_config: Mapping[str, ResourceConfig] | None,
         resource_overrides: Mapping[str, type[BaseIO[Any]]] | None,
         result_store_path: Path | None,
@@ -160,7 +154,6 @@ class LocalRunner:
         self.catalog = compile_live_catalog(plugins)
         self.providers = self.catalog.providers
         self._graph = self.catalog.graph
-        self._context_factory = context_factory
         self._resource_config = resource_config
         self._resource_overrides = resource_overrides
 
@@ -214,6 +207,7 @@ class LocalRunner:
         *,
         allow_private: bool,
     ) -> RunResult:
+        job_id = new_job_id()
         self._provenance = None
         try:
             request = JobCreateRequest.model_validate(
@@ -231,12 +225,9 @@ class LocalRunner:
             allow_private=allow_private,
             native_interventions=interventions,
         )
-        return self._execute(invocation)
+        return self._execute(invocation, job_id)
 
-    def _execute(self, invocation: PreparedExecution) -> RunResult:
-        if self._context_factory is not None:
-            return self._execute_with_context(invocation, self._context_factory)
-        job_id = str(uuid4())
+    def _execute(self, invocation: PreparedExecution, job_id: str) -> RunResult:
         with TemporaryDirectory(prefix="lyra-local-") as directory:
 
             def context_factory(node: str) -> RunContext:
@@ -250,18 +241,13 @@ class LocalRunner:
                     Path(directory),
                 )
 
-            return self._execute_with_context(invocation, context_factory)
-
-    def _execute_with_context(
-        self,
-        invocation: PreparedExecution,
-        context_factory: ContextFactory,
-    ) -> RunResult:
-        report = ReportCollection()
-        with persistence_boundary(report.execution_id):
-            store = SQLiteStore(self._store_path)
-        with store:
-            return self._execute_in_store(invocation, context_factory, store, report)
+            report = ReportCollection(job_id)
+            with persistence_boundary(job_id):
+                store = SQLiteStore(self._store_path)
+            with store:
+                return self._execute_in_store(
+                    invocation, context_factory, store, report
+                )
 
     def _execute_in_store(
         self,
@@ -287,8 +273,7 @@ class LocalRunner:
                 outcome.metadata.model_dump()
                 | {
                     "store_path": self._store_path,
-                    "result_ref": outcome.result_ref,
-                    "execution_id": report.execution_id,
+                    "job_id": report.job_id,
                 }
             )
             return RunResult(

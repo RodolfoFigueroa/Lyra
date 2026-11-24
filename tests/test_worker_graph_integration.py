@@ -15,6 +15,7 @@ from shapely.geometry import Point
 
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
+from lyra.contracts.references import new_job_id
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
@@ -30,6 +31,7 @@ from test_support.canonical_execution import canonical_workload
 from test_support.location_resolution import Provider, selection
 from test_support.table_fixtures import value_frame
 from tests.config_helpers import load_test_config
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.provider_execution_helpers import provider_execution_definitions
 from tests.queue_helpers import (
     accepted_envelope,
@@ -435,7 +437,7 @@ def test_submission_enqueues_one_native_job_without_retry(
             JobCreateRequest(metric="root", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: "one-job",
+            job_id_factory=lambda: "e" * 32,
         )
     )
     queue_factory.assert_called_once()
@@ -444,7 +446,7 @@ def test_submission_enqueues_one_native_job_without_retry(
     assert queue.enqueue_call.call_args.args == ("lyra.server.worker.run_metric_task",)
     options = queue.enqueue_call.call_args.kwargs
     assert "retry" not in options
-    assert options["job_id"] == "one-job"
+    assert options["job_id"] == "e" * 32
     assert len(options["args"]) == 1
     assert options["args"][0]["accepted"]["plan"]["request"]["metric"] == "root"
     assert options["meta"] == {}
@@ -452,7 +454,7 @@ def test_submission_enqueues_one_native_job_without_retry(
     native.id = options["job_id"]
     native.meta.update(options["meta"])
     result = run_and_read(worker.execute_job, options["args"][0], cast("Job", native))
-    assert result["job_id"] == "one-job"
+    assert result["job_id"] == "e" * 32
     assert result["outputs"] == {"answer": []}
     assert "provenance" not in result
     assert native.meta["execution"]["succeeded"]
@@ -472,7 +474,12 @@ def test_submission_enqueues_one_native_job_without_retry(
 def test_graph_failure_retains_error_category(
     cause: Exception, category: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    native = SimpleNamespace(id="job", worker_name="worker", meta={}, save_meta=Mock())
+    native = SimpleNamespace(
+        id=TEST_JOB_ID,
+        worker_name="worker",
+        meta={},
+        save_meta=Mock(),
+    )
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
     error = GraphExecutionError("source", ("root", "source"), cause)
     error.__cause__ = cause
@@ -574,7 +581,7 @@ def test_worker_jobs_share_persistent_cache(
     ):
         worker.initialize_worker(pool, config=runtime.config)
         native = native_job(monkeypatch, name)
-        native.id = f"cached-job-{number}"
+        native.id = f"{number:032x}"
         result = run_and_read(
             worker.run_metric_task,
             accepted_envelope(job_id=native.id, metric=name, inputs={}).model_dump(
@@ -706,13 +713,13 @@ def test_serialized_worker_plan(
             JobCreateRequest(metric="root", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: "graph-job",
+            job_id_factory=lambda: "33333333333333333333333333333333",
         )
     )
     (envelope,) = enqueue.call_args.args
     payload = envelope.accepted.plan
     assert payload.metric == "root"
-    native = native_job(monkeypatch)
+    native = native_job(monkeypatch, job_id=envelope.job_id)
     native.args = (envelope.model_dump(mode="json"),)
     if fails:
         with pytest.raises(GraphExecutionError):
@@ -722,7 +729,10 @@ def test_serialized_worker_plan(
         assert calls == ["root"]
         return
     first = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
-    second = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
+    native.id = new_job_id()
+    second = run_and_read(
+        worker.run_metric_task, envelope.model_dump(mode="json") | {"job_id": native.id}
+    )
     assert first["outputs"] == second["outputs"] == {"answer": [{"value": 7}]}
     assert calls == ["root"]
     assert envelope.accepted.plan.metric == "root"
@@ -843,10 +853,13 @@ def test_isolated_submission_worker_and_result_round_trip(
     )
     response = asyncio.run(
         job_submission.submit_job(
-            request, catalog=catalog, jobs=jobs, job_id_factory=lambda: "native-job"
+            request,
+            catalog=catalog,
+            jobs=jobs,
+            job_id_factory=lambda: "55555555555555555555555555555555",
         )
     )
-    assert response.job_id == "native-job"
+    assert response.job_id == "55555555555555555555555555555555"
     assert events == []
     envelope = JobEnvelope.model_validate_json(
         jobs.enqueue.call_args.args[0].model_dump_json()
@@ -858,9 +871,9 @@ def test_isolated_submission_worker_and_result_round_trip(
         "_WORKER_RUNTIME",
         worker.WorkerRuntime(catalog, frozenset({"default"}), config),
     )
-    native = Mock(id="native-job", origin="default", meta={})
+    native = Mock(id="55555555555555555555555555555555", origin="default", meta={})
     result = worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
-    outputs = read_retained(str(result["result_ref"])).tables
+    outputs = read_retained(str(result["job_id"])).tables
     assert outputs["result"].total.tolist() == [1]
     assert events == ["setup:target", "resolve:target", "metric", "close:target"]
     native.save_meta.assert_called_once()

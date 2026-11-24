@@ -25,6 +25,7 @@ from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk import Dependency, LocationDependency, PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
 from lyra.server import job_store
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.metric_execution_helpers import schema
 from tests.provider_execution_helpers import provider_execution_definitions
 from tests.sqlite_helpers import Database, database, fail_insert
@@ -252,10 +253,12 @@ def test_expired_job_does_not_expire_values(
     first = run(graph(tmp_path, events, [], "full"))
     jobs = job_store.JobStore(Mock(ttl=Mock(return_value=-2)), JobsConfig())
     expired = Mock(
-        id="job", key="rq:job:job", get_status=Mock(return_value=JobStatus.FINISHED)
+        id=TEST_JOB_ID,
+        key=f"rq:job:{TEST_JOB_ID}",
+        get_status=Mock(return_value=JobStatus.FINISHED),
     )
     monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=expired))
-    assert jobs.read_job("job") is None
+    assert jobs.read_job(TEST_JOB_ID) is None
     events.clear()
     # Cache matching reads only values and their descriptions, never the job.
     monkeypatch.setattr(
@@ -263,7 +266,7 @@ def test_expired_job_does_not_expire_values(
     )
     result = run(graph(tmp_path, events, [], "full"))
     assert events == []
-    assert result.result_ref != first.result_ref
+    assert result.job_id != first.job_id
     assert set(result.outputs["data"].location_id) == {"a", "b"}
 
 

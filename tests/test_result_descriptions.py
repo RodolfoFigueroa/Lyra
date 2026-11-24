@@ -93,7 +93,7 @@ def test_complete_description_without_report_or_values(
     )
     assert set(result.tables) == {"a", "b"}
     assert isinstance(result.report, ExecutionReport)
-    execution_id = database.rows["final_results"][0]["execution_id"]
+    job_id = database.rows["final_results"][0]["job_id"]
     # Descriptions check association and presence, not the full report body.
     database.rows["final_results"][0]["report"] = "{"
     writer.close()
@@ -103,8 +103,8 @@ def test_complete_description_without_report_or_values(
     with ResultStore.open(path) as reader:
         description = reader.describe_result(reference)
         assert isinstance(description, PublicResultDescription)
-        assert description.result_ref == reference
-        assert description.execution_id == execution_id
+        assert description.job_id == reference
+        assert description.job_id == job_id
         assert description.metric_name == retained.metric_name
         assert description.parameters == retained.parameters
         assert description.outputs == expected_outputs
@@ -112,8 +112,7 @@ def test_complete_description_without_report_or_values(
             location_descriptions() if with_inputs else {}
         )
         assert set(description.model_dump()) == {
-            "result_ref",
-            "execution_id",
+            "job_id",
             "metric_name",
             "parameters",
             "outputs",
@@ -326,10 +325,7 @@ def test_publication_projection_is_detached(
     )
     writer = ResultDescriptions(store)
     reference = publish_result(writer, description)
-    report = ExecutionReport.model_validate_json(
-        database.rows["final_results"][0]["report"]
-    )
-    projection = writer.metadata(description, reference, report.execution_id)
+    projection = writer.metadata(description, reference)
     assert not database.in_transaction
     expected = writer.describe(reference)
     assert projection == expected

@@ -83,7 +83,7 @@ Lyra combines the handler’s output with retained partitions to return each com
 | `second` | C | B and C |
 | `third` | Handler skipped | B and C |
 
-The table describes sets, without promising row order or invocation counts. Each run receives a distinct result reference.
+The table shows which records each handler needs. Row order and the number of handler calls can vary.
 
 With `cache="full"` and an initially empty store, the second call computes the complete B/C selection; the third reuses it. With `cache="off"`, each invoked computation receives its complete bound selection.
 
@@ -140,8 +140,8 @@ Recreate runners and restart deployed processes after changing definitions. Proc
 
 Local runs automatically use `.lyra/results.sqlite3`; set `result_store_path` to choose another file. The API and workers use one [shared SQLite path](../../operate/caching/) on one host.
 
-Each successful managed run gets a distinct execution ID and result reference, including development runs and empty or cached results. Several references can select the same stored values without copying rows. Lyra saves required final outputs and publishes their retrieval description with a complete [execution report](../provenance/).
+Each run gets a fresh job ID, even for an empty result or a full cache hit. Different jobs can reuse the same stored rows. Lyra publishes each job’s result description and [execution report](../provenance/) together.
 
-Lyra stores intermediates when caching or ordinary retrieval needs them, without adding storage solely for reporting. Cache matching needs no historical report or producer execution ID.
+Lyra saves intermediate values when it needs them for caching or retrieval. It can find a cached value without reading an earlier job’s report.
 
-Lyra retains everything it writes indefinitely within a [supported store](../../operate/caching/#preserve-stored-results). Job expiry and changes to keys or cache policies don’t delete stored data. Keep the store path with both identifiers to [reopen reports and results](../../use/results/#reopen-a-local-result). Remote methods accept job IDs, whose availability follows the server’s job retention setting.
+Queue expiry ends access to job status and job-based JSON downloads. The [SQLite store](../../operate/caching/#preserve-stored-results) retains published data across queue expiry and cache policy or key changes. Keep the job ID for remote reads. For [local reads](../../use/results/#reopen-a-local-result), also save the store path.

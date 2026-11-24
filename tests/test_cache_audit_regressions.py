@@ -50,7 +50,7 @@ def test_off_mapping_has_no_unneeded_storage(
     for _ in range(2):
         events.clear()
         result = run(ids)
-        assert bool(result.result_ref) == retain
+        assert (result.committed_report is not None) == retain
         assert ("mapping", frozenset(ids)) in events if ids else not events
         assert set(seen[-1].location_id) == ({"t"} if ids else set())
     metric_rows = [
@@ -337,7 +337,7 @@ def test_derived_empty_primary_skips_other_membership(
     assert work == ([{"a"}] if ids else [])
     result.metadata.store_path.touch()
     with ResultStore.open(result.metadata.store_path) as reader:
-        ref = result.metadata.result_ref
+        ref = result.metadata.job_id
         descriptions = reader.describe_result(ref).location_inputs
         assert descriptions["primary"].availability == "available"
         assert descriptions["shared"].availability == "not_materialized"

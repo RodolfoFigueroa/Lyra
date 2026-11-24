@@ -6,9 +6,9 @@ contentPlan: concepts/provenance
 sidebar: { label: "Execution Reports And Provenance" }
 ---
 
-Use an execution report to explain what Lyra computed or reused for your request. Lyra saves a complete `ExecutionReport` for each successful run through a local runner or server worker. For local and development runs, it attaches `result.report` before returning, so reading the report needs no storage lookup. You can also [reopen a saved report](../../use/results/#reopen-a-local-result) by execution ID.
+Use an execution report to see which parts of your request ran, reused cached values, or skipped work. A local or development run returns the complete report in `result.report`. For a server job, [retrieve the report by job ID](../../use/results/#read-an-execution-report).
 
-Each successful execution has its own identity and report, even when it reuses previously stored values. Reports cover all [output scopes](../../plugins/outputs/#declare-location-ownership), including empty results and runs that reuse every result from the cache. Every report has `status="succeeded"` and a required `result_ref` identifying its saved final result.
+Every successful run has its own report, including runs with empty outputs or full cache reuse. The report covers all [output scopes](../../plugins/outputs/#declare-location-ownership). Its `job_id` identifies the saved result, and its `status` is `"succeeded"`.
 
 Lyra must save the required values and publish the result description with the complete report before returning success. For a failed or interrupted attempt, inspect its exception and available diagnostics; Lyra doesn’t retain partial failure reports.
 
@@ -94,7 +94,7 @@ For example, a metric reusing blocks A and B while computing D has outcome `mixe
 
 A handler that runs and returns an empty table is still `executed` when it reused nothing. A use with no requested partitions, invocation, or reuse is `skipped`. Both can belong to a successful empty result.
 
-These outcomes summarize current work without counts or event histories for individual rows or partitions. They don’t reconstruct which historical execution produced cached values. Execution IDs and build revisions don’t change [cache identity](../caching/#reuse-tables-across-executions).
+These outcomes summarize current work without counts or event histories for individual rows or partitions. They don’t reconstruct which historical execution produced cached values. Runs with different job IDs or build revisions can share the same [cache identity](../caching/#reuse-tables-across-executions).
 
 Even when a metric reuses every result or skips a catalog, Lyra still validates each intervention set. Find the set by its `scope` in `report.intervention_validations`, then read its `membership_lookup` value.
 
@@ -161,4 +161,4 @@ These diagnostic labels differ from `ExecutionReport` outcomes. Inspection is `N
 
 Remote results and inspections include job-scoped `provenance` describing the accepted request and available observations. `provenance.execution` can be `null` before execution starts or include partial observations after a failure. Access to these diagnostics depends on [job retention](../lifecycle/#job-access-has-a-retention-period).
 
-Keep `result.report` to inspect a particular successful local execution. To read a report in another process or after job expiry, use [report lookup](../../use/results/#reopen-a-local-result) with the saved execution ID. Returned reports are ordinary Pydantic models: nested edits cannot change saved state, while field access makes no new copies.
+To [reopen a local report](../../use/results/#reopen-a-local-result) in another process, save the store path and job ID. You can edit the returned Pydantic model, including its nested fields. Those edits affect only your copy.

@@ -323,11 +323,7 @@ class LocationResolver:
             or provider.scope.provider_id not in self.retained_providers
         ):
             return
-        with (
-            persistence_boundary(self.report.execution_id)
-            if self.report
-            else nullcontext()
-        ):
+        with persistence_boundary(self.report.job_id) if self.report else nullcontext():
             self.provider_records.publish(provider, frame, references=references)
 
 

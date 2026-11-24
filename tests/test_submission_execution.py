@@ -55,12 +55,9 @@ def test_submission_native_round_trip(
     local = runner.run(name, inputs=inputs, parameters=None)
     development = runner.run_development(name, inputs=inputs, parameters=None)
     assert local.metadata.model_dump(
-        exclude={"result_ref", "store_path", "execution_id"}
-    ) == development.metadata.model_dump(
-        exclude={"result_ref", "store_path", "execution_id"}
-    )
-    assert local.metadata.execution_id != development.metadata.execution_id
-    assert local.metadata.result_ref != development.metadata.result_ref
+        exclude={"job_id", "store_path"}
+    ) == development.metadata.model_dump(exclude={"job_id", "store_path"})
+    assert local.metadata.job_id != development.metadata.job_id
     if name == "receiving":
         assert local.tables["total"].total.tolist() == [3 * len(ids)]
         assert local.metadata.outputs["total"].owner_scope is None
@@ -87,10 +84,14 @@ def test_submission_native_round_trip(
     assert set(runtime.catalog.compiled.graph.nodes) >= {"summary", name}
     assert "summary" not in runtime.catalog.get_loaded_metric_names()
     original = deepcopy(envelope.model_dump(mode="json"))
-    for _ in range(2):
+    for repeat in range(2):
+        if repeat:
+            asyncio.run(submit(runtime, transport, {"metric": name, "inputs": inputs}))
+            envelope = runtime.jobs.enqueue.call_args.args[0]
+            original = envelope.model_dump(mode="json")
         native = native_job(monkeypatch, name)
         native.id = envelope.job_id
-        key = str(worker.run_metric_task(original)["result_ref"])
+        key = str(worker.run_metric_task(original)["job_id"])
         tables = read_retained(key).tables
         assert read_retained(key).metadata.outputs == local.metadata.outputs
         for output, frame in local.tables.items():

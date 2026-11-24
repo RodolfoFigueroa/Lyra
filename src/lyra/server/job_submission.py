@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
-from uuid import uuid4
 
 from redis.exceptions import RedisError
 
@@ -18,6 +17,7 @@ from lyra.contracts.jobs import (
     JobEnvelope,
     JobLinks,
 )
+from lyra.contracts.references import new_job_id
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 
 if TYPE_CHECKING:
@@ -117,7 +117,7 @@ async def submit_job(
         raise MetricPayloadValidationError(
             [{"loc": [], "msg": str(exc), "type": "value_error"}]
         ) from exc
-    factory = job_id_factory or (lambda: uuid4().hex)
+    factory = job_id_factory or new_job_id
     job_id = factory()
     envelope = _build_submission_record(catalog, plan, job_id=job_id)
     try:

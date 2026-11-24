@@ -349,10 +349,8 @@ def test_inline_street_proposal_through_json_tools(city_server: CityServer) -> N
     job = tool("lyra_get_job_result", {"job_id": submitted["job_id"]})["result"]
     assert job["status"] == "succeeded"
     city_server.jobs.clear()  # Expire the queue entry before durable reads.
-    ref = job["result_ref"]
-    report = tool("lyra_inspect_report", {"execution_id": job["execution_id"]})[
-        "result"
-    ]
+    ref = job["job_id"]
+    report = tool("lyra_inspect_report", {"job_id": job["job_id"]})["result"]
     assert report["kind"] == "complete"
     (accepted,) = report["report"]["request"]["interventions"]
     assert {key: accepted[key] for key in proposal} == proposal
@@ -363,14 +361,12 @@ def test_inline_street_proposal_through_json_tools(city_server: CityServer) -> N
     assert scope["intervention"] == {
         key: proposal[key] for key in ("catalog", "id", "revision")
     }
-    description = tool("lyra_describe_result", {"result_ref": ref})["result"][
-        "description"
-    ]
+    description = tool("lyra_describe_result", {"job_id": ref})["result"]["description"]
     assert description["location_inputs"]["streets"]["provider_scope"] == scope
     assert tool(
         "lyra_get_location_input_rows",
         {
-            "result_ref": ref,
+            "job_id": ref,
             "input_name": "streets",
             "limit": 1,
         },
@@ -379,7 +375,7 @@ def test_inline_street_proposal_through_json_tools(city_server: CityServer) -> N
     assert tool(
         "lyra_get_result_rows",
         {
-            "result_ref": ref,
+            "job_id": ref,
             "output_name": "lengths",
             "limit": 1,
         },
@@ -461,10 +457,10 @@ def test_retained_city_table_matches_local_run_beyond_preview(
         )
         job.wait()
         retained = city_server.jobs[job.job_id].latest_result().return_value
-        assert set(retained) == {"result_ref", "execution_id"}
+        assert set(retained) == {"job_id"}
         inspection = client.results.inspect(job.job_id)
         assert isinstance(inspection, TerminalResultOutput)
-        assert inspection.execution_id == retained["execution_id"]
+        assert inspection.job_id == retained["job_id"]
         output = inspection.outputs["maintenance"]
         assert output.preview == expected[:5]
         assert output.truncation.omitted_rows == len(expected) - 5

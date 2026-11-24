@@ -206,11 +206,11 @@ def assert_reopened(
     first.metadata.store_path.touch()
     with ResultStore.open(first.metadata.store_path) as store:
         for original in (first, second):
-            described = store.describe(original.metadata.result_ref)
+            described = store.describe(original.metadata.job_id)
             assert described.model_dump() == original.metadata.model_dump(
                 exclude={"store_path"}
             )
-            restored = store.read_result(original.metadata.result_ref)
+            restored = store.read_result(original.metadata.job_id)
             assert restored.report == original.report
             assert restored.metadata == original.metadata
             for name in original.tables:

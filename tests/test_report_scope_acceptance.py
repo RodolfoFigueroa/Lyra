@@ -142,15 +142,15 @@ def test_concrete_metrics_and_shared_origin_revisions(
 
 
 def assert_retained_outputs(path: Path, retained: list) -> None:
-    assert len({result.report.execution_id for result in retained}) == len(retained)
+    assert len({result.report.job_id for result in retained}) == len(retained)
     with ResultStore(SQLiteStore(path, read_only=True)) as reader:
         for result in retained:
             metadata, tables = result.metadata, result.tables
-            assert reader.describe(metadata.result_ref).outputs == metadata.outputs
-            assert_exports(reader, metadata.result_ref, path.parent)
+            assert reader.describe(metadata.job_id).outputs == metadata.outputs
+            assert_exports(reader, metadata.job_id, path.parent)
             for name, frame in tables.items():
                 pd.testing.assert_frame_equal(
-                    reader.read_table(metadata.result_ref, name),
+                    reader.read_table(metadata.job_id, name),
                     frame.astype(
                         {"location_id": "string", "row_key": "string", "value": "Int64"}
                     ),
@@ -211,7 +211,7 @@ def shared_origin_summary(origin: Origin) -> Callable:
 def assert_summary_exports(path: Path, result: RunResult) -> None:
     assert result.metadata.outputs["map"].owner_scope is None
     with ResultStore(SQLiteStore(path, read_only=True)) as reader:
-        assert_exports(reader, result.metadata.result_ref, path.parent)
+        assert_exports(reader, result.metadata.job_id, path.parent)
 
 
 def assert_no_execution_exports(

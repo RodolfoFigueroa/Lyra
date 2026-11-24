@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.dml import Insert
 
 from lyra.contracts.errors import ExecutionPersistenceError
@@ -12,14 +13,15 @@ from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.reports import ExecutionReport
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_descriptions import ResultDescriptions
+from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import DamagedDataError, SQLiteStore
 from lyra.sdk import PluginDefinition, metric
 from test_support.publication import publication_report, publish_result
 from tests.provider_execution_helpers import RESULT
 from tests.result_description_helpers import publish_values, retain_descriptions
-from tests.sqlite_helpers import Database, database
+from tests.sqlite_helpers import Database, database, schema_database
 
-__all__ = ["database"]
+__all__ = ["database", "schema_database"]
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -58,7 +60,7 @@ def test_managed_atomic_success(
     if fault is not None:
         with pytest.raises(ExecutionPersistenceError) as caught:
             runner.run("total", inputs={})
-        assert caught.value.execution_id is not None
+        assert caught.value.job_id is not None
         assert isinstance(caught.value.__cause__, RuntimeError)
         assert not database.rows.get("final_results")
         assert bool(database.rows.get("stored_results")) == (fault != "value")
@@ -68,31 +70,55 @@ def test_managed_atomic_success(
     second = runner.run("total", inputs={})
     rows = database.rows["final_results"]
     reports = [ExecutionReport.model_validate_json(row["report"]) for row in rows]
-    assert len({report.execution_id for report in reports}) == len(rows)
-    assert len({report.result_ref for report in reports}) == len(rows)
-    assert first.metadata.result_ref != second.metadata.result_ref
+    assert len({report.job_id for report in reports}) == len(rows)
+    assert first.metadata.job_id != second.metadata.job_id
     assert len(database.rows["stored_results"]) == 1
     assert len(calls) == (2 if fault == "value" else 1)
     assert second.report == reports[-1]
     second.report.nodes.clear()
     assert (
-        ResultDescriptions(SQLiteStore(path)).read_report(second.metadata.execution_id)
+        ResultDescriptions(SQLiteStore(path)).read_report(second.metadata.job_id)
         == reports[-1]
     )
     assert reports[-1].nodes[0].outcome == "reused"
     for row, report in zip(rows, reports, strict=True):
-        assert report.execution_id == row["execution_id"]
-        assert report.result_ref == row["result_ref"]
-        description, tables = ResultDescriptions(SQLiteStore(path)).read(
-            row["result_ref"]
-        )
+        assert report.job_id == row["job_id"]
+        description, tables = ResultDescriptions(SQLiteStore(path)).read(row["job_id"])
         assert description.metric_name == report.request.metric
         assert tables["total"].total.tolist() == ([] if empty else [7])
     if fault is not None:
-        assert caught.value.execution_id not in {r.execution_id for r in reports}
+        assert caught.value.job_id not in {r.job_id for r in reports}
 
 
-@pytest.mark.parametrize("damage", ["missing", "execution", "result", "root"])
+def test_first_commit_becomes_visible_during_retained_lookup(
+    schema_database: Database, tmp_path: Path
+) -> None:
+    path = tmp_path / "results.sqlite"
+    with SQLiteStore(path) as store:
+        job_id = publish_result(
+            ResultDescriptions(store), publish_values(store, ("one",))
+        )
+    path.touch()
+    committed = schema_database.rows
+    schema_database.rows = {}
+    execute = schema_database.connection.execute.side_effect
+
+    def read_during_commit(statement: object, parameters: object = None) -> object:
+        try:
+            return execute(statement, parameters)
+        except OperationalError:
+            # The writer commits after this reader observes an empty schema.
+            schema_database.rows = committed
+            raise
+
+    schema_database.connection.execute.side_effect = read_during_commit
+    with ResultStore.open(path) as reader:
+        result = reader.read_result(job_id)
+    assert result.report.job_id == job_id
+    assert result.tables["a"].location_id.tolist() == ["one"]
+
+
+@pytest.mark.parametrize("damage", ["missing", "identity", "root"])
 def test_pair_integrity_on_read(
     database: Database, tmp_path: Path, damage: str
 ) -> None:
@@ -108,7 +134,7 @@ def test_pair_integrity_on_read(
         if damage == "root":
             report["nodes"][0]["parameters"] = {"different": True}
         else:
-            report["execution_id" if damage == "execution" else "result_ref"] = "a" * 32
+            report["job_id"] = "a" * 32
         row["report"] = json.dumps(report)
     with pytest.raises(DamagedDataError):
         writer.read_complete(ref)
@@ -123,9 +149,8 @@ def test_execution_cannot_publish_two_results(
     first = publish_result(writer, description)
     retained = database.rows["final_results"][0]
     report = ExecutionReport.model_validate_json(retained["report"])
-    duplicate = report.model_copy(update={"result_ref": "b" * 32})
     with pytest.raises(ValueError, match="Duplicate"):
-        writer.publish(description, duplicate)
+        writer.publish(description, report)
     assert len(database.rows["final_results"]) == 1
     assert writer.read(first)[0] == description
 

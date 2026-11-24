@@ -17,8 +17,8 @@ def publication_report(
 ) -> ExecutionReport:
     """Build a matching report before testing publication of a description."""
     writer.store.load_registrations()
-    execution_id, result_ref = uuid4().hex, uuid4().hex
-    projection = writer.metadata(description, result_ref, execution_id)
+    job_id = uuid4().hex
+    projection = writer.metadata(description, job_id)
     sources = []
     bindings = {}
     for name, location in projection.location_inputs.items():
@@ -42,8 +42,7 @@ def publication_report(
             source_use_id=use_id, output_name=None, provider_scope=scope
         )
     return ExecutionReport(
-        execution_id=execution_id,
-        result_ref=result_ref,
+        job_id=job_id,
         status="succeeded",
         request=SubmittedRequest(
             metric=description.metric_name, parameters=description.parameters

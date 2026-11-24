@@ -27,7 +27,7 @@ class _PositionCursor(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     version: Literal[1] = 1
-    result_ref: str
+    job_id: str
 
     def encode(self) -> str:
         return base64.urlsafe_b64encode(self.model_dump_json().encode()).decode()
@@ -47,7 +47,7 @@ class _InputCursor(_PositionCursor):
 
 
 def validate_pagination(
-    result_ref: str,
+    job_id: str,
     output_name: str | None,
     limit: int,
     cursor: str | None,
@@ -64,13 +64,13 @@ def validate_pagination(
     """
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise InvalidPaginationError(
-            result_ref, output_name, "limit", input_name=input_name
+            job_id, output_name, "limit", input_name=input_name
         )
     if cursor is None:
         return None
     if not isinstance(cursor, str):
         raise InvalidPaginationError(
-            result_ref, output_name, "cursor", input_name=input_name
+            job_id, output_name, "cursor", input_name=input_name
         )
     cursor_type = _Cursor if input_name is None else _InputCursor
     try:
@@ -79,23 +79,23 @@ def validate_pagination(
         )
     except (ValueError, ValidationError, binascii.Error) as error:
         raise InvalidPaginationError(
-            result_ref, output_name, "cursor", input_name=input_name
+            job_id, output_name, "cursor", input_name=input_name
         ) from error
     name = decoded.output_name if isinstance(decoded, _Cursor) else decoded.input_name
     if (
-        decoded.result_ref != result_ref
+        decoded.job_id != job_id
         or name != (output_name if input_name is None else input_name)
         or decoded.encode() != cursor
     ):
         raise InvalidPaginationError(
-            result_ref, output_name, "cursor", input_name=input_name
+            job_id, output_name, "cursor", input_name=input_name
         )
     return RowAddress(decoded.computation, decoded.key)
 
 
 def validate_position(
     selected: OutputSelection | InputRows,
-    result_ref: str,
+    job_id: str,
     output_name: str | None,
     after: RowAddress | None,
     *,
@@ -111,12 +111,12 @@ def validate_position(
     if isinstance(selected, InputRows):
         if not selected.contains(after):
             raise InvalidPaginationError(
-                result_ref, output_name, "cursor", input_name=input_name
+                job_id, output_name, "cursor", input_name=input_name
             )
         return
     if after.computation >= len(selected.computations):
         raise InvalidPaginationError(
-            result_ref, output_name, "cursor", input_name=input_name
+            job_id, output_name, "cursor", input_name=input_name
         )
     computation = selected.computations[after.computation]
     expected = (
@@ -126,7 +126,7 @@ def validate_position(
         type(value) is not kind for value, kind in zip(after.key, expected, strict=True)
     ):
         raise InvalidPaginationError(
-            result_ref, output_name, "cursor", input_name=input_name
+            job_id, output_name, "cursor", input_name=input_name
         )
     query = (
         computation.select(*computation.keys)
@@ -142,7 +142,7 @@ def validate_position(
     try:
         if result.mappings().one_or_none() is None:
             raise InvalidPaginationError(
-                result_ref, output_name, "cursor", input_name=input_name
+                job_id, output_name, "cursor", input_name=input_name
             )
     finally:
         result.close()
@@ -172,7 +172,7 @@ class CandidatePage:
 
 def candidates(
     selected: OutputSelection | InputRows,
-    result_ref: str,
+    job_id: str,
     output_name: str,
     limit: int,
     after: RowAddress | None,
@@ -198,14 +198,14 @@ def candidates(
             if following is not None:
                 continuation = (
                     _Cursor(
-                        result_ref=result_ref,
+                        job_id=job_id,
                         output_name=output_name,
                         computation=address.computation,
                         key=address.key,
                     )
                     if not isinstance(selected, InputRows)
                     else _InputCursor(
-                        result_ref=result_ref,
+                        job_id=job_id,
                         input_name=output_name,
                         computation=address.computation,
                         key=address.key,

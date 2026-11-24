@@ -43,8 +43,7 @@ Update an origin revision when its external contents change. Change a node ID or
 Local runs automatically save final outputs and complete execution reports in `.lyra/results.sqlite3` before returning success. To [reopen a report or result](../../docs/src/content/docs/use/results.md#reopen-a-local-result), save these fields from `result.metadata`:
 
 - `store_path`: SQLite file path
-- `execution_id`: report identifier
-- `result_ref`: final-result identifier
+- `job_id`: ID for the run, its report, and its tables
 
 ## Exercise the client without services
 
@@ -76,7 +75,7 @@ print(result.tables["total"])
 print(result.tables["count"])
 print(result.metadata.metric_name, result.metadata.parameters)
 print(result.metadata.outputs["total"].scope)
-print(result.metadata.execution_id)
+print(result.metadata.job_id)
 for node in result.report.nodes:
     print(node.use_id, node.node_id, node.outcome)
 ```

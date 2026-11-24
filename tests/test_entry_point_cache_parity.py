@@ -135,7 +135,7 @@ def entry_point(
         result = worker.run_metric_task(envelope.model_dump(mode="json"))
         # Reuse must not need the previous job's execution observations.
         native.meta.clear()
-        return read_retained(str(result["result_ref"]))
+        return read_retained(str(result["job_id"]))
 
     return run
 
@@ -170,7 +170,7 @@ def test_metric_reuse_parity(
             with ResultStore(
                 worker.SQLiteStore(results[-1].metadata.store_path)
             ) as reader:
-                reference = results[-1].metadata.result_ref
+                reference = results[-1].metadata.job_id
                 assert set(
                     reader.read_location_input(reference, "places").location_id
                 ) == set(ids)
@@ -184,7 +184,7 @@ def test_metric_reuse_parity(
         rows = results[-1].tables["rows"]
         assert set(rows.location_id) == set(ids)
         assert set(rows.value) == ({2} if name == "complete" else {3})
-    assert len({result.metadata.result_ref for result in results}) == 3
+    assert len({result.metadata.job_id for result in results}) == 3
     assert_logical_equal(results[1].tables["rows"], results[2].tables["rows"])
 
 
@@ -199,7 +199,7 @@ def test_selector_reuse_parity(
     for index, ids in enumerate((["a", "b"], ["b", "c"], ["c", "b"])):
         events.clear()
         result = run("consumer", inputs={"source": {"provider": "sources", "ids": ids}})
-        references.add(result.metadata.result_ref)
+        references.add(result.metadata.job_id)
         assert result.tables["result"].value.tolist() == [2]
         assert seen[-1] == {(key, f"{key}-2") for key in ids}
         callbacks = [
@@ -236,13 +236,13 @@ def test_development_reuses_local_values_and_private_roots(tmp_path: Path) -> No
     work.clear()
     second = runner.run_development("complete", inputs=inputs)
     assert events == work == []
-    assert first.metadata.result_ref != second.metadata.result_ref
+    assert first.metadata.job_id != second.metadata.job_id
     assert_logical_equal(first.tables["rows"], second.tables["rows"])
     private = runner.run_development("private", inputs=inputs)
     work.clear()
     repeated = runner.run_development("private", inputs=inputs)
     assert work == []
-    assert private.metadata.result_ref != repeated.metadata.result_ref
+    assert private.metadata.job_id != repeated.metadata.job_id
     with pytest.raises(PreparationError, match="private"):
         runner.run("private", inputs=inputs)
 

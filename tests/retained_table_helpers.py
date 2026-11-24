@@ -72,19 +72,11 @@ def retained_service(
         read_job=Mock(
             return_value=JobObservation(
                 snapshot=JobStatusInfo(
-                    job_id="native",
+                    job_id=key,
                     status="succeeded",
                     created_at=now,
                     updated_at=now,
-                    result_ref=key,
-                    execution_id=ResultDescriptions(writer)
-                    .read_complete(key)[1]
-                    .execution_id,
                 ),
-                result_ref=key,
-                execution_id=ResultDescriptions(writer)
-                .read_complete(key)[1]
-                .execution_id,
             )
         )
     )

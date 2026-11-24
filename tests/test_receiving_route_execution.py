@@ -196,14 +196,14 @@ def test_retained_final_route(
     path.touch()
     before = len(trace.events)
     with ResultStore.open(path) as reader:
-        captured = reader.describe_result(result.metadata.result_ref).location_inputs[
+        captured = reader.describe_result(result.metadata.job_id).location_inputs[
             "places"
         ]
         assert captured.provider_scope.description == "Captured target"
         assert captured.source_scope is not None
         assert captured.source_scope.provider_id == "middle"
         assert captured.source_scope.description == "Captured middle"
-        saved = reader.read_location_input(result.metadata.result_ref, "places")
+        saved = reader.read_location_input(result.metadata.job_id, "places")
         assert set(zip(saved.source_location_id, saved.location_id, strict=True)) == {
             ("x", "X"),
             ("y", "Y"),
@@ -211,7 +211,7 @@ def test_retained_final_route(
         }
         destination = tmp_path / "route.parquet"
         reader.export_location_input_geoparquet(
-            result.metadata.result_ref, "places", destination
+            result.metadata.job_id, "places", destination
         )
         exported = gpd.read_parquet(destination)
         pd.testing.assert_frame_equal(exported, saved)

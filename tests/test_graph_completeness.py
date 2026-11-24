@@ -28,6 +28,7 @@ from lyra.server.results import ResultService
 from lyra.server.routes.jobs import router
 from lyra.server.runtime import get_jobs, get_results
 from tests.client_scenarios import Reply, Scenario
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.queue_helpers import run_and_read
 from tests.retained_job_helpers import retain
 from tests.worker_graph_integration_helpers import install, native_job
@@ -163,7 +164,7 @@ def test_worker_graph_to_public_consumers(
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     payload = {}
-    for job_id in ("first-job", "job"):
+    for job_id in ("0" * 32, TEST_JOB_ID):
         native = native_job(monkeypatch)
         native.id = job_id
         asyncio.run(
@@ -202,14 +203,14 @@ def verify_public_consumers(
     app.dependency_overrides[get_jobs] = lambda: store
     app.dependency_overrides[require_agent_key] = lambda: None
     with TestClient(app) as http:
-        response = http.get("/jobs/job/result")
+        response = http.get(f"/jobs/{TEST_JOB_ID}/result")
         assert response.status_code == 200
         assert response.json() == payload
-        assert http.get("/jobs/job/result/download").json() == payload
-        descriptor = http.get("/jobs/job/result/inspection").json()
-    observation = service.read_observation("job")
+        assert http.get(f"/jobs/{TEST_JOB_ID}/result/download").json() == payload
+        descriptor = http.get(f"/jobs/{TEST_JOB_ID}/result/inspection").json()
+    observation = service.read_observation(TEST_JOB_ID)
     assert observation is not None
-    inspection = project_observation("job", observation)
+    inspection = project_observation(TEST_JOB_ID, observation)
     assert isinstance(inspection, TerminalResultOutput)
     assert set(inspection.outputs) == {"parcels", "summary"}
     for name, output in inspection.outputs.items():
@@ -220,16 +221,13 @@ def verify_public_consumers(
             == descriptor["outputs"][name]["metadata"]
         )
         assert output.preview == payload["outputs"][name]
-    for reference in ("job", "lyra://results/job"):
-        scenario.replies = [Reply(payload=response.json())]
-        tables = scenario.resolve(scenario.client.results.tables(reference))
-        assert set(tables) == {"parcels", "summary"}
-        assert isinstance(tables["parcels"], gpd.GeoDataFrame)
-        assert tables["parcels"].crs == "EPSG:6372"
-        assert tables["parcels"].geometry.name == "geometry"
-        for table in tables.values():
-            assert table.index.tolist() == ([] if empty else [0, 1])
-            assert table.producer_id.tolist() == (
-                [] if empty else ["parcel-z", "parcel-a"]
-            )
-            assert "id" not in table.columns
+    scenario.replies = [Reply(payload=response.json())]
+    tables = scenario.resolve(scenario.client.results.tables(payload["job_id"]))
+    assert set(tables) == {"parcels", "summary"}
+    assert isinstance(tables["parcels"], gpd.GeoDataFrame)
+    assert tables["parcels"].crs == "EPSG:6372"
+    assert tables["parcels"].geometry.name == "geometry"
+    for table in tables.values():
+        assert table.index.tolist() == ([] if empty else [0, 1])
+        assert table.producer_id.tolist() == ([] if empty else ["parcel-z", "parcel-a"])
+        assert "id" not in table.columns

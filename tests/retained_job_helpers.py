@@ -12,6 +12,7 @@ from lyra.contracts.jobs import JobRunProvenance, TableJobResult
 from lyra.contracts.reports import ExecutionReport, ReportNode
 from lyra.runtime.results import ResultStore, RunMetadata, RunOutputMetadata, RunResult
 from lyra.server import job_store
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.provenance_helpers import result_provenance
 from tests.result_helpers import observed_tables
 
@@ -43,13 +44,12 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
             pass
         else:
             tables = observed_tables(result)
-            reference = result.result_ref
+            reference = result.job_id
             metric = JobRunProvenance.model_validate(provenance).accepted.plan.metric
             retained = RunResult(
                 tables=tables,
                 report=ExecutionReport(
-                    execution_id=result.execution_id,
-                    result_ref=reference,
+                    job_id=reference,
                     status="succeeded",
                     request={"metric": metric, "inputs": {}, "parameters": {}},
                     root_use_id="root",
@@ -91,8 +91,7 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
                         for name, metadata in result.output_metadata.items()
                     },
                     store_path=store_path,
-                    result_ref=reference,
-                    execution_id=result.execution_id,
+                    job_id=reference,
                 ),
             )
             reader = Mock()
@@ -101,11 +100,18 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
                 __enter__=Mock(return_value=reader), __exit__=Mock(return_value=False)
             )
             monkeypatch.setattr(ResultStore, "open", Mock(return_value=context))
-            stored = {"result_ref": reference, "execution_id": result.execution_id}
+            stored = {
+                "job_id": reference,
+            }
     job = SimpleNamespace(
-        args=({"job_id": "job", "accepted": provenance["accepted"]},),
-        id="job",
-        key="rq:job:job",
+        args=(
+            {
+                "job_id": TEST_JOB_ID,
+                "accepted": provenance["accepted"],
+            },
+        ),
+        id=TEST_JOB_ID,
+        key=f"rq:job:{TEST_JOB_ID}",
         created_at=NOW,
         started_at=NOW,
         ended_at=NOW,

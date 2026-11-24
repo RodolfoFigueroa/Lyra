@@ -8,14 +8,13 @@ from pydantic import ValidationError
 
 from lyra.contracts.errors import (
     InvalidPaginationError,
-    InvalidResultReferenceError,
     LocationInputUnavailableError,
     ResultIntegrityError,
     ResultNotFoundError,
     RowTooLargeError,
 )
 from lyra.contracts.references import (
-    validate_result_reference,
+    validate_job_id,
     validate_retrieval_name,
 )
 from lyra.contracts.results import LocationInputDescription, ResultDescription
@@ -32,8 +31,7 @@ _REFERENCE = "a" * 32
 def test_description_round_trip_keeps_schema_and_scope_roles() -> None:
     inputs = location_descriptions()
     original = ResultDescription(
-        result_ref=_REFERENCE,
-        execution_id="b" * 32,
+        job_id=_REFERENCE,
         metric_name="metric",
         parameters={},
         outputs={},
@@ -90,9 +88,7 @@ def test_lookup_names_are_strict_across_boundaries(name: object) -> None:
     with pytest.raises(ValidationError):
         validate_retrieval_name(name)
     with pytest.raises(ValidationError):
-        DownloadTableInput.model_validate(
-            {"result_ref": _REFERENCE, "output_name": name}
-        )
+        DownloadTableInput.model_validate({"job_id": _REFERENCE, "output_name": name})
     reader = ResultStore(Mock(spec=SQLiteStore))
     with pytest.raises(ValidationError):
         reader.read_table(_REFERENCE, cast("str", name))
@@ -105,8 +101,7 @@ def test_input_inventory_does_not_coerce_names(name: object) -> None:
     with pytest.raises(ValidationError):
         ResultDescription.model_validate(
             {
-                "result_ref": _REFERENCE,
-                "execution_id": "b" * 32,
+                "job_id": _REFERENCE,
                 "metric_name": "metric",
                 "parameters": {},
                 "outputs": {},
@@ -119,17 +114,13 @@ def test_input_inventory_does_not_coerce_names(name: object) -> None:
     "reference", [None, 123, b"a" * 32, "A" * 32, "result_example"]
 )
 def test_invalid_reference_keeps_input_context(reference: object) -> None:
-    with pytest.raises(InvalidResultReferenceError) as caught:
-        validate_result_reference(reference, input_name="blocks")
-    assert caught.value.result_ref == reference
-    assert caught.value.input_name == "blocks"
-    assert caught.value.output_name is None
+    with pytest.raises(ValidationError):
+        validate_job_id(reference)
 
 
 @pytest.mark.parametrize("output_name", [None, "table"])
 def test_existing_lookup_payloads_keep_their_shape(output_name: str | None) -> None:
     for error in (
-        InvalidResultReferenceError(_REFERENCE, output_name),
         ResultNotFoundError(_REFERENCE, output_name),
         ResultIntegrityError(_REFERENCE, output_name),
         InvalidPaginationError(_REFERENCE, output_name, "cursor"),
@@ -141,12 +132,12 @@ def test_existing_lookup_payloads_keep_their_shape(output_name: str | None) -> N
         assert "input_name" not in payload
 
 
-@pytest.mark.parametrize("field", ["code", "message", "result_ref", "input_name"])
+@pytest.mark.parametrize("field", ["code", "message", "job_id", "input_name"])
 def test_unavailable_error_requires_its_fields(field: str) -> None:
     payload = error_payload(
         LocationInputUnavailableError(_REFERENCE, "blocks")
     ).model_dump()
-    assert set(payload) == {"code", "message", "result_ref", "input_name"}
+    assert set(payload) == {"code", "message", "job_id", "input_name"}
     del payload[field]
     assert decode_error(payload, status=409) is None
 
@@ -170,8 +161,6 @@ def test_unavailable_error_requires_matching_status() -> None:
 def test_describe_result_whole_lookup_context() -> None:
     store = Mock(spec=SQLiteStore)
     reader = ResultStore(store)
-    with pytest.raises(InvalidResultReferenceError) as caught:
+    with pytest.raises(ValidationError):
         reader.describe_result("bad")
-    assert caught.value.output_name is None
-    assert caught.value.input_name is None
     assert not store.mock_calls

@@ -12,6 +12,7 @@ import httpx
 import pandas as pd
 import pyarrow as pa
 import pytest
+from pydantic import ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
@@ -19,7 +20,6 @@ from lyra.api import AsyncLyraClient
 from lyra.api.exceptions import DownloadError
 from lyra.contracts.errors import (
     InvalidPaginationError,
-    InvalidResultReferenceError,
     ResultAccessError,
     ResultIntegrityError,
     ResultNotFoundError,
@@ -186,7 +186,6 @@ def test_public_download_preserves_bytes_and_reads_normally(
         RowTooLargeError(_ID, "rows", "https://example.test/api/table/download"),
         InvalidPaginationError(_ID, "rows", "cursor"),
         InvalidPaginationError(_ID, "rows", "limit"),
-        InvalidResultReferenceError(_ID, "rows"),
         ResultNotFoundError(_ID, "rows"),
         ResultIntegrityError(_ID, "rows"),
     ],
@@ -281,14 +280,12 @@ def test_encoded_output_path_and_invalid_reference(
 ) -> None:
     path = tmp_path / "out"
     output = "雪 /%?#"
-    with pytest.raises(InvalidResultReferenceError) as caught:
+    with pytest.raises(ValidationError):
         client.resolve(
             client.client.results.table("bad", output)
             if method == "table"
             else client.client.results.download_table("bad", output, path)
         )
-    assert caught.value.result_ref == "bad"
-    assert caught.value.output_name == output
     assert not client.requests
     assert not path.exists()
     client.responses.append(httpx.Response(404, text="missing"))

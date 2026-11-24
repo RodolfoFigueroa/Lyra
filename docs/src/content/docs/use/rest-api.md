@@ -115,7 +115,7 @@ The API rejects input schema violations with `422`. Python validation in a worke
 
 During execution, Lyra resolves your IDs to location data using the revisions recorded at submission. Unknown IDs or unavailable revisions cause the job to fail. Inspecting a failed job still returns HTTP `200`; check the response’s `status` field for the execution outcome.
 
-Use a nonempty string for each job ID, and percent-encode it in request paths. Lyra preserves the ID exactly, including whitespace. A missing ID path segment can return `404` before validation.
+Pass the 32 lowercase hexadecimal characters you received at submission. On a matching route, an authorized request with a malformed ID returns HTTP 422. The validation error identifies `["path", "job_id"]`. A valid ID with no matching resource returns HTTP 404.
 
 All job lookup endpoints return `404` when the job is missing or expired. Lyra returns `500` when data required by a lookup is missing or invalid. The error includes `detail.code: invalid_job_result` and `detail.retryable: false`, without exposing stored data. You can still check status and administrator details when successful result files are unavailable.
 
@@ -127,15 +127,15 @@ Result endpoints return `202` while the job is queued or running. Choose a route
 | `GET /jobs/{job_id}/result` | Read the complete terminal JSON result |
 | `GET /jobs/{job_id}/result/download` | Download the complete terminal JSON result |
 
-The `/result` and `/result/download` routes return the same complete JSON object, including failure details. Successful results include every declared output of the requested metric; intermediate dependency tables stay internal. Download what you need before access by job ID expires.
+Both `/result` and `/result/download` return the complete job result as JSON. A successful job includes every named output of the requested metric. A failed job includes failure details. Download the job result before its queue record expires.
 
-Read `execution_id` from a successful result or inspection to identify its saved report. Use `GET /executions/{execution_id}/report/download` for the complete authenticated report JSON. Keep `result_ref` for retained descriptions and named tables after the job expires.
+To read the complete report, send an authenticated `GET /executions/{job_id}/report/download` request. This route accepts the submission’s job ID even after queue expiry.
 
 ## Download a retained table
 
-Download one saved output using its `result_ref` and `output_name`, even after the job expires. Choose the output name from the [result description](../results/#read-a-retained-description).
+Download one saved output using its `job_id` and `output_name`, even after the job expires. Choose the output name from the [result description](../results/#read-a-retained-description).
 
-Send `GET /results/{result_ref}/tables/{output_name}/download` with your agent Bearer credential, percent-encoding each path segment. Lyra returns `200` with content type `application/vnd.apache.arrow.stream` when the lookup succeeds.
+Send `GET /results/{job_id}/tables/{output_name}/download` with your agent Bearer credential, percent-encoding each path segment. Lyra returns `200` with content type `application/vnd.apache.arrow.stream` when the lookup succeeds.
 
 Save the response bytes unchanged as `output.arrow`. The download uses Arrow’s interprocess communication (IPC) stream format regardless of the filename. Open the saved stream with PyArrow:
 
@@ -172,17 +172,16 @@ Lyra generates the download from saved rows without rerunning the metric. If the
 
 | HTTP status | Code | Meaning |
 | --- | --- | --- |
-| `422` | `invalid_result_reference` | The reference is malformed |
 | `404` | `result_not_found` | The result or output name doesn’t exist |
 | `500` | `result_integrity_error` | Required stored data is missing or damaged |
 
-Each error includes `result_ref` and the requested `output_name`. If generation fails after streaming starts, the download stops; discard the partial file.
+Each lookup error includes `job_id` and the requested `output_name`. If the download stops midstream, discard the partial file.
 
 Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.
 
 ## Read retained location inputs
 
-Use your saved `result_ref` to retrieve the location inputs associated with a completed result. Choose `input_name` from `location_inputs` in the [result description](../results/#read-a-retained-description). Only the requested metric’s declared location inputs appear there; ordinary metric dependencies don’t.
+Use the job ID to read the location inputs saved for the requested metric. Choose an `input_name` from `location_inputs` in the [result description](../results/#read-a-retained-description).
 
 Inspect each input’s schema and `availability` before reading its rows. Its [provider scope](../../concepts/caching/#reuse-tables-across-executions) identifies the dataset and revisions. Correspondences map immediate source records to target records, so their descriptions also identify the source scope.
 
@@ -192,8 +191,8 @@ Send your agent Bearer credential to either GET endpoint, percent-encoding each 
 
 | Read | Endpoint |
 | --- | --- |
-| JSON page | `/results/{result_ref}/location-inputs/{input_name}/rows` |
-| Arrow stream | `/results/{result_ref}/location-inputs/{input_name}/download` |
+| JSON page | `/results/{job_id}/location-inputs/{input_name}/rows` |
+| Arrow stream | `/results/{job_id}/location-inputs/{input_name}/download` |
 
 Successful requests return `200`. For pages, set a positive integer `limit` to change the default of 100 rows. Pass `next_cursor` unchanged as `cursor` with the same result and input until it returns `null`. Continue after short pages when a cursor remains; output-table cursors aren’t valid for input rows.
 
@@ -211,13 +210,12 @@ If a request fails, inspect `detail.code`:
 
 | Status | Code | Meaning |
 | --- | --- | --- |
-| `422` | `invalid_result_reference` | Malformed reference |
 | `404` | `result_not_found` | Missing result or undeclared location input |
 | `409` | `location_input_unavailable` | Lyra didn’t materialize this input for the result |
 | `500` | `result_integrity_error` | Required retained data or relationships are missing or damaged |
 | `422` | `invalid_pagination` | Invalid limit or cursor; see `parameter` |
 | `422` | `row_too_large` | Next row cannot fit; use the Arrow `download_url` |
 
-Each error identifies `result_ref` and `input_name`. Errors also include `output_name=null`, except `location_input_unavailable`, which omits that field. Retrying an unavailable input doesn’t acquire data or change its availability.
+Each lookup error includes `job_id` and `input_name`. All except `location_input_unavailable` also include `output_name=null`. Retrying an unavailable input leaves its saved selection unchanged.
 
 For `row_too_large`, fetch `download_url` with your agent Bearer credential to retrieve the complete Arrow stream. The failed page request leaves the cursor at the oversized row. If generation fails after streaming starts, discard the partial download.

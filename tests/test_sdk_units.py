@@ -27,6 +27,7 @@ from lyra.server.routes import jobs
 from test_support.location_schema import StrictConfig
 from tests.client_helpers import _result_descriptor_response
 from tests.contract_helpers import metric_manifest, plugin_manifest
+from tests.job_id_helpers import CLIENT_JOB_ID
 from tests.provenance_helpers import result_provenance
 from tests.result_helpers import result_observation
 
@@ -197,17 +198,13 @@ def test_rest_result_descriptor_preserves_unit(
     )
     observation = result_observation(
         snapshot=JobStatusInfo(
-            job_id="job-1",
+            job_id=CLIENT_JOB_ID,
             status="succeeded",
-            execution_id="b" * 32,
-            result_ref="a" * 32,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         ),
         result=TableJobResult(
-            result_ref="a" * 32,
-            execution_id="b" * 32,
-            job_id="job-1",
+            job_id=CLIENT_JOB_ID,
             outputs={"result": []},
             output_metadata={"result": declaration},
             provenance=provenance,
@@ -218,7 +215,7 @@ def test_rest_result_descriptor_preserves_unit(
     service.inspect.side_effect = lambda item: project_observation(
         item.snapshot.job_id, item
     )
-    response = asyncio.run(jobs.inspect_job_result("job-1", service))
+    response = asyncio.run(jobs.inspect_job_result(CLIENT_JOB_ID, service))
     wire = json.loads(bytes(response.body))
     assert (
         wire["outputs"]["result"]["metadata"]["declaration"]["columns"][0]["unit"]

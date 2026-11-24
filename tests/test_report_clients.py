@@ -10,12 +10,12 @@ from typing import TYPE_CHECKING, TypeVar
 
 import httpx
 import pytest
+from pydantic import ValidationError
 from typing_extensions import override
 
 from lyra.api import AsyncLyraClient, LyraClient
 from lyra.api.exceptions import DownloadError
 from lyra.contracts.errors import (
-    InvalidExecutionIDError,
     ReportIntegrityError,
     ReportNotFoundError,
     ResultAccessError,
@@ -85,7 +85,7 @@ def client(
 @pytest.mark.parametrize("method", ["get", "inspect", "download"])
 @pytest.mark.parametrize(
     "error",
-    [InvalidExecutionIDError(_ID), ReportNotFoundError(_ID), ReportIntegrityError(_ID)],
+    [ReportNotFoundError(_ID), ReportIntegrityError(_ID)],
 )
 def test_report_errors(
     client: ClientHarness, tmp_path: Path, method: str, error: ResultAccessError
@@ -221,10 +221,10 @@ def test_report_download_missing_parent(client: ClientHarness, tmp_path: Path) -
     assert list(tmp_path.iterdir()) == []
 
 
-def test_invalid_execution_id_precedes_network_and_files(
+def test_invalid_job_id_precedes_network_and_files(
     client: ClientHarness, tmp_path: Path
 ) -> None:
-    with pytest.raises(InvalidExecutionIDError):
+    with pytest.raises(ValidationError):
         client.resolve(client.client.reports.download("bad", tmp_path / "report.json"))
     assert not client.requests
     assert not list(tmp_path.iterdir())

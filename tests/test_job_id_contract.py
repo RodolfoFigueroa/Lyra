@@ -1,4 +1,4 @@
-"""Job identity validation is strict, format-independent, and service-free."""
+"""Job identity validation is strict and shared across public models."""
 
 import json
 from datetime import UTC, datetime
@@ -23,21 +23,11 @@ from lyra.server.mcp.models import (
     JobIdInput,
     RunMetricOutput,
 )
-from tests.job_id_helpers import INVALID_IDS
+from tests.job_id_helpers import INVALID_IDS, TEST_JOB_ID
 from tests.provenance_helpers import result_provenance
 
 ADAPTER = TypeAdapter(JobId)
-VALID_IDS = [
-    "job-1",
-    "not-a-uuid",
-    "λ/结果?#",
-    "lyra://results/job",
-    " padded ",
-    " ",
-    "\t\n",
-    "\u2003",
-    "a" * 32,
-]
+VALID_IDS = ["a" * 32, "0123456789abcdef" * 2]
 
 
 MODELS = [
@@ -86,8 +76,6 @@ def model_payload(request: pytest.FixtureRequest) -> tuple[type[BaseModel], dict
             ).accepted,
         },
         TableJobResult: {
-            "execution_id": "b" * 32,
-            "result_ref": "a" * 32,
             "outputs": {"result": []},
             "output_metadata": {"result": {"columns": []}},
         },
@@ -95,7 +83,10 @@ def model_payload(request: pytest.FixtureRequest) -> tuple[type[BaseModel], dict
         JobCreateResponse: {
             "metric": "root",
             "status": "queued",
-            "links": {"self": "/jobs/job", "result": "/jobs/job/result"},
+            "links": {
+                "self": f"/jobs/{TEST_JOB_ID}",
+                "result": f"/jobs/{TEST_JOB_ID}/result",
+            },
         },
         JobStatusInfo: status,
         ActiveResultOutput: status,
@@ -103,14 +94,14 @@ def model_payload(request: pytest.FixtureRequest) -> tuple[type[BaseModel], dict
             "status": "failed",
             "result_kind": "failed",
             "lifetime": {},
-            "download": "/jobs/job/result",
+            "download": f"/jobs/{TEST_JOB_ID}/result",
         },
     }
     return request.param, payloads[request.param]
 
 
 @pytest.mark.parametrize("job_id", VALID_IDS)
-def test_job_id_preserves_nonempty_strings(job_id: str) -> None:
+def test_job_id_preserves_valid_strings(job_id: str) -> None:
     assert ADAPTER.validate_python(job_id) == job_id
     assert ADAPTER.validate_json(json.dumps(job_id)) == job_id
 
@@ -142,7 +133,7 @@ def test_shared_models_reject_invalid_job_identity(
     errors = caught.value.errors(include_input=False)
     assert [error["loc"] for error in errors] == [("job_id",)]
     assert errors[0]["type"] == (
-        "string_too_short" if isinstance(job_id, str) else "string_type"
+        "string_pattern_mismatch" if isinstance(job_id, str) else "string_type"
     )
 
 
@@ -151,8 +142,8 @@ def test_job_identity_schema(model: type[BaseModel]) -> None:
     for mode in ("validation", "serialization"):
         field = model.model_json_schema(mode=mode)["properties"]["job_id"]
         assert field["type"] == "string"
-        assert field["minLength"] == 1
-    assert ADAPTER.json_schema() == {"type": "string", "minLength": 1}
+        assert field["pattern"] == "^[0-9a-f]{32}$"
+    assert ADAPTER.json_schema() == {"type": "string", "pattern": "^[0-9a-f]{32}$"}
 
 
 @pytest.mark.parametrize("job_id", INVALID_IDS)

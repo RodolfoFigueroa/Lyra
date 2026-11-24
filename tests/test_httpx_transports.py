@@ -18,8 +18,6 @@ from lyra.api.client import httpx as client_httpx
 from lyra.api.client.httpx import AsyncHTTPTransport, SyncHTTPTransport
 from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
 from lyra.contracts.errors import (
-    InvalidExecutionIDError,
-    InvalidResultReferenceError,
     ReportIntegrityError,
     ReportNotFoundError,
     ResultAccessError,
@@ -38,6 +36,7 @@ from tests.client_helpers import (
     _status_response,
 )
 from tests.httpx_download_helpers import ChunkStream, TemporaryFileOptions, destinations
+from tests.job_id_helpers import CLIENT_JOB_ID
 
 __all__ = ["destinations"]
 
@@ -131,7 +130,7 @@ def test_requests_and_credentials(transport: TransportHarness) -> None:
         )
     )
     assert isinstance(result, JobCreateResponse)
-    assert result.job_id == "job-1"
+    assert result.job_id == CLIENT_JOB_ID
     jobs = transport.resolve(
         admin.request(
             endpoints.list_admin_jobs(
@@ -139,8 +138,8 @@ def test_requests_and_credentials(transport: TransportHarness) -> None:
             )
         )
     )
-    assert jobs.jobs[0].job_id == "job-1"
-    table = transport.resolve(consumer.request(endpoints.get_job_result("job-1")))
+    assert jobs.jobs[0].job_id == CLIENT_JOB_ID
+    table = transport.resolve(consumer.request(endpoints.get_job_result(CLIENT_JOB_ID)))
     assert isinstance(table, TableJobResult)
     assert table.outputs == {"result": [{"value": 6}]}
     catalog, submission, listing, result_request = transport.requests
@@ -166,7 +165,7 @@ def test_requests_and_credentials(transport: TransportHarness) -> None:
         "offset": "2",
         "limit": "3",
     }
-    assert result_request.url.path == "/base/jobs/job-1/result"
+    assert result_request.url.path == f"/base/jobs/{CLIENT_JOB_ID}/result"
 
 
 @pytest.mark.parametrize(
@@ -222,7 +221,7 @@ def test_invalid_responses_are_permanent(
         )
     )
     with pytest.raises(DownloadError) as error:
-        transport.resolve(client.request(endpoints.get_job_result("job-1")))
+        transport.resolve(client.request(endpoints.get_job_result(CLIENT_JOB_ID)))
     assert not error.value.retryable
     assert len(transport.requests) == 1
 
@@ -244,8 +243,8 @@ def test_service_and_pending_errors(transport: TransportHarness) -> None:
     assert service.value.retryable
     assert service.value.retry_after_seconds == 3
     with pytest.raises(JobNotReadyError) as pending:
-        transport.resolve(client.request(endpoints.get_job_result("job-1")))
-    assert pending.value.job_id == "job-1"
+        transport.resolve(client.request(endpoints.get_job_result(CLIENT_JOB_ID)))
+    assert pending.value.job_id == CLIENT_JOB_ID
     assert pending.value.snapshot.status == "running"
     with pytest.raises(DownloadError, match="may have been accepted") as invalid:
         transport.resolve(client.request(endpoints.create_job("heavy_metric")))
@@ -380,7 +379,10 @@ def test_download_streams_before_consuming_next_chunk(
     assert (
         transport.resolve(
             client.download(
-                "jobs/job-1/result", path, operation="download result", atomic=atomic
+                f"jobs/{CLIENT_JOB_ID}/result",
+                path,
+                operation="download result",
+                atomic=atomic,
             )
         )
         is None
@@ -391,7 +393,7 @@ def test_download_streams_before_consuming_next_chunk(
     assert destinations[0].closed
     assert list(tmp_path.iterdir()) == [path]
     request = transport.requests[0]
-    assert str(request.url) == "http://example.test/base/jobs/job-1/result"
+    assert str(request.url) == f"http://example.test/base/jobs/{CLIENT_JOB_ID}/result"
     assert request.headers["authorization"] == "Bearer consumer"
     assert request.headers["X-Source"] == "download"
     assert request.extensions["timeout"] == {
@@ -405,7 +407,11 @@ def test_download_streams_before_consuming_next_chunk(
     transport.close(client)
     with pytest.raises(RuntimeError, match="closed"):
         transport.resolve(
-            client.download("jobs/job-1/result", path, operation="download")
+            client.download(
+                f"jobs/{CLIENT_JOB_ID}/result",
+                path,
+                operation="download",
+            )
         )
 
 
@@ -438,10 +444,14 @@ def test_download_rejected_before_opening_destination(
     transport.responses.append(response)
     with pytest.raises(error_type) as error:
         transport.resolve(
-            transport.open().download("jobs/job-1/result", path, operation="download")
+            transport.open().download(
+                f"jobs/{CLIENT_JOB_ID}/result",
+                path,
+                operation="download",
+            )
         )
     if isinstance(error.value, JobNotReadyError):
-        assert error.value.job_id == "job-1"
+        assert error.value.job_id == CLIENT_JOB_ID
         assert error.value.snapshot.status == "running"
     elif isinstance(error.value, ServiceUnavailableError):
         assert error.value.code == "redis_unavailable"
@@ -580,9 +590,6 @@ def test_cancel_download_awaits_cleanup_in_caller_task(
 @pytest.mark.parametrize(
     "error",
     [
-        InvalidResultReferenceError("bad"),
-        InvalidResultReferenceError(None, "a"),
-        InvalidExecutionIDError(123),
         ResultNotFoundError("a" * 32),
         ResultNotFoundError("a" * 32, "雪/a"),
         ResultIntegrityError("a" * 32),

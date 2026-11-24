@@ -93,7 +93,7 @@ def test_geometry_survives_local_execution_and_queue(
     assert events == ["setup", (Provider.id, sorted(ids)), "close"]
 
     envelope = accepted_envelope(
-        job_id="geometry", metric="inspect", inputs=caller, catalog=runner.catalog
+        job_id="e" * 32, metric="inspect", inputs=caller, catalog=runner.catalog
     )
     restored = JobEnvelope.model_validate_json(envelope.model_dump_json())
     accepted = restored.accepted.plan

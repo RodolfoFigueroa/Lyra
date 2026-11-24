@@ -35,16 +35,13 @@ from lyra.server.routes.job_errors import (
     JOB_LOOKUP_RESPONSES,
     InvalidJobResultHTTPError,
 )
-from lyra.server.routes.job_ids import JobIdRoute
 from lyra.server.runtime import (
     CatalogDependency,
     JobStoreDependency,
     ResultServiceDependency,
 )
 
-router = APIRouter(
-    route_class=JobIdRoute, tags=["Jobs"], dependencies=[Depends(require_agent_key)]
-)
+router = APIRouter(tags=["Jobs"], dependencies=[Depends(require_agent_key)])
 
 
 async def _get_observed_job_status(

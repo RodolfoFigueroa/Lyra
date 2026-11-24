@@ -20,6 +20,7 @@ from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.table_fixtures import value_frame, value_schema
+from tests.job_id_helpers import TEST_JOB_ID
 
 
 class Nested(MetricParameters):
@@ -147,7 +148,7 @@ def test_job_construction_captures_accepted_metadata() -> None:
         catalog_fingerprint="catalog",
         created_at=datetime.now(UTC),
     )
-    envelope = JobEnvelope(job_id="job", accepted=accepted)
+    envelope = JobEnvelope(job_id=TEST_JOB_ID, accepted=accepted)
     provenance = JobRunProvenance(accepted=accepted)
     expected = envelope.model_dump()
     raw["parameters"].clear()

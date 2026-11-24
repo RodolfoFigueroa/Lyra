@@ -288,7 +288,7 @@ def test_shared_service_pages_and_missing_store(
     ):
         with pytest.raises(ResultNotFoundError) as caught:
             call()
-        assert caught.value.result_ref == retained.reference
+        assert caught.value.job_id == retained.reference
         assert caught.value.input_name == "places"
         assert caught.value.output_name is None
 

@@ -253,12 +253,12 @@ def test_unpartitioned_terminal_retention(
     invocation = prepare_execution(local.catalog, {"metric": "terminal", "inputs": {}})
     first = executor.execute(invocation)
     second = executor.execute(invocation)
-    assert first.result_ref is not None
-    assert second.result_ref is not None
-    assert first.result_ref != second.result_ref
+    assert first.job_id is not None
+    assert second.job_id is not None
+    assert first.job_id != second.job_id
     description, frames = ResultDescriptions(
         SQLiteStore(tmp_path / "values.sqlite")
-    ).read(first.result_ref)
+    ).read(first.job_id)
     assert description.metric_name == "terminal"
     pd.testing.assert_frame_equal(
         frames["total"], first.outputs["total"].astype({"total": "Int64"})
@@ -292,13 +292,13 @@ def test_unpartitioned_terminal_retention(
     third = uncached_executor.execute(
         prepare_execution(uncached.catalog, {"metric": "terminal", "inputs": {}})
     )
-    assert third.result_ref not in {first.result_ref, second.result_ref}
+    assert third.job_id not in {first.job_id, second.job_id}
     assert len(database.rows["stored_results"]) == 1
     assert len(database.rows["final_results"]) == 3
     assert (
-        ResultDescriptions(SQLiteStore(tmp_path / "values.sqlite")).read(
-            first.result_ref
-        )[0]
+        ResultDescriptions(SQLiteStore(tmp_path / "values.sqlite")).read(first.job_id)[
+            0
+        ]
         == description
     )
 
@@ -399,7 +399,7 @@ def test_scoped_computation_publication(
         if policy == "full"
         else [frozenset({"a", "b"})] + [frozenset({"b", "c"})] * 3
     )
-    assert len({result.metadata.result_ref for result in results}) == 6
+    assert len({result.metadata.job_id for result in results}) == 6
     # Retention must store each computation once, with no assembled value copy.
     assert (
         len(
@@ -430,7 +430,7 @@ def test_scoped_computation_publication(
     path.touch()  # Existence only; all storage operations use the transaction fake.
     with ResultStore.open(path) as reader:
         for result, ids in zip(results, (*selections, ["b", "c"]), strict=True):
-            restored = reader.read_result(result.metadata.result_ref)
+            restored = reader.read_result(result.metadata.job_id)
             assert restored.metadata == result.metadata
             assert set(restored.tables["a"].location_id) == set(ids) - (
                 {"b"} if empty_partition else set()
@@ -448,16 +448,14 @@ def test_scoped_computation_publication(
                 )
                 assert_logical_equal(actual, expected)
                 assert_logical_equal(
-                    reader.read_table(result.metadata.result_ref, name),
+                    reader.read_table(result.metadata.job_id, name),
                     restored.tables[name],
                 )
     # Zero-location per-location executions describe typed empties without keys.
     if policy == "per_location":
         with SQLiteStore(path) as store:
             for result in results[3:5]:
-                description, _ = ResultDescriptions(store).read(
-                    result.metadata.result_ref
-                )
+                description, _ = ResultDescriptions(store).read(result.metadata.job_id)
                 assert all(
                     not output.computations for output in description.outputs.values()
                 )

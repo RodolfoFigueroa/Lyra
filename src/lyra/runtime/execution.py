@@ -10,7 +10,6 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, cast
-from uuid import uuid4
 
 import pandas as pd
 
@@ -28,6 +27,7 @@ from lyra.contracts.provenance import (
     InvocationObservation,
     NativeInputSummary,
 )
+from lyra.contracts.references import new_job_id
 from lyra.runtime.input_capture import (
     capture_inputs,
     capture_skipped_inputs,
@@ -116,7 +116,7 @@ class GraphExecutionError(RuntimeError):
         kind: str = "metric",
     ) -> None:
         """Record the failing node and traversal path for worker diagnostics."""
-        self.execution_id: str | None = None
+        self.job_id: str | None = None
         self.provenance: ExecutionProvenance | None = None
         self.kind = kind
         self.node = node
@@ -225,7 +225,7 @@ class _MetricDecision:
 
 @dataclass(frozen=True)
 class ExecutionOutcome:
-    """Root tables, their durable description reference, and execution observations."""
+    """Root tables, publication metadata, and execution observations."""
 
     outputs: NativeOutputs
     committed_report: ExecutionReport | None
@@ -235,9 +235,9 @@ class ExecutionOutcome:
     completions: tuple[MetricCompletion, ...] = ()
 
     @property
-    def result_ref(self) -> str | None:
-        """Reference of the successfully published result, when retention is enabled."""
-        return self.committed_report.result_ref if self.committed_report else None
+    def job_id(self) -> str:
+        """Identifier of this run, including when retention is disabled."""
+        return self.report_state.job_id
 
 
 class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationResult"]):
@@ -246,7 +246,7 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
     def __init__(self, report: ReportCollection | None = None) -> None:
         """Start an empty run."""
         super().__init__()
-        self.report = report if report is not None else ReportCollection()
+        self.report = report if report is not None else ReportCollection(new_job_id())
         self.resolver: LocationResolver | None = None
         self.observations: list[InvocationObservation] = []
         self.native_inputs: list[NativeInputSummary] = []
@@ -441,7 +441,7 @@ class GraphExecutor:
         prepared = prepared.model_copy(deep=True)
         _, scope = self._bind_plan(prepared)
         with self._acquisition_scope(
-            scope, prepared.request.interventions, ReportCollection()
+            scope, prepared.request.interventions, ReportCollection(new_job_id())
         ) as resolver:
             return resolver.resolve_prepared(prepared)
 
@@ -454,7 +454,7 @@ class GraphExecutor:
         """Run one prepared public metric and return all its native outputs.
 
         Returns:
-            The requested metric's tables, description reference, and provenance.
+            The requested metric's tables, metadata, and provenance.
 
         Preparation, execution, and result failures raise GraphExecutionError,
         chained to the underlying exception.
@@ -506,7 +506,7 @@ class GraphExecutor:
             succeeded = True
         finally:
             if failure is not None:
-                failure.execution_id = completed.report.execution_id
+                failure.job_id = completed.report.job_id
             self._provenance = ExecutionProvenance(
                 root if isinstance(root, PreparedExecution) else None,
                 ExecutionObservations(
@@ -548,7 +548,7 @@ class GraphExecutor:
         """
         store = self.provider_records.store if self.provider_records else self.store
         if interventions or (retain_result and store is not None):
-            with persistence_boundary(report.execution_id):
+            with persistence_boundary(report.job_id):
                 if store is None:
                     msg = "Intervention validation requires a configured store"
                     raise ValueError(msg)
@@ -748,7 +748,7 @@ class GraphExecutor:
             if pairs is not None and publication_required(
                 node.cache, required=retain_membership or self.retain_result
             ):
-                with persistence_boundary(completed.report.execution_id):
+                with persistence_boundary(completed.report.job_id):
                     pairs.publish(tuple(selections), complete.groups)
             return dict(complete.groups)
         completed.report.observe_computation(
@@ -1212,7 +1212,7 @@ class GraphExecutor:
             ) from cause
 
     def _retain_result(self, metadata: ExecutionMetadata, completed: RunState) -> None:
-        with persistence_boundary(completed.report.execution_id):
+        with persistence_boundary(completed.report.job_id):
             self._publish_result(metadata, completed)
 
     def _publish_result(
@@ -1276,10 +1276,8 @@ class GraphExecutor:
                 and completed.bound_root is not None
                 else InputBindings(),
             )
-            report = completed.report.complete(uuid4().hex)
-            _, projection = _ResultPublication(store).publish_metadata(
-                description, report
-            )
+            report = completed.report.complete()
+            projection = _ResultPublication(store).publish_metadata(description, report)
             metadata.location_inputs = projection.location_inputs
             completed.committed_report = report
 
@@ -1310,14 +1308,14 @@ class GraphExecutor:
         retain = tables is not None and publication_required(
             entry.node.cache, required=len(path) == 1 and self.retain_result
         )
-        with persistence_boundary(completed.report.execution_id):
+        with persistence_boundary(completed.report.job_id):
             captured = capture_inputs(
                 store, self.catalog, invocation, selections, enabled=retain
             )
         remember_inputs(invocation, captured, completed.input_selections)
         outputs = plugin.invoke(invocation, dependencies, context_factory)
         if retain and tables is not None:
-            with persistence_boundary(completed.report.execution_id):
+            with persistence_boundary(completed.report.job_id):
                 tables.publish(
                     selections,
                     outputs,
@@ -1376,7 +1374,7 @@ class GraphExecutor:
         if store is not None and publication_required(
             entry.node.cache, required=retain_membership or self.retain_result
         ):
-            with persistence_boundary(completed.report.execution_id):
+            with persistence_boundary(completed.report.job_id):
                 OperationPairs(store).publish(selections, dict(result.groups))
         if next(iter(invocation.locations.values())).ids:
             completed.report.observe_computation(

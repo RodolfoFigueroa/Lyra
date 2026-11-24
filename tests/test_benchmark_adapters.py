@@ -166,7 +166,7 @@ def test_node_cache_workload(graph: str, state: str) -> None:
         # The fake database retains data in process; satisfy the public path check.
         suite.path.touch()
         with ResultStore.open(suite.path) as reader:
-            restored = reader.read_result(result.metadata.result_ref)
+            restored = reader.read_result(result.metadata.job_id)
         pd.testing.assert_frame_equal(
             restored.tables["data"]
             .sort_values(["location_id", "row_key"])
@@ -178,7 +178,7 @@ def test_node_cache_workload(graph: str, state: str) -> None:
         suite.work.calls.clear()
         repeated = suite.runner.run("root", inputs=suite.inputs)
         assert suite.work.calls == []
-        assert repeated.metadata.result_ref != result.metadata.result_ref
+        assert repeated.metadata.job_id != result.metadata.job_id
     finally:
         suite.teardown(graph, state)
 

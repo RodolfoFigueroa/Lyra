@@ -14,6 +14,7 @@ from lyra.sdk.resources import BaseIO
 from lyra.server import worker
 from test_support.table_fixtures import value_frame, value_schema
 from tests.config_helpers import load_test_config
+from tests.job_id_helpers import TEST_JOB_ID
 
 
 def test_node_contexts_share_progress_and_expose_job_services(
@@ -26,7 +27,7 @@ def test_node_contexts_share_progress_and_expose_job_services(
     native.meta = {}
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
     monkeypatch.setattr(worker, "time", SimpleNamespace(monotonic=lambda: 1.0))
-    job_id = "shared-job"
+    job_id = TEST_JOB_ID
     setup = Mock()
 
     class Database(BaseIO):
@@ -121,11 +122,11 @@ def test_local_and_worker_contexts_validate_reporting(
         config = load_test_config(tmp_path)
         monkeypatch.setattr(worker, "get_current_job", lambda: None)
         base = worker.WorkerRunContext(
-            job_id="job",
+            job_id=TEST_JOB_ID,
             node="select",
             logger=logger,
             temp_dir=tmp_path,
-            progress=worker.WorkerProgress("job", config.jobs),
+            progress=worker.WorkerProgress(TEST_JOB_ID, config.jobs),
         )
     progress = Mock(wraps=base.report_progress)
     monkeypatch.setattr(type(base), "report_progress", progress)

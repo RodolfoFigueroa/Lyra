@@ -222,8 +222,7 @@ class Layout:
         self.final_results = sa.Table(
             "final_results",
             self.metadata,
-            sa.Column("result_ref", sa.Text, primary_key=True),
-            sa.Column("execution_id", sa.Text, nullable=False, unique=True),
+            sa.Column("job_id", sa.Text, primary_key=True),
             sa.Column("report", sa.Text, nullable=False),
             sa.Column("description", sa.Text, nullable=False),
         )

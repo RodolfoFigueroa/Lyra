@@ -375,11 +375,11 @@ def test_published_exact_work_and_ownership(local: LocalRunner, events: Mock) ->
 
         result.metadata.store_path.touch()
         with ResultStore.open(result.metadata.store_path) as reader:
-            restored = reader.read_result(report.result_ref)
+            restored = reader.read_result(report.job_id)
             for stream, role in (
-                (reader.stream_table(report.result_ref, "rows"), b"owner_scope"),
+                (reader.stream_table(report.job_id, "rows"), b"owner_scope"),
                 (
-                    reader.stream_location_input(report.result_ref, "places"),
+                    reader.stream_location_input(report.job_id, "places"),
                     b"provider_scope",
                 ),
             ):
@@ -390,7 +390,7 @@ def test_published_exact_work_and_ownership(local: LocalRunner, events: Mock) ->
                     assert sorted(
                         arrow.read_all()["location_id"].to_pylist()
                     ) == sorted(ids)
-            assert restored.report == reader.read_report(report.execution_id) == report
+            assert restored.report == reader.read_report(report.job_id) == report
             assert restored.metadata == result.metadata
             by_catalog = {
                 change.catalog: change
@@ -436,12 +436,12 @@ def test_failed_result_publication_keeps_only_completed_work(
         "reused" if table == "final_results" else "executed"
     )
     result.metadata.store_path.touch()
-    assert isinstance(caught.value.execution_id, str)
+    assert isinstance(caught.value.job_id, str)
     with (
         ResultStore.open(result.metadata.store_path) as reader,
         pytest.raises(ReportNotFoundError),
     ):
-        reader.read_report(caught.value.execution_id)
+        reader.read_report(caught.value.job_id)
 
 
 @pytest.mark.usefixtures("database")
@@ -452,7 +452,7 @@ def test_downloads_keep_intervention_scope_per_result(local: LocalRunner) -> Non
         result = local.run(
             "measure", inputs=selected("a"), interventions=[intervention]
         )
-        references.append((result.report.result_ref, revision))
+        references.append((result.report.job_id, revision))
     path = result.metadata.store_path
     path.touch()
     with ResultStore.open(path) as reader:

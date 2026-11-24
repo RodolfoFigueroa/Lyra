@@ -10,6 +10,7 @@ import pytest
 from lyra.api import admin_cli
 from lyra.api.client.httpx import SyncHTTPTransport
 from tests.client_helpers import FakeSyncResponse, install_sync_handler
+from tests.job_id_helpers import TEST_JOB_ID
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
@@ -100,15 +101,13 @@ CASES = (
         params={"limit": 7, "status": "running", "queue": "batch", "offset": 0},
     ),
     Case(
-        "jobs get job",
+        f"jobs get {TEST_JOB_ID}",
         "GET",
-        "admin/jobs/job",
+        f"admin/jobs/{TEST_JOB_ID}",
         {
             "snapshot": {
-                "job_id": "job",
+                "job_id": TEST_JOB_ID,
                 "status": "queued",
-                "execution_id": None,
-                "result_ref": None,
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
                 "started_at": None,
@@ -345,7 +344,7 @@ def test_request_exceptions_do_not_retry(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     http.error = error
-    assert admin_cli.main(["--json", "jobs", "get", "metric"]) == code
+    assert admin_cli.main(["--json", "jobs", "get", "1" * 32]) == code
     assert len(http.calls) == 1
     assert not capsys.readouterr().out
 
@@ -376,7 +375,7 @@ def test_human_output_preserves_jobs_and_order(
     http: HTTPStub,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    job_id = "job-with-a-long-identifier-that-must-not-be-truncated"
+    job_id = "123456789abcdef0" * 2
     http.payload = {
         "jobs": [
             {
@@ -387,7 +386,7 @@ def test_human_output_preserves_jobs_and_order(
                 "metric": "metric",
             },
             {
-                "job_id": "older-job",
+                "job_id": "0" * 32,
                 "status": "failed",
                 "created_at": "2026-09-22T11:00:00Z",
                 "updated_at": "2026-09-22T11:00:00Z",
@@ -399,7 +398,7 @@ def test_human_output_preserves_jobs_and_order(
         admin_cli.main(["jobs", "list", "--queue", "batch", "--status", "running"]) == 0
     )
     output = capsys.readouterr().out
-    assert output.index(job_id) < output.index("older-job")
+    assert output.index(job_id) < output.index("0" * 32)
     assert "failed\\nwith details" in output
     assert http.calls[0][2]["params"] == {
         "limit": 50,
@@ -449,6 +448,6 @@ def test_caller_interrupt_closes_client(
     monkeypatch.setenv("LYRA_ADMIN_API_KEY", "test-admin")
     monkeypatch.setattr(SyncHTTPTransport, "request", interrupted)
     monkeypatch.setattr(SyncHTTPTransport, "close", close)
-    assert admin_cli.main(["--json", "jobs", "get", "metric"]) == 130
+    assert admin_cli.main(["--json", "jobs", "get", "1" * 32]) == 130
     assert closed == [True]
     assert json.loads(capsys.readouterr().err)["error"]["kind"] == "interrupted"

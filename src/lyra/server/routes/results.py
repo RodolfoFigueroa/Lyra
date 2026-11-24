@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from starlette.convertors import PathConvertor, register_url_convertor
 
 from lyra.contracts.errors import InvalidPaginationError, ResultAccessError
+from lyra.contracts.references import JobId
 from lyra.contracts.results import (
     ResultDescription,
     ResultDescriptionInspection,
@@ -33,24 +34,24 @@ router = APIRouter(tags=["Results"], dependencies=[Depends(require_agent_key)])
 
 
 @router.get(
-    "/results/{result_ref}/tables/{output_name:lyra_retrieval_name}/download",
+    "/results/{job_id}/tables/{output_name:lyra_retrieval_name}/download",
     response_class=StreamingResponse,
     responses={200: {"content": {"application/vnd.apache.arrow.stream": {}}}},
 )
 async def download_table(
-    result_ref: str, output_name: str, results: ResultServiceDependency
+    job_id: JobId, output_name: str, results: ResultServiceDependency
 ) -> TableResponse:
     """Return one retained output as a generated Arrow IPC streaming response."""
-    return TableResponse(results.stream_table(result_ref, output_name))
+    return TableResponse(results.stream_table(job_id, output_name))
 
 
-@router.get("/results/{result_ref}", response_model=ResultDescriptionInspection)
+@router.get("/results/{job_id}", response_model=ResultDescriptionInspection)
 async def describe_result(
-    result_ref: str, results: ResultServiceDependency, config: ConfigDependency
+    job_id: JobId, results: ResultServiceDependency, config: ConfigDependency
 ) -> JSONResponse:
     """Return complete metadata or a bounded authenticated download link."""
     try:
-        description = await results.describe(result_ref)
+        description = await results.describe(job_id)
     except ResultAccessError as error:
         return retrieval_error_response(error)
     return http_json_response(
@@ -62,15 +63,13 @@ async def describe_result(
     )
 
 
-@router.get(
-    "/results/{result_ref}/description/download", response_model=ResultDescription
-)
+@router.get("/results/{job_id}/description/download", response_model=ResultDescription)
 async def download_description(
-    result_ref: str, results: ResultServiceDependency
+    job_id: JobId, results: ResultServiceDependency
 ) -> JSONResponse:
     """Return generated complete description JSON without an inspection size limit."""
     try:
-        description = await results.describe(result_ref)
+        description = await results.describe(job_id)
     except ResultAccessError as error:
         return retrieval_error_response(error)
     return http_json_response(description)
@@ -84,11 +83,11 @@ class RowQuery(BaseModel):
 
 
 @router.get(
-    "/results/{result_ref}/tables/{output_name:lyra_retrieval_name}/rows",
+    "/results/{job_id}/tables/{output_name:lyra_retrieval_name}/rows",
     response_model=ResultRowPage,
 )
 async def result_rows(
-    result_ref: str,
+    job_id: JobId,
     output_name: str,
     results: ResultServiceDependency,
     config: ConfigDependency,
@@ -103,9 +102,9 @@ async def result_rows(
         try:
             parsed_limit = int(query.limit)
         except ValueError as error:
-            raise InvalidPaginationError(result_ref, output_name, "limit") from error
+            raise InvalidPaginationError(job_id, output_name, "limit") from error
         page = await results.rows(
-            result_ref,
+            job_id,
             output_name,
             parsed_limit,
             query.cursor,
@@ -117,23 +116,23 @@ async def result_rows(
 
 
 @router.get(
-    "/results/{result_ref}/location-inputs/{input_name:lyra_retrieval_name}/download",
+    "/results/{job_id}/location-inputs/{input_name:lyra_retrieval_name}/download",
     response_class=StreamingResponse,
     responses={200: {"content": {"application/vnd.apache.arrow.stream": {}}}},
 )
 async def download_location_input(
-    result_ref: str, input_name: str, results: ResultServiceDependency
+    job_id: JobId, input_name: str, results: ResultServiceDependency
 ) -> TableResponse:
     """Return a retained location input as a generated Arrow stream."""
-    return TableResponse(results.stream_location_input(result_ref, input_name))
+    return TableResponse(results.stream_location_input(job_id, input_name))
 
 
 @router.get(
-    "/results/{result_ref}/location-inputs/{input_name:lyra_retrieval_name}/rows",
+    "/results/{job_id}/location-inputs/{input_name:lyra_retrieval_name}/rows",
     response_model=ResultRowPage,
 )
 async def location_input_rows(
-    result_ref: str,
+    job_id: JobId,
     input_name: str,
     results: ResultServiceDependency,
     config: ConfigDependency,
@@ -149,10 +148,10 @@ async def location_input_rows(
             parsed_limit = int(query.limit)
         except ValueError as error:
             raise InvalidPaginationError(
-                result_ref, None, "limit", input_name=input_name
+                job_id, None, "limit", input_name=input_name
             ) from error
         page = await results.location_input_rows(
-            result_ref,
+            job_id,
             input_name,
             parsed_limit,
             query.cursor,

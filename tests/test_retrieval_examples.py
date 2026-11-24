@@ -49,7 +49,7 @@ def test_reconnect_example(
     config.api.public_base_url = BASE
     frame = pd.DataFrame({"value": pd.array([1, 2], dtype="Int64")})
     service, reference = retained_service(config.result_store_path, SCHEMA, frame)
-    report = service.read_report(service.read_description(reference).execution_id)
+    report = service.read_report(service.read_description(reference).job_id)
     monkeypatch.setattr(
         service.jobs, "read_job", Mock(side_effect=AssertionError("Expired job"))
     )
@@ -61,8 +61,7 @@ def test_reconnect_example(
     for name, value in {
         "LYRA_SERVER": BASE.removeprefix("https://"),
         "LYRA_AGENT_API_KEY": "agent-secret",
-        "LYRA_RESULT_REF": reference,
-        "LYRA_EXECUTION_ID": report.execution_id,
+        "LYRA_JOB_ID": reference,
         "LYRA_OUTPUT_NAME": "rows",
     }.items():
         monkeypatch.setenv(name, value)
@@ -107,7 +106,7 @@ def test_row_examples(
             str(path),
             init_globals={
                 "client": client,
-                "result_ref": retained.reference,
+                "job_id": retained.reference,
                 "output_name": "rows",
             },
         )
@@ -145,7 +144,7 @@ def test_location_input_example(
             str(path),
             init_globals={
                 "client": client,
-                "result_ref": retained_input.reference,
+                "job_id": retained_input.reference,
                 "input_name": "places",
             },
         )
@@ -223,7 +222,7 @@ def assert_export_examples(store_path: Path, reference: str, tmp_path: Path) -> 
         description = store.describe(reference)
         expected_output = store.read_table(reference, "a")
         expected_input = store.read_location_input(reference, "places")
-        expected_report = store.read_report(description.execution_id)
+        expected_report = store.read_report(description.job_id)
     read_path = tmp_path / "read_export.py"
     read_path.write_text(published_python("use/location-exports.md", read_path.name))
     restored = runpy.run_path(str(read_path))
@@ -252,8 +251,7 @@ def assert_export_examples(store_path: Path, reference: str, tmp_path: Path) -> 
         )
         assert actual.attrs["lyra"] == {
             "kind": kind,
-            "result_ref": reference,
-            "execution_id": description.execution_id,
+            "job_id": reference,
             name_field: selected_name,
             "description": selected.model_dump(mode="json"),
         }

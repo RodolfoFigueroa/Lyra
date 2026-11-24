@@ -12,6 +12,7 @@ import pytest
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import metric_manifest
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.plugin_helpers import MANIFEST_FILENAME, plugin_config
 from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.smoke_plugin_helpers import (
@@ -276,11 +277,11 @@ def test_runner_uses_configured_worker_temp_dir(
 
     worker_module.initialize_worker("heavy", config=config)
     context = worker_module.build_run_context(
-        "job-temp",
+        TEST_JOB_ID,
         node="heavy_metric",
     )
 
-    assert context.temp_dir == tmp_path / "worker-temp" / "job-temp"
+    assert context.temp_dir == tmp_path / "worker-temp" / TEST_JOB_ID
     assert context.temp_dir.is_dir()
     assert "db" not in vars(context)
 
@@ -340,7 +341,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
     node = entries.catalog.compiled.graph.nodes["smoke_table_metric"].node
     worker_module.set_runner_temp_base(tmp_path / "native-results")
     native = SimpleNamespace(
-        id="native-result",
+        id="a" * 32,
         origin=entries.catalog.metric_queues[node.name],
         meta={},
         worker_name="test-worker",
@@ -363,8 +364,6 @@ def test_worker_encodes_named_outputs_without_request_identity(
         worker_module.run_metric_task, envelope.model_dump(mode="json")
     )
     assert result == {
-        "execution_id": result["execution_id"],
-        "result_ref": result["result_ref"],
         "kind": "table",
         "job_id": native.id,
         "status": "succeeded",

@@ -12,10 +12,10 @@ import pandera.pandas as pa
 import pytest
 from geopandas.testing import assert_geodataframe_equal
 from pandera.engines.geopandas_engine import Geometry
+from pydantic import ValidationError
 from shapely.geometry import Point
 
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
     LocationInputUnavailableError,
     ResultIntegrityError,
     ResultNotFoundError,
@@ -59,7 +59,7 @@ def test_location_export(
     expected = reader.read_table(reference, name)
     edited = reader.read_table(reference, name)
     edited["value"] = 999
-    edited.attrs["lyra"] = {"result_ref": "forged"}
+    edited.attrs["lyra"] = {"job_id": "forged"}
     changed = reader.describe(reference)
     changed.outputs[name].table_schema.columns.clear()
     changed.outputs[name].owner_scope = None
@@ -91,8 +91,7 @@ def test_location_export(
     assert actual.attrs == {
         "lyra": {
             "kind": "metric_output",
-            "result_ref": reference,
-            "execution_id": description.execution_id,
+            "job_id": reference,
             "output_name": name,
             "description": description.outputs[name].model_dump(mode="json"),
         }
@@ -190,7 +189,7 @@ def test_preparation_isolation_and_indexes(
     }
     frame.index = indexes[index_kind]
     frame["incidental"] = "ignored"
-    frame.attrs = {"lyra": {"result_ref": "forged"}, "nested": {"items": [1]}}
+    frame.attrs = {"lyra": {"job_id": "forged"}, "nested": {"items": [1]}}
     original = frame.copy(deep=True)
     schema = compile_output(declaration(frame.drop(columns="incidental")))[1]
     metadata: JsonObject = {"nested": {"items": [2]}}
@@ -291,7 +290,7 @@ def test_lookup_and_destination_errors(
     name = "b" if failure == "empty-nonspatial" else "a"
     expected = ValueError
     if failure == "reference":
-        reference, expected = "bad", InvalidResultReferenceError
+        reference, expected = "bad", ValidationError
     elif failure == "name":
         name, expected = "missing", ResultNotFoundError
     elif failure == "missing":
@@ -333,7 +332,7 @@ def test_input_export_round_trip(
     expected = reader.read_location_input(reference, "selected")
     edited = reader.read_location_input(reference, "selected")
     edited["count"] = 999
-    edited.attrs["lyra"] = {"result_ref": "forged"}
+    edited.attrs["lyra"] = {"job_id": "forged"}
     changed = reader.describe_result(reference)
     changed.location_inputs["selected"].table_schema.columns.clear()
     destination = tmp_path / "export.parquet"
@@ -351,8 +350,7 @@ def test_input_export_round_trip(
     assert actual.attrs == {
         "lyra": {
             "kind": "location_input",
-            "result_ref": reference,
-            "execution_id": description.execution_id,
+            "job_id": reference,
             "input_name": "selected",
             "description": description.location_inputs["selected"].model_dump(
                 mode="json"
@@ -384,7 +382,7 @@ def test_input_export_lookup_errors(
     name = "selected"
     expected = FileNotFoundError
     if failure == "reference":
-        reference, expected = "bad", InvalidResultReferenceError
+        reference, expected = "bad", ValidationError
     elif failure == "missing":
         reference, expected = "0" * 32, ResultNotFoundError
     elif failure == "name":

@@ -5,7 +5,7 @@ contentType: Reference
 contentPlan: reference/location-artifacts
 ---
 
-Use pandas and GeoPandas to read standalone table files. Managed GeoParquet exports also include a Lyra description and references to retained results and reports. These references require the associated store or deployment.
+Use pandas and GeoPandas to read standalone table files. Managed GeoParquet exports also include a Lyra description and the job ID. Use the ID with the associated store or deployment to retrieve the report and tables.
 
 ## Native readers
 
@@ -28,8 +28,7 @@ After you read a [managed GeoParquet export](../../use/location-exports/), `fram
 | Field | Meaning |
 | --- | --- |
 | `kind` | `metric_output` or `location_input` |
-| `result_ref` | Originating retained result reference |
-| `execution_id` | Execution associated with that result, including cache reuse |
+| `job_id` | Originating retained job ID |
 | `output_name` or `input_name` | Selected name, according to `kind` |
 | `description` | Complete selected description serialized with `model_dump(mode="json")`, including null fields |
 
@@ -66,7 +65,7 @@ Computed outputs keep their own result and named-table identity. Structural colu
 | Correspondence input | Immediate `source_location_id` and target `location_id` |
 | Unpartitioned output | Only declared columns; export doesn’t add ownership IDs or row keys |
 
-Correspondence geometry and attributes belong to the target, which may appear under several sources. Result and execution references identify retained results and runs separately from provider records. Runs that reuse values can have different result and execution references.
+In a correspondence table, the geometry and attributes describe the target. The same target can appear under several sources. The exported `job_id` identifies the run that produced the saved selection, including a run that reused cached values.
 
 ### Schema and preservation
 
@@ -82,6 +81,6 @@ Empty tables retain these declarations without fabricated rows. Lyra writes only
 
 ### Retained references
 
-Supply the associated store or deployment to [follow references to descriptions and reports](../../use/location-exports/#follow-references-to-reports). Reports stay in the retained store; the file includes neither report bodies nor the store’s location. File metadata doesn’t register a provider or bind a managed execution.
+Use the job ID to [read the description and report for an exported table](../../use/location-exports/#read-the-report-for-an-exported-table). Supply the original store path or deployment address. The file contains the selected table’s metadata. The full report stays in the store. Reading the file doesn’t register a provider or start a run.
 
 Third-party rewriting may discard custom attributes. Files without Lyra metadata remain readable spatial files, and file checksums don’t establish provider record identity.

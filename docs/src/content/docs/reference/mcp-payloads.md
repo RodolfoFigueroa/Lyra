@@ -74,7 +74,7 @@ Keep the job ID to check the job’s status and retrieve its result.
 
 ```json
 {
-  "job_id": "job-1",
+  "job_id": "12345678901234567890123456789012",
   "next_tool": "lyra_get_job_result"
 }
 ```
@@ -86,7 +86,7 @@ Wait for `poll_after_seconds` before checking status again.
 ```json
 {
   "result": {
-    "job_id": "job-1",
+    "job_id": "12345678901234567890123456789012",
     "status": "queued",
     "metric": "city_street_maintenance",
     "created_at": "2026-09-24T12:00:00Z",
@@ -109,7 +109,7 @@ A running job may report progress, but lifecycle status determines completion. T
 ```json
 {
   "result": {
-    "job_id": "job-1",
+    "job_id": "12345678901234567890123456789012",
     "status": "running",
     "metric": "city_street_maintenance",
     "created_at": "2026-09-24T12:00:00Z",
@@ -149,11 +149,11 @@ The tool call succeeds (`isError: false`) even when it reports a failed job.
 ```json
 {
   "result": {
-    "job_id": "failed-1",
+    "job_id": "12345678901234567890123456789014",
     "status": "failed",
     "result_kind": "failed",
     "lifetime": {},
-    "download": "/jobs/failed-1/result/download",
+    "download": "/jobs/12345678901234567890123456789014/result/download",
     "error": {
       "message": "Execution failed"
     },
@@ -177,7 +177,7 @@ A tool error reports `result_not_found` with `isError: true`.
     "code": "result_not_found",
     "message": "This job is unknown or expired.",
     "details": {
-      "job_id": "old-1"
+      "job_id": "12345678901234567890123456789015"
     }
   }
 }
@@ -191,7 +191,7 @@ For a successful job, the download handoff returns a URL and authentication inst
 
 ```json
 {
-  "job_id": "job-1",
+  "job_id": "12345678901234567890123456789012",
   "status": "succeeded",
   "format": "json",
   "media_type": "application/json",
@@ -200,7 +200,7 @@ For a successful job, the download handoff returns a URL and authentication inst
   },
   "lyra_api": {
     "method": "GET",
-    "url": "https://lyra.example/api/jobs/job-1/result/download",
+    "url": "https://lyra.example/api/jobs/12345678901234567890123456789012/result/download",
     "authentication": {
       "scheme": "Bearer",
       "credential_env_var": "LYRA_AGENT_API_KEY"
@@ -259,13 +259,13 @@ Download the [complete compact provenance response](../../examples/mcp/compact-p
 
 ## Retained description preview
 
-Pass these `tools/call` parameters with a saved result reference. Use your saved reference in place of the example value:
+To inspect saved metadata, pass your job ID to `lyra_describe_result` in a `tools/call` request.
 
 ```json
 {
   "name": "lyra_describe_result",
   "arguments": {
-    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "job_id": "12345678901234567890123456789012"
   }
 }
 ```
@@ -276,12 +276,11 @@ When the complete description exceeds the inspection limit, the tool returns a p
 {
   "result": {
     "kind": "preview",
-    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "execution_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "job_id": "12345678901234567890123456789012",
     "omitted": [
       "description"
     ],
-    "download_url": "https://lyra.example/api/results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/description/download"
+    "download_url": "https://lyra.example/api/results/12345678901234567890123456789012/description/download"
   }
 }
 ```
@@ -290,13 +289,13 @@ Follow the link with your agent Bearer credential for the complete description, 
 
 ## Retained report preview
 
-Use the saved execution ID:
+Use the same job ID with `lyra_inspect_report` to inspect the execution report.
 
 ```json
 {
   "name": "lyra_inspect_report",
   "arguments": {
-    "execution_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    "job_id": "12345678901234567890123456789012"
   }
 }
 ```
@@ -307,13 +306,13 @@ Large parameters and large graphs produce the same fixed preview:
 {
   "result": {
     "kind": "preview",
-    "execution_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "job_id": "12345678901234567890123456789012",
     "metric": "city_street_maintenance",
     "status": "succeeded",
     "omitted": [
       "report"
     ],
-    "download_url": "https://lyra.example/api/executions/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/report/download"
+    "download_url": "https://lyra.example/api/executions/12345678901234567890123456789012/report/download"
   }
 }
 ```
@@ -328,7 +327,7 @@ Choose a named output from the description:
 {
   "name": "lyra_download_table",
   "arguments": {
-    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "job_id": "12345678901234567890123456789012",
     "output_name": "maintenance"
   }
 }
@@ -338,9 +337,9 @@ The tool returns a link, with no Arrow data in the MCP envelope:
 
 ```json
 {
-  "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "job_id": "12345678901234567890123456789012",
   "output_name": "maintenance",
-  "download_url": "https://lyra.example/api/results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tables/maintenance/download"
+  "download_url": "https://lyra.example/api/results/12345678901234567890123456789012/tables/maintenance/download"
 }
 ```
 
@@ -354,7 +353,7 @@ To request the first page, omit `cursor`:
 {
   "name": "lyra_get_result_rows",
   "arguments": {
-    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "job_id": "12345678901234567890123456789012",
     "output_name": "maintenance"
   }
 }
@@ -385,9 +384,9 @@ An oversized row produces `isError: true` with this structured error. The reques
   "error": {
     "code": "row_too_large",
     "message": "The next row exceeds the response size limit.",
-    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "job_id": "12345678901234567890123456789012",
     "output_name": "maintenance",
-    "download_url": "https://lyra.example/api/results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tables/maintenance/download"
+    "download_url": "https://lyra.example/api/results/12345678901234567890123456789012/tables/maintenance/download"
   }
 }
 ```
@@ -398,13 +397,13 @@ Download the complete Arrow table with the same credential. It includes rows alr
 
 Location-input tools return saved rows or authenticated Arrow download URLs for a completed result. Choose `input_name` from the result description’s `location_inputs`.
 
-This request reads the first page using the default limit of 100 rows. Replace `result_ref` with your saved reference:
+Pass the job ID and input name to read the first page of saved records. The default page limit is 100 rows.
 
 ```json {2,4-5}
 {
   "name": "lyra_get_location_input_rows",
   "arguments": {
-    "result_ref": "12345678901234567890123456789012",
+    "job_id": "12345678901234567890123456789012",
     "input_name": "streets"
   }
 }
@@ -412,11 +411,11 @@ This request reads the first page using the default limit of 100 rows. Replace `
 
 The response includes `rows` and `next_cursor` directly in `structuredContent`. Input rows contain provider attributes and geometry, with no metric `row_key`. Correspondence rows map immediate source records to target records through `source_location_id` and `location_id`.
 
-`lyra_download_location_input` accepts the same `result_ref` and `input_name` without pagination arguments. Its response contains these fields directly in `structuredContent`:
+`lyra_download_location_input` accepts the same `job_id` and `input_name` without pagination arguments. Its response contains these fields directly in `structuredContent`:
 
 | Field | Value |
 | --- | --- |
-| `result_ref` | The requested result reference |
+| `job_id` | The requested job ID |
 | `input_name` | The requested location-input name |
 | `download_url` | An absolute Arrow download URL using the deployment’s public API base URL |
 
@@ -429,7 +428,7 @@ For an unavailable input, the tool sets `isError` to `true` and returns this pay
   "error": {
     "code": "location_input_unavailable",
     "message": "The location input was not materialized for this result.",
-    "result_ref": "12345678901234567890123456789012",
+    "job_id": "12345678901234567890123456789012",
     "input_name": "streets"
   }
 }

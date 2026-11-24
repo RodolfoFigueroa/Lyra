@@ -55,7 +55,7 @@ class InterfaceSuite:
         self.jobs.read_job.return_value = self.results.observation
         service = ResultService(self.jobs, path)
         self.runtime.results = service
-        self.result_request = GetJobResultInput(job_id="benchmark")
+        self.result_request = GetJobResultInput(job_id=self.results.native.id)
         self.loop = asyncio.Runner()
         app = FastAPI()
         app.state.runtime = Mock(
@@ -142,7 +142,9 @@ class InterfaceSuite:
 
     def time_rest_result(self, _nodes: int) -> None:
         """Serialize a retained result through the HTTP route."""
-        self.loop.run(self.client.get("/jobs/benchmark/result")).raise_for_status()
+        self.loop.run(
+            self.client.get(f"/jobs/{self.result_request.job_id}/result")
+        ).raise_for_status()
 
     def time_mcp_result(self, _nodes: int) -> None:
         """Project a retained result through MCP tool dispatch."""

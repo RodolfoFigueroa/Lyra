@@ -215,12 +215,12 @@ def test_published_selector_stages_and_partial_reuse(
             )
             result.metadata.store_path.touch()
             with ResultStore.open(result.metadata.store_path) as reader:
-                saved = reader.describe_result(
-                    result.report.result_ref
-                ).location_inputs["places"]
+                saved = reader.describe_result(result.report.job_id).location_inputs[
+                    "places"
+                ]
                 assert saved.source_scope == source.scope
                 assert saved.provider_scope == target.scope
-                assert reader.read_report(result.report.execution_id) == result.report
+                assert reader.read_report(result.report.job_id) == result.report
         assert set(result.report.request.inputs) == {"source"}
         assert result.report.request.inputs["source"].ids == ids
         assert operation.outcome == ("reused" if warm and ids else expected)

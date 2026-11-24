@@ -15,6 +15,7 @@ from lyra.contracts.jobs import (
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.server.mcp.serialization import serialize_result, serialized_size
 from lyra.server.result_projection import project_observation
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.result_helpers import inspection_of, result_observation
 
 
@@ -24,17 +25,11 @@ def column(name: str) -> ColumnMetadata:
 
 def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
     output = project_observation(
-        "job",
+        TEST_JOB_ID,
         result_observation(
             snapshot=JobStatusInfo(
                 job_id=result.job_id,
                 status=result.status,
-                execution_id=result.execution_id
-                if isinstance(result, TableJobResult)
-                else None,
-                result_ref=result.result_ref
-                if isinstance(result, TableJobResult)
-                else None,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
             ),
@@ -73,9 +68,7 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
             geometry="geom",
         )
     result = TableJobResult(
-        result_ref="a" * 32,
-        execution_id="b" * 32,
-        job_id="job",
+        job_id=TEST_JOB_ID,
         outputs=outputs,
         output_metadata=metadata,
     )
@@ -109,9 +102,7 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
 
 def test_many_outputs_share_preview_limits() -> None:
     result = TableJobResult(
-        result_ref="a" * 32,
-        execution_id="b" * 32,
-        job_id="job",
+        job_id=TEST_JOB_ID,
         outputs={f"table{i}": [{"value": i}] * 3 for i in range(30)},
         output_metadata={f"table{i}": OutputMetadata(columns=[]) for i in range(30)},
     )
@@ -158,9 +149,7 @@ def test_wire_budget_and_explicit_omission(large: str) -> None:
     else:
         value = [value]
     result = TableJobResult(
-        result_ref="a" * 32,
-        execution_id="b" * 32,
-        job_id="job",
+        job_id=TEST_JOB_ID,
         outputs={"output": value},
         output_metadata={"output": declaration},
     )
@@ -189,7 +178,7 @@ def test_graph_failure_path_survives_inspection() -> None:
         "node": "plugin.source",
         "dependency_path": ["plugin.root", "plugin.middle", "plugin.source"],
     }
-    observation = inspect(FailedJobResult(job_id="job", error=error))
+    observation = inspect(FailedJobResult(job_id=TEST_JOB_ID, error=error))
     assert observation.status == "failed"
     assert observation.outputs == {}
     assert observation.error == error
@@ -197,9 +186,7 @@ def test_graph_failure_path_survives_inspection() -> None:
 
 def test_summaries_use_observed_values_without_schema_coercion() -> None:
     result = TableJobResult(
-        result_ref="a" * 32,
-        execution_id="b" * 32,
-        job_id="job",
+        job_id=TEST_JOB_ID,
         outputs={
             "output": [
                 {"mixed": 3, "boolean": True, "number": -2, "null": None},

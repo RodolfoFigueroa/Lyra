@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.config import JobsConfig, LyraConfig
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope
+from lyra.contracts.references import new_job_id
 from lyra.server import worker
 from test_support.canonical_execution import canonical_workload
 from test_support.receiving_workloads import receiving_workload
@@ -29,7 +30,7 @@ class BoundWorkerSuite:
     def prepare_worker(self) -> None:
         """Bind the selected workload to temporary storage and fake job services."""
         self.native = SimpleNamespace(
-            id="benchmark",
+            id=new_job_id(),
             origin="heavy",
             worker_name="benchmark",
             meta={},
@@ -72,7 +73,10 @@ class BoundWorkerSuite:
             ),
             patch.object(worker, "build_run_context", return_value=Mock()),
         ):
-            worker.run_metric_task(self.envelope.model_dump(mode="json"))
+            self.native.id = new_job_id()
+            worker.run_metric_task(
+                self.envelope.model_dump(mode="json") | {"job_id": self.native.id}
+            )
 
     def peakmem_execute(self) -> None:
         """Measure whole-process memory through worker result persistence."""

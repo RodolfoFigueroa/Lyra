@@ -14,6 +14,7 @@ from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server import job_store, worker
+from lyra.server.results import ResultService
 from tests.local_persistence_helpers import definition
 from tests.queue_helpers import accepted_envelope
 from tests.sqlite_helpers import Database, database
@@ -35,10 +36,10 @@ def test_jobs_share_values_with_local_and_survive_expiry(
         {"plugin": plugin}, result_store_path=runtime.config.result_store_path
     ).run("root")
     first = worker.run_metric_task(envelope.model_dump(mode="json"))
-    native.id = "second-job"
+    native.id = "2" * 32
     second_envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     second = worker.run_metric_task(second_envelope.model_dump(mode="json"))
-    refs = [local_result.metadata.result_ref, first["result_ref"], second["result_ref"]]
+    refs = [local_result.metadata.job_id, first["job_id"], second["job_id"]]
     assert len(set(refs)) == 3
     assert calls == [[1]]
     assert len(database.rows["stored_results"]) == 1
@@ -49,19 +50,30 @@ def test_jobs_share_values_with_local_and_survive_expiry(
     native.latest_result = Mock(return_value=SimpleNamespace(return_value=second))
     monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=native))
     monkeypatch.setattr(runtime.jobs.connection, "ttl", Mock(return_value=60))
+    # SQLite publication precedes the worker returning its completion to RQ.
+    native.get_status.return_value = JobStatus.STARTED
+    path = runtime.config.result_store_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    running = runtime.jobs.read_status(native.id)
+    assert running is not None
+    assert running.status == "running"
+    assert_committed(runtime.results, native.id)
+    native.get_status.return_value = JobStatus.FINISHED
     observed = runtime.jobs.read_job(native.id)
     assert observed is not None
-    assert observed.result_ref == second["result_ref"]
+    assert observed.snapshot.job_id == second["job_id"]
     monkeypatch.setattr(runtime.jobs.connection, "ttl", Mock(return_value=-2))
-    assert runtime.jobs.read_job(native.id) is None
+    assert runtime.jobs.read_status(native.id) is None
+    assert_committed(runtime.results, native.id)
     # A restart and changed cache policy cannot remove previously published results.
     install_definitions(
         tmp_path, monkeypatch, {"plugin": definition(calls, cache="off")}
     )
-    native_job(monkeypatch)
-    envelope = accepted_envelope(job_id="graph-job", metric="root", inputs={})
+    native = native_job(monkeypatch)
+    envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     third = worker.run_metric_task(envelope.model_dump(mode="json"))
-    assert third["result_ref"] not in refs
+    assert third["job_id"] not in refs
     assert calls == [[1], [1]]
     assert_retained(runtime.config.result_store_path, refs)
     assert not list(tmp_path.rglob("*.arrow"))
@@ -106,3 +118,9 @@ def assert_retained(path: Path, refs: list) -> None:
             == descriptions[1].outputs
             == descriptions[2].outputs
         )
+
+
+def assert_committed(service: ResultService, job_id: str) -> None:
+    assert service.read_report(job_id).job_id == job_id
+    assert service.read_description(job_id).job_id == job_id
+    assert b"".join(service.stream_table(job_id, "answer"))

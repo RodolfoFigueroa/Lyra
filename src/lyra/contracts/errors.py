@@ -139,23 +139,19 @@ class _ResultLookupError(ResultAccessError):
 
     def __init__(
         self,
-        result_ref: object,
+        job_id: object,
         output_name: str | None = None,
         *,
         input_name: str | None = None,
     ) -> None:
         """Capture the requested reference and optional output or input name."""
-        self.result_ref = result_ref
+        self.job_id = job_id
         self.output_name = output_name
         self.input_name = input_name
         super().__init__(
-            f"{type(self).__name__}: {result_ref!r}, "
+            f"{type(self).__name__}: {job_id!r}, "
             f"output={output_name!r}, input={input_name!r}"
         )
-
-
-class InvalidResultReferenceError(_ResultLookupError):
-    """The supplied reference is malformed."""
 
 
 class ResultNotFoundError(_ResultLookupError):
@@ -171,7 +167,7 @@ class InvalidPaginationError(_ResultLookupError):
 
     def __init__(
         self,
-        result_ref: object,
+        job_id: object,
         output_name: str | None,
         parameter: Literal["cursor", "limit"],
         *,
@@ -179,7 +175,7 @@ class InvalidPaginationError(_ResultLookupError):
     ) -> None:
         """Capture the requested output and invalid pagination parameter."""
         self.parameter = parameter
-        super().__init__(result_ref, output_name, input_name=input_name)
+        super().__init__(job_id, output_name, input_name=input_name)
 
 
 class RowTooLargeError(_ResultLookupError):
@@ -187,7 +183,7 @@ class RowTooLargeError(_ResultLookupError):
 
     def __init__(
         self,
-        result_ref: object,
+        job_id: object,
         output_name: str | None,
         download_url: str,
         *,
@@ -195,27 +191,23 @@ class RowTooLargeError(_ResultLookupError):
     ) -> None:
         """Capture the output and authenticated complete-table fallback."""
         self.download_url = download_url
-        super().__init__(result_ref, output_name, input_name=input_name)
+        super().__init__(job_id, output_name, input_name=input_name)
 
 
 class LocationInputUnavailableError(ResultAccessError):
     """The declared location input was not materialized for this result."""
 
-    def __init__(self, result_ref: object, input_name: str) -> None:
+    def __init__(self, job_id: object, input_name: str) -> None:
         """Capture the result and its unavailable root location-input name."""
-        self.result_ref = result_ref
+        self.job_id = job_id
         self.input_name = input_name
-        super().__init__(f"{type(self).__name__}: {result_ref!r}, input={input_name!r}")
+        super().__init__(f"{type(self).__name__}: {job_id!r}, input={input_name!r}")
 
 
 class _ReportLookupError(ResultAccessError):
-    def __init__(self, execution_id: object) -> None:
-        self.execution_id = execution_id
-        super().__init__(f"{type(self).__name__}: {execution_id!r}")
-
-
-class InvalidExecutionIDError(_ReportLookupError):
-    """The supplied execution ID is malformed."""
+    def __init__(self, job_id: object) -> None:
+        self.job_id = job_id
+        super().__init__(f"{type(self).__name__}: {job_id!r}")
 
 
 class ReportNotFoundError(_ReportLookupError):
@@ -229,7 +221,7 @@ class ReportIntegrityError(_ReportLookupError):
 class ExecutionPersistenceError(RuntimeError):
     """Required publication failed for an attempted execution."""
 
-    def __init__(self, execution_id: object) -> None:
+    def __init__(self, job_id: object) -> None:
         """Capture the attempted ID; chain the underlying storage failure."""
-        self.execution_id = execution_id
-        super().__init__(f"Execution persistence failed: {execution_id!r}")
+        self.job_id = job_id
+        super().__init__(f"Execution persistence failed: {job_id!r}")

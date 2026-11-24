@@ -70,7 +70,8 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     if contract.kind != "metric":
         message = "Benchmark requires a metric"
         raise ValueError(message)
-    native = Mock(id="benchmark", origin="default")
+    job_id = publish_fixture(work, rows, store_path, contract.outputs["root"])
+    native = Mock(id=job_id, origin="default")
     plan = prepare_execution(catalog.compiled, {"metric": "root"})
     provenance = JobRunProvenance(
         accepted=AcceptedJob(
@@ -82,20 +83,13 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     )
     native.meta = {}
     envelope = JobEnvelope(
-        job_id="benchmark",
+        job_id=job_id,
         accepted=provenance.accepted,
     ).model_dump(mode="json")
 
-    result_ref = publish_fixture(work, rows, store_path, contract.outputs["root"])
-    with SQLiteStore(store_path) as store:
-        execution_id = (
-            ResultDescriptions(store).read_complete(result_ref)[1].execution_id
-        )
     result = TableJobResult.model_validate(
         {
-            "job_id": "benchmark",
-            "execution_id": execution_id,
-            "result_ref": result_ref,
+            "job_id": job_id,
             "outputs": serialize_outputs("root", {"root": frame(rows)}),
             "output_metadata": contract.outputs,
             "provenance": provenance,
@@ -103,17 +97,13 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     )
     observation = JobObservation(
         snapshot=JobStatusInfo(
-            job_id="benchmark",
+            job_id=job_id,
             metric="root",
             status="succeeded",
-            execution_id=execution_id,
-            result_ref=result_ref,
             created_at=provenance.accepted.created_at,
             updated_at=provenance.accepted.created_at,
             completed_at=provenance.accepted.created_at,
         ),
-        result_ref=result_ref,
-        execution_id=execution_id,
         inspection=summarize_outputs({"root": frame(rows)}),
         provenance=provenance,
     )

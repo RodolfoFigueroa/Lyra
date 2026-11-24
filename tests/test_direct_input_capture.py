@@ -122,23 +122,23 @@ def test_direct_references(
             ("left", set() if empty else {"a", "b"}),
             ("right", {"x", "y"}),
         ):
-            saved = reader.read_location_input(result.metadata.result_ref, name)
+            saved = reader.read_location_input(result.metadata.job_id, name)
             assert set(saved.location_id) == ids
             assert saved.crs == "EPSG:4326"
             assert saved["count"].tolist() == [1] * len(ids)
             assert "row_key" not in saved
             saved.loc[:, "count"] = 100
             result.metadata.location_inputs[name].table_schema.columns.clear()
-            again = reader.read_location_input(result.metadata.result_ref, name)
+            again = reader.read_location_input(result.metadata.job_id, name)
             assert again["count"].tolist() == [1] * len(ids)
             assert (
-                reader.describe_result(result.metadata.result_ref)
+                reader.describe_result(result.metadata.job_id)
                 .location_inputs[name]
                 .provider_scope.description
                 == "Captured places"
             )
             assert (
-                reader.describe_result(result.metadata.result_ref)
+                reader.describe_result(result.metadata.job_id)
                 .location_inputs[name]
                 .table_schema.columns
             )
@@ -260,18 +260,18 @@ def test_complete_hit_restores_inputs_without_geometry(
         reused = run("count", inputs=inputs)
     assert not events
     assert reused.tables["rows"].empty
-    assert reused.metadata.result_ref != first.metadata.result_ref
+    assert reused.metadata.job_id != first.metadata.job_id
     path.touch()
     with ResultStore.open(path) as reader:
         for result in (first, reused):
             assert (
-                reader.describe_result(result.metadata.result_ref)
+                reader.describe_result(result.metadata.job_id)
                 .location_inputs["left"]
                 .provider_scope.description
                 == "Captured places"
             )
         for name, ids in (("left", {"a", "b"}), ("right", {"shared"})):
-            saved = reader.read_location_input(reused.metadata.result_ref, name)
+            saved = reader.read_location_input(reused.metadata.job_id, name)
             assert set(saved.location_id) == ids
             assert saved.crs == "EPSG:4326"
 
@@ -325,7 +325,7 @@ def test_skipped_input_inventory(
         )
     path.touch()
     with ResultStore.open(path) as reader:
-        ref = result.metadata.result_ref
+        ref = result.metadata.job_id
         empty = reader.read_location_input(ref, "primary")
         assert empty.empty
         assert empty.geometry.name == "geometry"

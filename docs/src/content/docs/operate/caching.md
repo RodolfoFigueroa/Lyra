@@ -30,7 +30,7 @@ If storage or publication fails, the attempt fails even when calculation finishe
 
 Lyra retains stored values, result descriptions, and reports indefinitely within a supported store. Job expiry, worker restarts, and changes to cache keys or policies don’t delete them. Plan for storage growth: Lyra doesn’t automatically remove old data.
 
-To read data after job expiry, use [read-only `ResultStore` lookup](../../use/results/#reopen-a-local-result) with a saved execution ID. You need filesystem access to the store, but no plugins or external data acquisition. Remote job methods still depend on Redis retention.
+After queue expiry, use the job ID to [read retained results through the API](../../use/results/#keep-access-after-job-expiry). With filesystem access, you can also [open the store locally](../../use/results/#reopen-a-local-result). Local reads need no plugins or provider connections.
 
 Retention applies while the store’s schema remains compatible with your Lyra version. Closed alpha doesn’t promise migrations or readers for incompatible stores; you can explicitly reset a development store if needed.
 
@@ -69,7 +69,4 @@ and HTTP/MCP rows use bounded SQL-selected pages. See the
 [benchmark guide](https://github.com/RodolfoFigueroa/lyra/blob/main/benchmarks/USAGE.md)
 for measurement scope.
 
-Retention does not authorize execution reuse. Providers with caching disabled still
-acquire records when execution needs them; downstream metric hits can skip acquisition.
-Input inspection uses retained values without acquisition fallback. Save result
-references for [input access after job expiry](../../use/results/#read-retained-location-inputs).
+A provider with caching disabled still acquires records when a calculation needs them. A downstream metric can skip acquisition if it reuses its cached result. To [read saved inputs after queue expiry](../../use/results/#read-retained-location-inputs), keep the job ID. These reads use the saved records directly.

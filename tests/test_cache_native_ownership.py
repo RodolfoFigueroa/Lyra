@@ -196,19 +196,19 @@ def test_mutating_consumers_and_repeated_reads(
         assert work == expected_work[policy][iteration]
         assert acquired == [[{"a"}], [{"b"}], []][iteration]
         mutate(result.tables["data"])
-        assert result.metadata.result_ref is not None
+        assert result.metadata.job_id is not None
         with ResultStore(
             SQLiteStore(tmp_path / "values.sqlite", read_only=True)
         ) as store:
-            captured = store.read_location_input(result.metadata.result_ref, "places")
+            captured = store.read_location_input(result.metadata.job_id, "places")
             assert set(captured.location_id) == set(ids)
             assert captured.crs == "EPSG:4326"
             assert captured["count"].tolist() == [1] * len(ids)
             assert all(geometry == Point(0, 0) for geometry in captured.geometry)
-            first = store.read_result(result.metadata.result_ref)
+            first = store.read_result(result.metadata.job_id)
             check(first.tables["data"], set(ids), empty=empty)
             mutate(first.tables["data"])
             first.metadata.outputs.clear()
-            again = store.read_result(result.metadata.result_ref)
+            again = store.read_result(result.metadata.job_id)
             assert again.metadata.outputs
             check(again.tables["data"], set(ids), empty=empty)

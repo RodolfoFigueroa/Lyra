@@ -7,11 +7,11 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 from rq.job import Job
 from sqlalchemy.exc import DatabaseError
 
 from lyra.contracts.errors import (
-    InvalidExecutionIDError,
     ReportIntegrityError,
     ReportNotFoundError,
     ResultAccessError,
@@ -68,46 +68,43 @@ def test_report_is_independent_of_jobs_values_and_plugins(
     database.rows = {"final_results": database.rows["final_results"]}
     before = deepcopy(database.rows)
     with ResultStore.open(path) as reader:
-        report = reader.read_report(expected.execution_id)
+        report = reader.read_report(expected.job_id)
         assert report == expected
         assert report.nodes is report.nodes
         report.request.parameters.clear()
         report.nodes[0].parameters.clear()
         report.nodes[0].outputs["a"].table_schema.columns.clear()
-        assert reader.read_report(expected.execution_id) == expected
-    assert report.result_ref == expected.result_ref
+        assert reader.read_report(expected.job_id) == expected
+    assert report.job_id == expected.job_id
     with pytest.raises(RuntimeError, match="closed"):
-        reader.read_report(expected.execution_id)
+        reader.read_report(expected.job_id)
     with ResultStore.open(path) as reopened:
-        restored = reopened.read_report(expected.execution_id)
+        restored = reopened.read_report(expected.job_id)
     assert restored == expected
     assert database.rows == before
 
 
-@pytest.mark.parametrize("execution_id", ["", "bad", "a" * 31, "A" * 32, "0" * 33])
+@pytest.mark.parametrize("job_id", ["", "bad", "a" * 31, "A" * 32, "0" * 33])
 def test_invalid_id(
-    retained: tuple[Path, ExecutionReport], database: Database, execution_id: str
+    retained: tuple[Path, ExecutionReport], database: Database, job_id: str
 ) -> None:
     database.connection.execute.side_effect = AssertionError("Must validate before SQL")
     with (
         ResultStore.open(retained[0]) as reader,
-        pytest.raises(InvalidExecutionIDError) as captured,
+        pytest.raises(ValidationError),
     ):
-        reader.read_report(execution_id)
-    assert isinstance(captured.value, ResultAccessError)
-    assert captured.value.execution_id == execution_id
-    assert isinstance(captured.value.__cause__, ValueError)
+        reader.read_report(job_id)
 
 
 def test_absent_attempt_report(retained: tuple[Path, ExecutionReport]) -> None:
-    attempted_execution_id = uuid4().hex
+    attempted_job_id = uuid4().hex
     with (
         ResultStore.open(retained[0]) as reader,
         pytest.raises(ReportNotFoundError) as captured,
     ):
-        reader.read_report(attempted_execution_id)
+        reader.read_report(attempted_job_id)
     assert isinstance(captured.value, ResultAccessError)
-    assert captured.value.execution_id == attempted_execution_id
+    assert captured.value.job_id == attempted_job_id
 
 
 def test_table_and_description_do_not_decode_report(
@@ -117,16 +114,16 @@ def test_table_and_description_do_not_decode_report(
     row = database.rows["final_results"][0]
     row["report"] = "{"
     with ResultStore.open(path) as reader:
-        assert reader.describe(report.result_ref).execution_id == report.execution_id
-        assert reader.read_table(report.result_ref, "a").value.tolist() == [1]
+        assert reader.describe(report.job_id).job_id == report.job_id
+        assert reader.read_table(report.job_id, "a").value.tolist() == [1]
         with pytest.raises(ReportIntegrityError):
-            reader.read_report(report.execution_id)
+            reader.read_report(report.job_id)
         with pytest.raises(ResultIntegrityError):
-            reader.read_result(report.result_ref)
+            reader.read_result(report.job_id)
         row["report"] = None
         with pytest.raises(ResultIntegrityError) as captured:
-            reader.read_table(report.result_ref, "a")
-        assert captured.value.result_ref == report.result_ref
+            reader.read_table(report.job_id, "a")
+        assert captured.value.job_id == report.job_id
         assert captured.value.output_name == "a"
 
 
@@ -137,8 +134,7 @@ def test_table_and_description_do_not_decode_report(
         "report_missing",
         "description_json",
         "description_missing",
-        "execution_id",
-        "result_ref",
+        "job_id",
         "metric",
         "parameters",
         "revision",
@@ -156,14 +152,14 @@ def test_damaged_report_pair(
     error_type = ReportIntegrityError if lookup == "report" else ResultIntegrityError
     with ResultStore.open(path) as reader:
         read = reader.read_report if lookup == "report" else reader.read_result
-        identifier = report.execution_id if lookup == "report" else report.result_ref
+        identifier = report.job_id
         with pytest.raises(error_type) as captured:
             read(identifier)
     assert isinstance(captured.value, ResultAccessError)
     if isinstance(captured.value, ReportIntegrityError):
-        assert captured.value.execution_id == report.execution_id
+        assert captured.value.job_id == report.job_id
     else:
-        assert captured.value.result_ref == report.result_ref
+        assert captured.value.job_id == report.job_id
         assert captured.value.output_name is None
     assert captured.value.__cause__ is not None
 
@@ -182,8 +178,8 @@ def test_storage_error_context(
         ResultStore.open(path) as reader,
         pytest.raises(ReportIntegrityError) as captured,
     ):
-        reader.read_report(report.execution_id)
-    assert captured.value.execution_id == report.execution_id
+        reader.read_report(report.job_id)
+    assert captured.value.job_id == report.job_id
     assert captured.value.__cause__ is failure
 
 
@@ -193,7 +189,7 @@ def damage_pair(database: Database, damage: str) -> None:
         row[damage.removesuffix("_json")] = "{"
     elif damage.endswith("_missing"):
         row[damage.removesuffix("_missing")] = None
-    elif damage in {"execution_id", "result_ref"}:
+    elif damage == "job_id":
         saved = json.loads(row["report"])
         saved[damage] = uuid4().hex
         row["report"] = json.dumps(saved)

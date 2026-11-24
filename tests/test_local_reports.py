@@ -82,18 +82,18 @@ def test_location_reports_and_resource_cleanup(
         report = result.report
         root = next(node for node in report.nodes if node.use_id == report.root_use_id)
         assert root.outcome == expected
-        assert report.execution_id == result.metadata.execution_id
+        assert report.job_id == result.metadata.job_id
         assert report.request.inputs["places"].ids == ids
         assert result.tables["data"].location_id.tolist() == ids
         assert root.outputs == result.metadata.outputs
         path.touch()
         events_before = events.copy()
         with ResultStore.open(path) as store:
-            described = store.describe(result.metadata.result_ref)
+            described = store.describe(result.metadata.job_id)
             assert described.model_dump() == result.metadata.model_dump(
                 exclude={"store_path"}
             )
-            reopened = store.read_result(result.metadata.result_ref)
+            reopened = store.read_result(result.metadata.job_id)
             assert reopened.report == report
             assert reopened.metadata == result.metadata
             pd.testing.assert_frame_equal(
@@ -107,7 +107,7 @@ def test_location_reports_and_resource_cleanup(
             attached.request.inputs["places"].ids.append("edited")
             reopened_root.outputs["data"].table_schema.columns.clear()
             assert reopened.metadata == result.metadata
-            assert store.read_result(result.metadata.result_ref).report == report
+            assert store.read_result(result.metadata.job_id).report == report
         assert reopened.report is attached
         assert events == events_before
         root.outputs["data"].table_schema.columns[0].description = "edited"
@@ -132,7 +132,7 @@ def test_changed_declarations_preserve_reports_and_detached_operation_details(
     newer = LocalRunner.from_definitions(changed, result_store_path=path).run(
         "consumer", inputs=inputs
     )
-    assert newer.metadata.execution_id != original.metadata.execution_id
+    assert newer.metadata.job_id != original.metadata.job_id
     path.touch()
     events.clear()
     forbidden = Mock(
@@ -143,10 +143,10 @@ def test_changed_declarations_preserve_reports_and_detached_operation_details(
     monkeypatch.setattr(loading, "load_installed_plugin_definition", forbidden)
     with ResultStore.open(path) as reader:
         assert (
-            reader.describe(original.metadata.result_ref).outputs
+            reader.describe(original.metadata.job_id).outputs
             == original.metadata.outputs
         )
-        restored = reader.read_result(original.metadata.result_ref)
+        restored = reader.read_result(original.metadata.job_id)
         assert restored.report == expected
         report = restored.report
         report.request.inputs["source"].ids.append("edited")
@@ -162,8 +162,8 @@ def test_changed_declarations_preserve_reports_and_detached_operation_details(
         operation.target_scope = operation.target_scope.model_copy(
             update={"provider_id": "edited"}
         )
-        assert reader.read_report(original.metadata.execution_id) == expected
-        assert reader.read_result(original.metadata.result_ref).report == expected
+        assert reader.read_report(original.metadata.job_id) == expected
+        assert reader.read_result(original.metadata.job_id).report == expected
     # Attached metadata and native values remain independent after closure.
     assert restored.metadata == original.metadata
     pd.testing.assert_frame_equal(

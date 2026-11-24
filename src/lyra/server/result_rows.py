@@ -40,7 +40,7 @@ class RowPageBuilder:
 
     def build(
         self,
-        result_ref: str,
+        job_id: str,
         output_name: str,
         limit: int = 100,
         cursor: str | None = None,
@@ -50,28 +50,26 @@ class RowPageBuilder:
         Returns:
             A page whose cursor advances only past rows included in the response.
         """
-        with self.store.page_candidates(
-            result_ref, output_name, limit, cursor
-        ) as selected:
-            return self._build(selected, result_ref, output_name)
+        with self.store.page_candidates(job_id, output_name, limit, cursor) as selected:
+            return self._build(selected, job_id, output_name)
 
     def build_location_input(
         self,
-        result_ref: str,
+        job_id: str,
         input_name: str,
         limit: int = 100,
         cursor: str | None = None,
     ) -> ResultRowPage:
         """Return complete input rows within the active transport's encoded budget."""
         with self.store.location_input_page_candidates(
-            result_ref, input_name, limit, cursor
+            job_id, input_name, limit, cursor
         ) as selected:
-            return self._build(selected, result_ref, None, input_name=input_name)
+            return self._build(selected, job_id, None, input_name=input_name)
 
     def _build(
         self,
         selected: CandidatePage,
-        result_ref: str,
+        job_id: str,
         output_name: str | None,
         *,
         input_name: str | None = None,
@@ -87,12 +85,12 @@ class RowPageBuilder:
                 if page.rows:
                     return page
                 path = (
-                    location_input_download_path(result_ref, input_name)
+                    location_input_download_path(job_id, input_name)
                     if input_name is not None
-                    else table_download_path(result_ref, output_name or "")
+                    else table_download_path(job_id, output_name or "")
                 )
                 raise RowTooLargeError(
-                    result_ref,
+                    job_id,
                     output_name,
                     absolute_api_url(self.public_api_base_url, path),
                     input_name=input_name,

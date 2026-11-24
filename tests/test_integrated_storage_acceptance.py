@@ -61,7 +61,7 @@ def test_nullable_results_across_execution_entries(
     local_keys = {row["value_key"] for row in database.rows["stored_results"]}
     development = runner.run_development("root")
     envelope = accepted_envelope(
-        job_id="nullable-job",
+        job_id="a" * 32,
         metric="root",
         inputs={},
         catalog=runtime.catalog.compiled,
@@ -69,10 +69,10 @@ def test_nullable_results_across_execution_entries(
     native = native_job(monkeypatch)
     native.id = envelope.job_id
     result = worker.run_metric_task(envelope.model_dump(mode="json"))
-    key = str(result["result_ref"])
+    key = str(result["job_id"])
     assert {row["value_key"] for row in database.rows["stored_results"]} == local_keys
     assert len(local_keys) == 1
-    assert len({key, local.metadata.result_ref, development.metadata.result_ref}) == 3
+    assert len({key, local.metadata.job_id, development.metadata.job_id}) == 3
     assert (
         read_retained(key).metadata.outputs
         == local.metadata.outputs
@@ -219,16 +219,16 @@ def test_revisions_selections_and_parameters_share_table_without_mixing(
     path.touch()  # Only existence is real; the service guard and SQL fake stay active.
     with ResultStore.open(path) as reader:
         for result, scope, ids, factor in retained:
-            reopened = reader.read_result(result.metadata.result_ref)
+            reopened = reader.read_result(result.metadata.job_id)
             assert reopened.metadata.outputs["rows"].owner_scope == scope
             assert sorted(reopened.tables["rows"].location_id) == sorted(ids)
             assert reopened.tables["rows"].value.tolist() == [
                 factor * scope_value(scope)
             ] * len(ids)
-            single = reader.read_table(result.metadata.result_ref, "rows")
+            single = reader.read_table(result.metadata.job_id, "rows")
             pd.testing.assert_frame_equal(single, reopened.tables["rows"])
     assert len(calls) == (0 if empty else 9)
-    assert len({result.metadata.result_ref for result, *_ in retained}) == 9
+    assert len({result.metadata.job_id for result, *_ in retained}) == 9
     # One registration per named output is a storage contract, across revisions.
     with SQLiteStore(path) as store:
         registrations = store.load_registrations()
@@ -257,7 +257,7 @@ def test_equal_bare_ids_keep_concrete_metric_scopes(
     path.touch()
     with ResultStore.open(path) as reader:
         for result, scope in retained:
-            restored = reader.read_result(result.metadata.result_ref)
+            restored = reader.read_result(result.metadata.job_id)
             assert restored.metadata.outputs["rows"].owner_scope == scope
             assert restored.tables["rows"].location_id.tolist() == (
                 [] if empty else ["a"]

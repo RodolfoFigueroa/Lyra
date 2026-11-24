@@ -15,6 +15,7 @@ from lyra.runtime.resources import ResourceScope, resolve_secret, resource_invoc
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, PluginDefinitionError, metric
 from lyra.sdk.resources import BaseIO, Resource
+from tests.job_id_helpers import TEST_JOB_ID
 
 
 class FileSettings(IOConfig):
@@ -144,7 +145,7 @@ def test_cleanup_partial_initialization_and_original_failure() -> None:
 
 def test_operation_preserves_results_exceptions_and_ignores_logging_failure() -> None:
     io = BaseIO(IOConfig(), {})
-    context = Mock(job_id="job", node="node")
+    context = Mock(job_id=TEST_JOB_ID, node="node")
     context.logger.info.side_effect = RuntimeError("logging failed")
     value = pd.DataFrame({"x": [1]})
     error = ValueError("operation failed")

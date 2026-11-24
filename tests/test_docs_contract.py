@@ -12,7 +12,6 @@ from importlib import import_module
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
-from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
@@ -44,7 +43,6 @@ from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.resources import ResourceScope
 from lyra.runtime.results import ResultStore
-from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.sdk.plugin_cli import main as plugin_main
 from lyra.sdk.plugin_cli import render_manifest
@@ -472,7 +470,7 @@ def test_mcp_workflow_examples_match_serialization_schemas(relative: str) -> Non
             continue
         if validate_retrieval_example(payload, tools):
             continue
-        if set(payload) == {"result_ref", "output_name"}:
+        if set(payload) == {"job_id", "output_name"}:
             validate(payload, tools["lyra_download_table"].inputSchema)
             continue
         if "status" not in payload and "error" in payload:
@@ -714,7 +712,7 @@ def test_installed_plugin_guide_runs_without_services(
     spec.loader.exec_module(module)
     assert module.tables["maintenance"].street_id.tolist() == ["street-1"]
     assert module.tables["maintenance"].maintenance_length_m.tolist() == [100.0]
-    assert module.result.report.execution_id == module.result.metadata.execution_id
+    assert module.result.report.job_id == module.result.metadata.job_id
     assert module.result.report.request.parameters == {"condition_threshold": 50}
 
 
@@ -733,25 +731,24 @@ def test_retained_result_example_reopens_detached_values(
     module = load_documented_module(path, "reopen_result", monkeypatch)
 
     assert module.store_path == store_path
-    assert module.result_ref != module.second.metadata.result_ref
-    assert module.execution_id != module.second.metadata.execution_id
+    assert module.job_id != module.second.metadata.job_id
     assert module.report == module.first.report == module.restored.report
     assert module.report is not module.restored.report
-    assert module.restored.metadata.execution_id == module.execution_id
+    assert module.restored.metadata.job_id == module.job_id
     assert module.maintenance.street_id.tolist() == ["street-1"]
     assert module.maintenance.maintenance_length_m.tolist() == [100.0]
     pd.testing.assert_frame_equal(
         module.maintenance, module.restored.tables["maintenance"]
     )
     with pytest.raises(RuntimeError, match="closed"):
-        module.store.read_result(module.result_ref)
+        module.store.read_result(module.job_id)
     module.restored.metadata.parameters.clear()
     module.restored.report.request.parameters.clear()
     module.report.request.inputs["streets"].ids.append("caller-edit")
     module.restored.tables["maintenance"]["maintenance_length_m"] = 999.0
     with ResultStore.open(store_path) as reader:
-        again = reader.read_result(module.result_ref)
-        retained_report = reader.read_report(module.execution_id)
+        again = reader.read_result(module.job_id)
+        retained_report = reader.read_report(module.job_id)
     assert again.metadata.parameters == module.first.metadata.parameters
     assert again.report == retained_report == module.first.report
     pd.testing.assert_frame_equal(module.maintenance, again.tables["maintenance"])
@@ -1070,14 +1067,9 @@ def test_published_location_graph(
         def close(self) -> None:
             events.append("close")
 
-    def context_factory(_node: str) -> RunContext:
-        assert "close" not in events
-        return create_autospec(RunContext, instance=True)
-
     runner = LocalRunner.from_definitions(
         {"metrics": module.plugin, "geography": module.provider},
         resource_overrides={"lots": FakeLots},
-        context_factory=context_factory,
     )
     request = deepcopy(module.request)
     if invalid_id is not None:

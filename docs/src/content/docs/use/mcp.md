@@ -8,7 +8,7 @@ sidebar: { label: "Connect An AI Assistant With MCP" }
 
 Connect an AI assistant to Lyra through the Model Context Protocol (MCP). You can then discover metrics, submit jobs, and retrieve their results. Connect your MCP client to the operator’s endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
 
-Connect to MCP through your existing Lyra server using the agent key. The [tool reference](../../reference/generated/mcp/) lists the available tools and their request and response schemas.
+See the [MCP tool reference](../../reference/generated/mcp/) for request and response schemas.
 
 The examples use the finished [city plugin](../../plugins/tutorial/package/). Your operator must [enable it on the server](../../operate/plugins/). Its bundled dataset requires no resource settings or data-service credentials.
 
@@ -62,7 +62,7 @@ The submission response gives you a job ID:
 
 ```json
 {
-  "job_id": "job-1",
+  "job_id": "12345678901234567890123456789012",
   "next_tool": "lyra_get_job_result"
 }
 ```
@@ -73,7 +73,7 @@ Every submission creates an independent job. A timeout can happen after acceptan
 
 ## 3. Observe the result
 
-Pass the returned `job_id` unchanged as a nonempty string. Lyra preserves whitespace. Empty strings and other types produce validation errors with `isError: true` and an explanation in text content.
+Copy the `job_id` from the submission response. It contains 32 lowercase hexadecimal characters. If an argument is invalid, the tool sets `isError` to `true` and returns the validation error in its text content.
 
 Call `lyra_get_job_result` with only `job_id`. Read the job’s status and output previews from `structuredContent.result`. If `status` is `queued` or `running`, wait two seconds before the next inspection.
 
@@ -81,11 +81,11 @@ The tool call succeeds (`isError: false`) even when it reports a failed job. Che
 
 Unknown IDs fail the job during execution. The job also fails if a provider cannot supply the data revision captured when Lyra accepted it. A conversion that returns no locations produces a valid empty selection, and execution continues.
 
-For successful jobs, save `execution_id` for the report and `result_ref` for retained descriptions, tables, and row pages. Inspection groups declarations, column summaries, and previews by output name. All outputs share a preview limit of five rows and twenty columns.
+Inspection groups declarations, column summaries, and previews by output name. Across all outputs, the preview includes up to five rows and twenty columns. Use the same `job_id` to retrieve saved tables, pages, and the report.
 
-To compare a baseline and a proposal, submit each as a separate job. For each run, use `lyra_inspect_report` to see the submitted changes. Use its result reference to compare [output rows](#read-retained-row-pages) and [selected input records](#read-retained-location-inputs) as JSON.
+Submit the baseline and the proposal as separate jobs. For each job ID, inspect the submitted changes with `lyra_inspect_report`. Then compare the [output rows](#read-retained-row-pages) and [selected input records](#read-retained-location-inputs).
 
-Truncation metadata records what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric. To read the saved report without truncation, [inspect it with its execution ID](#inspect-a-retained-execution-report).
+Truncation metadata records what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric. To read the saved report without truncation, [inspect it with its job ID](#inspect-a-retained-execution-report).
 
 For the request above, `maintenance` contains one row for `street-1`. Its `length_m` and `maintenance_length_m` both equal 100. You can also submit the [tutorial’s block-selection handoff request](../../plugins/tutorial/package/#hand-off-a-known-request); it returns three street rows through the same metric.
 
@@ -103,14 +103,14 @@ Inspection summarizes each submitted ID selection as an object with a field coun
 
 ## Describe a retained result
 
-Call `lyra_describe_result` with the `result_ref` from a successful job to read its saved metadata. You can reuse the reference after job expiry or plugin registration changes, while the retained store remains available. This read-only lookup doesn’t load tables or the full report.
+Pass your job ID to `lyra_describe_result` to read the saved metadata without loading tables or the report. The metadata remains available after queue expiry or plugin changes while the store retains the result.
 
 Read `structuredContent.result.kind` to choose your next step:
 
 - `complete`: read the [result description](../results/#read-a-retained-description) from `structuredContent.result.description`
 - `preview`: fetch `structuredContent.result.download_url` with your agent Bearer credential
 
-A preview identifies the saved metadata with `result_ref` and `execution_id`. Its `omitted` field is `["description"]`, and its absolute `download_url` preserves your deployment’s public path prefix.
+A preview identifies the saved metadata with `job_id`. Its `omitted` field is `["description"]`, and its absolute `download_url` preserves your deployment’s public path prefix.
 
 Lyra returns a preview when the complete response exceeds 65,536 bytes. This limit counts the SDK envelope and both text and structured representations. The preview omits the entire description; Lyra never trims individual schemas, parameters, or outputs.
 
@@ -120,49 +120,47 @@ Handle description lookup failures by their error code:
 
 | Code | Meaning |
 | --- | --- |
-| `invalid_result_reference` | The reference is malformed |
-| `result_not_found` | No retained result matches the reference |
+| `result_not_found` | No result exists for this job ID |
 | `result_integrity_error` | Required metadata or relationships are damaged |
 
-Each lookup error includes `result_ref` and `output_name=null`. Missing or wrongly typed tool arguments produce SDK validation errors instead.
+Each lookup error includes `job_id` and `output_name=null`. Missing or wrongly typed tool arguments produce SDK validation errors instead.
 
 ## Inspect a retained execution report
 
-Call `lyra_inspect_report` with the `execution_id` from a successful job to read its [execution report](../../concepts/provenance/). You can reuse the ID after job expiry or plugin changes, while the retained store remains available. This lookup doesn’t load output tables or rerun the calculation.
+Pass your job ID to `lyra_inspect_report` to read the [execution report](../../concepts/provenance/). The tool reads the saved report without loading tables or running the calculation again.
 
 Read `structuredContent.result.kind` to choose your next step:
 
 - `complete`: read the entire report from `structuredContent.result.report`
 - `preview`: fetch `structuredContent.result.download_url` with your agent Bearer credential
 
-A preview identifies the report by its `execution_id` and root `metric`, with `status="succeeded"`. Its `omitted=["report"]` field means the inspection omits the entire report. The absolute `download_url` includes your deployment’s public path prefix and returns the complete report as `application/json`.
+A report preview includes the job ID, root metric, and `status="succeeded"`. When `omitted` contains `"report"`, fetch `download_url` for the complete report as `application/json`. The URL includes your deployment’s public path prefix.
 
 Lyra returns a preview when the complete response exceeds 65,536 bytes. This limit includes the SDK envelope and both text and structured copies of the report. Large parameters and large graphs produce the same preview; the download preserves the complete report without an inspection size limit.
 
-If lookup fails, read `structuredContent.error` when `isError` is `true`. Each error includes `code`, `message`, and `execution_id`:
+If lookup fails, read `structuredContent.error` when `isError` is `true`. Each error includes `code`, `message`, and `job_id`:
 
 | Code | Meaning |
 | --- | --- |
-| `invalid_execution_id` | The execution ID is malformed |
-| `report_not_found` | No retained report matches the execution ID |
+| `report_not_found` | No retained report matches the job ID |
 | `report_integrity_error` | The retained report or its required relationships are damaged |
 
 Missing or wrongly typed arguments produce SDK validation errors instead. For other clients, follow [report retrieval through HTTP and Python](../results/#read-an-execution-report).
 
 ## Download a retained table
 
-Call `lyra_download_table` to get a download address for one saved output. Use your `result_ref` and choose an `output_name` from the [result description](#describe-a-retained-result). Replace the example reference with your saved reference:
+Choose an `output_name` from the [result description](#describe-a-retained-result). Pass it with your job ID to `lyra_download_table` to get the Arrow download URL.
 
 ```json
 {
-  "result_ref": "0123456789abcdef0123456789abcdef",
+  "job_id": "12345678901234567890123456789012",
   "output_name": "maintenance"
 }
 ```
 
 Read these fields directly from `structuredContent`:
 
-- `result_ref`: identifies the saved result
+- `job_id`: identifies the saved result
 - `output_name`: identifies the selected table
 - `download_url`: gives the complete download address, including your deployment’s public path prefix
 
@@ -176,11 +174,10 @@ If `isError` is `true`, inspect `structuredContent.error.code`:
 
 | Code | Meaning |
 | --- | --- |
-| `invalid_result_reference` | The reference is malformed |
 | `result_not_found` | The result or output name doesn’t exist |
 | `result_integrity_error` | Required stored data is missing or damaged |
 
-Each lookup error includes `result_ref` and the requested `output_name`. Missing or wrongly typed arguments produce SDK validation errors instead.
+Each lookup error includes `job_id` and the requested `output_name`. Missing or wrongly typed arguments produce SDK validation errors instead.
 
 ## Handle unavailable job results
 
@@ -193,7 +190,7 @@ An unavailable result can mean that work is still active, retained data has expi
 | `result_not_ready` | You requested a download while the job was active |
 | `result_not_downloadable` | The job failed |
 
-Save `execution_id` and `result_ref` before the completed job’s reported lifetime ends. Use these tools after job expiry:
+Save `job_id` when submitting the job. Use these tools after job expiry:
 
 | Task | Tool |
 | --- | --- |
@@ -208,7 +205,7 @@ Infrastructure and deadline failures can produce retryable tool errors. Retry th
 
 ## Read retained row pages
 
-Call `lyra_get_result_rows` with `result_ref` and `output_name` to read saved rows. Set a positive integer `limit` to change the default of 100 rows per page.
+Call `lyra_get_result_rows` with `job_id` and `output_name` to read saved rows. Set a positive integer `limit` to change the default of 100 rows per page.
 
 Read `rows` and `next_cursor` directly from `structuredContent`. Pass `next_cursor` unchanged as `cursor`, using the same result and output. Continue until `next_cursor` is `null`, even after a short page.
 
@@ -240,17 +237,17 @@ The tool returns at most 50 relationships in a consistent order, with an omissio
 
 ## Read retained location inputs
 
-Use your saved `result_ref` to retrieve location inputs through MCP. Choose `input_name` from `location_inputs` in the [retained result description](#describe-a-retained-result). Each entry describes the input’s schema, dataset scope, and availability, including empty and unavailable selections.
+Use your saved `job_id` to retrieve location inputs through MCP. Choose `input_name` from `location_inputs` in the [retained result description](#describe-a-retained-result). Each entry describes the input’s schema, dataset scope, and availability, including empty and unavailable selections.
 
 If the description exceeds the response limit, follow the preview’s authenticated JSON download URL. The download includes every output and input description without truncating schemas.
 
-Call `lyra_get_location_input_rows` with `result_ref` and `input_name`. Set a positive integer `limit` to change the default of 100 rows. Read `rows` and `next_cursor` directly from `structuredContent`, using the [row cell encodings](#read-retained-row-pages).
+Call `lyra_get_location_input_rows` with `job_id` and `input_name`. Set a positive integer `limit` to change the default of 100 rows. Read `rows` and `next_cursor` directly from `structuredContent`, using the [row cell encodings](#read-retained-row-pages).
 
 Pass `next_cursor` unchanged as `cursor` with the same result and input until it returns `null`. Continue after short pages when a cursor remains; output-table cursors aren’t valid here. For correspondence inputs, each row maps an immediate source record to a target record, preserving repeated targets under different sources.
 
-Call `lyra_download_location_input` with `result_ref` and `input_name`. If the input is available, the tool returns a download URL. Read these fields directly from `structuredContent`:
+Call `lyra_download_location_input` with `job_id` and `input_name`. If the input is available, the tool returns a download URL. Read these fields directly from `structuredContent`:
 
-- `result_ref`: the saved result
+- `job_id`: the saved result
 - `input_name`: the selected location input
 - `download_url`: the absolute URL, including your deployment’s public path prefix
 
@@ -260,6 +257,6 @@ When `isError` is `true`, inspect `structuredContent.error` using the [HTTP erro
 
 - `location_input_unavailable`: retrying doesn’t materialize the input or change its availability
 - `row_too_large`: fetch the authenticated Arrow `download_url`; the cursor remains at the oversized row
-- `result_not_found`: check the result reference and declared location-input names; ordinary metric dependencies aren’t location inputs
+- `result_not_found`: check the job ID and choose an input name from `description.location_inputs`
 
 Missing or wrongly typed tool arguments produce SDK validation errors in text content. See [location-input payload examples](../../reference/mcp-payloads/#retained-location-inputs) for request and response fields.

@@ -79,7 +79,7 @@ def test_capture_preserves_empty_ownership_and_detaches_declarations(
     )
     executor = GraphExecutor(catalog, Mock())
     root = executor.validate_plan(plan)
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.capture(root, catalog, plan)
     assert report.root_use_id is not None
     description = report.descriptions[report.root_use_id]
@@ -145,7 +145,7 @@ def test_target_adapter_is_described_without_initialization(
         catalog,
         {"metric": "consumer", "inputs": {"seed": {"provider": "tracts", "ids": []}}},
     )
-    report = ReportCollection()
+    report = ReportCollection("a" * 32)
     report.capture(bind_execution(catalog, plan), catalog, plan)
     operations = [d.operation for d in report.descriptions.values() if d.operation]
     assert len(operations) == 1

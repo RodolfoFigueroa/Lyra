@@ -75,19 +75,14 @@ def test_shared_membership_and_dense_pairs(
     path.touch()
     with ResultStore.open(path) as reader:
         for result in (fresh, mixed, reused):
-            assert_exports(reader, result.metadata.result_ref, tmp_path)
+            assert_exports(reader, result.metadata.job_id, tmp_path)
         assert work.calls == []
-        assert (
-            len({result.metadata.result_ref for result in (fresh, mixed, reused)}) == 3
-        )
-        pairs = reader.read_location_input(mixed.metadata.result_ref, "targets")
+        assert len({result.metadata.job_id for result in (fresh, mixed, reused)}) == 3
+        pairs = reader.read_location_input(mixed.metadata.job_id, "targets")
         assert set(zip(pairs.source_location_id, pairs.location_id, strict=True)) == {
             (f"s{i}", f"t{j}") for i in range(10) for j in range(100)
         }
-        assert (
-            len(reader.read_location_input(mixed.metadata.result_ref, "reference"))
-            == 20
-        )
+        assert len(reader.read_location_input(mixed.metadata.job_id, "reference")) == 20
 
     assert_remote_outputs(
         path, [fresh, mixed, reused], native_api, monkeypatch, exports_only=True
@@ -115,14 +110,12 @@ def test_changed_registration_preserves_captured_inputs(
     )
     with ResultStore.open(path) as reader:
         for result, revision in [(first, "1"), (second, "2")]:
-            assert_exports(reader, result.metadata.result_ref, tmp_path)
-            description = reader.describe_result(result.metadata.result_ref)
+            assert_exports(reader, result.metadata.job_id, tmp_path)
+            description = reader.describe_result(result.metadata.job_id)
             assert (
                 description.location_inputs["main"].provider_scope.code_revision
                 == revision
             )
             assert set(
-                reader.read_location_input(
-                    result.metadata.result_ref, "main"
-                ).location_id
+                reader.read_location_input(result.metadata.job_id, "main").location_id
             ) == {"s0", "s1"}

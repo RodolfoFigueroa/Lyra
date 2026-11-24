@@ -12,6 +12,7 @@ from typing_extensions import override
 from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import TableJobResult
+from lyra.contracts.references import new_job_id
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
@@ -207,6 +208,7 @@ def test_typed_mixed_graph(
                 ).tables,
             )
 
+        native.id = new_job_id()
         envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)
         payload = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         result = TableJobResult.model_validate(payload)

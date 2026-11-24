@@ -75,13 +75,13 @@ def test_worker_jobs_reuse_internal_locations(
         for label in ("a", "b"):
             worker.initialize_worker("heavy", config=config)
             native = native_job(monkeypatch)
-            native.id = label
+            native.id = label * 32
             inputs = SELECTION | {"parameters": {"label": label}}
 
             result = run_and_read(
                 worker.run_metric_task,
                 accepted_envelope(
-                    job_id=label, metric="root", inputs=inputs
+                    job_id=native.id, metric="root", inputs=inputs
                 ).model_dump(mode="json"),
             )
             assert result["outputs"] == {"root": [{"value": 1}]}

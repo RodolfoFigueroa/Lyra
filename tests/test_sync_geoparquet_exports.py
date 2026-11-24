@@ -76,8 +76,7 @@ def test_remote_export(
                 httpx.Response(
                     200,
                     json=ResultDescriptionPreview(
-                        result_ref=reference,
-                        execution_id=description.execution_id,
+                        job_id=reference,
                         download_url=f"https://example.test/api/results/{reference}/description/download",
                     ).model_dump(mode="json"),
                 ),

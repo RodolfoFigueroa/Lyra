@@ -66,19 +66,19 @@ class DownloadSpec:
     content_type: str
 
 
-def get_table_download(result_ref: str, output_name: str) -> DownloadSpec:
+def get_table_download(job_id: str, output_name: str) -> DownloadSpec:
     """Return the shared Arrow operation for native reads and saved files."""
     return DownloadSpec(
-        table_download_path(result_ref, output_name),
+        table_download_path(job_id, output_name),
         "download table",
         "application/vnd.apache.arrow.stream",
     )
 
 
-def get_location_input_download(result_ref: str, input_name: str) -> DownloadSpec:
+def get_location_input_download(job_id: str, input_name: str) -> DownloadSpec:
     """Return the shared input Arrow operation for native reads and saved files."""
     return DownloadSpec(
-        location_input_download_path(result_ref, input_name),
+        location_input_download_path(job_id, input_name),
         "download location input",
         "application/vnd.apache.arrow.stream",
     )
@@ -433,11 +433,11 @@ def get_result_inspection(job_id: str) -> RequestSpec[ResultInspection]:
     )
 
 
-def get_result_description(result_ref: str) -> RequestSpec[ResultDescriptionInspection]:
+def get_result_description(job_id: str) -> RequestSpec[ResultDescriptionInspection]:
     """Return the bounded retained-description inspection request."""
     return RequestSpec(
         "GET",
-        result_description_path(result_ref),
+        result_description_path(job_id),
         "describe result",
         TypeAdapter(ResultDescriptionInspection),
         require_json=True,
@@ -491,22 +491,22 @@ def get_metric(metric_name: str) -> RequestSpec[MetricInspection]:
     )
 
 
-def get_report(execution_id: str) -> RequestSpec[ExecutionReport]:
+def get_report(job_id: str) -> RequestSpec[ExecutionReport]:
     """Return the complete report download request with model validation."""
     return RequestSpec(
         "GET",
-        report_download_path(execution_id),
+        report_download_path(job_id),
         "get report",
         TypeAdapter(ExecutionReport),
         require_json=True,
     )
 
 
-def get_report_inspection(execution_id: str) -> RequestSpec[ExecutionReportInspection]:
+def get_report_inspection(job_id: str) -> RequestSpec[ExecutionReportInspection]:
     """Return the bounded retained-report inspection request."""
     return RequestSpec(
         "GET",
-        report_inspection_path(execution_id),
+        report_inspection_path(job_id),
         "inspect report",
         TypeAdapter(ExecutionReportInspection),
         require_json=True,
@@ -514,7 +514,7 @@ def get_report_inspection(execution_id: str) -> RequestSpec[ExecutionReportInspe
 
 
 def get_result_rows(
-    result_ref: str,
+    job_id: str,
     output_name: str,
     limit: int = 100,
     cursor: str | None = None,
@@ -525,7 +525,7 @@ def get_result_rows(
         params["cursor"] = cursor
     return RequestSpec(
         "GET",
-        table_rows_path(result_ref, output_name),
+        table_rows_path(job_id, output_name),
         "get result rows",
         TypeAdapter(ResultRowPage),
         params=params,
@@ -534,7 +534,7 @@ def get_result_rows(
 
 
 def get_location_input_rows(
-    result_ref: str,
+    job_id: str,
     input_name: str,
     limit: int = 100,
     cursor: str | None = None,
@@ -545,7 +545,7 @@ def get_location_input_rows(
         params["cursor"] = cursor
     return RequestSpec(
         "GET",
-        location_input_rows_path(result_ref, input_name),
+        location_input_rows_path(job_id, input_name),
         "get location input rows",
         TypeAdapter(ResultRowPage),
         params=params,

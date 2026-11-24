@@ -22,7 +22,6 @@ from starlette.routing import Mount
 
 from lyra.api import AsyncLyraClient, LyraClient
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
@@ -188,7 +187,7 @@ def test_complete_description_http_and_clients(
 ) -> None:
     expected = retained.description
     before = deepcopy(database.rows)
-    path = f"/results/{expected.result_ref}"
+    path = f"/results/{expected.job_id}"
     with asyncio.Runner() as runner:
         http = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=retained.public), base_url=_BASE + "/"
@@ -207,8 +206,7 @@ def test_complete_description_http_and_clients(
         else:
             assert inspection.json() == {
                 "kind": "preview",
-                "result_ref": expected.result_ref,
-                "execution_id": expected.execution_id,
+                "job_id": expected.job_id,
                 "omitted": ["description"],
                 "download_url": _BASE + path + "/description/download",
             }
@@ -253,13 +251,13 @@ def test_complete_description_http_and_clients(
                 with LyraClient(
                     _BASE.removeprefix("https://"), agent_api_key="agent-secret"
                 ) as client:
-                    return client.results.describe(expected.result_ref)
+                    return client.results.describe(expected.job_id)
 
             async def run() -> ResultDescription:
                 async with AsyncLyraClient(
                     _BASE.removeprefix("https://"), agent_api_key="agent-secret"
                 ) as client:
-                    return await client.results.describe(expected.result_ref)
+                    return await client.results.describe(expected.job_id)
 
             return runner.run(run())
 
@@ -305,7 +303,7 @@ def test_http_boundary_uses_encoded_response(
                     partial(original_budget, limit=limit),
                 )
                 response = await client.get(
-                    f"{_BASE}/results/{expected.result_ref}", headers=mcp_headers()
+                    f"{_BASE}/results/{expected.job_id}", headers=mcp_headers()
                 )
                 assert response.json()["kind"] == kind
                 assert len(response.content) <= limit
@@ -322,10 +320,10 @@ def test_http_boundary_uses_encoded_response(
 def test_description_domain_errors(
     retained: Retained, database: Database, damage: str, suffix: str
 ) -> None:
-    reference = retained.description.result_ref
+    reference = retained.description.job_id
     if damage == "invalid":
         reference = "invalid"
-        expected = InvalidResultReferenceError(reference)
+        expected = None
     elif damage == "absent":
         reference = "0" * 32
         expected = ResultNotFoundError(reference)
@@ -346,6 +344,10 @@ def test_description_domain_errors(
             response = await client.get(
                 f"{_BASE}/results/{reference}{suffix}", headers=mcp_headers()
             )
+        if expected is None:
+            assert response.status_code == 422
+            assert response.json()["detail"][0]["loc"] == ["path", "job_id"]
+            return
         payload = error_payload(expected)
         assert response.status_code == error_status(payload)
         assert response.json() == {"detail": payload.model_dump()}
@@ -389,7 +391,7 @@ def test_mcp_description_sdk_and_boundaries(
             response = await http.post(
                 url,
                 json=tool_call_payload(
-                    "lyra_describe_result", {"result_ref": expected.result_ref}
+                    "lyra_describe_result", {"job_id": expected.job_id}
                 ),
             )
             body = response.json()["result"]["structuredContent"]["result"]
@@ -404,7 +406,7 @@ def test_mcp_description_sdk_and_boundaries(
                 exact = await http.post(
                     url,
                     json=tool_call_payload(
-                        "lyra_describe_result", {"result_ref": expected.result_ref}
+                        "lyra_describe_result", {"job_id": expected.job_id}
                     ),
                 )
                 assert exact.content == response.content
@@ -412,17 +414,16 @@ def test_mcp_description_sdk_and_boundaries(
                 response = await http.post(
                     url,
                     json=tool_call_payload(
-                        "lyra_describe_result", {"result_ref": expected.result_ref}
+                        "lyra_describe_result", {"job_id": expected.job_id}
                     ),
                 )
                 body = response.json()["result"]["structuredContent"]["result"]
             assert body == {
                 "kind": "preview",
-                "result_ref": expected.result_ref,
-                "execution_id": expected.execution_id,
+                "job_id": expected.job_id,
                 "omitted": ["description"],
                 "download_url": (
-                    f"{_BASE}/results/{expected.result_ref}/description/download"
+                    f"{_BASE}/results/{expected.job_id}/description/download"
                 ),
             }
             assert len(response.content) <= limit
@@ -454,26 +455,24 @@ async def _check_sdk(
         )
         assert tool.annotations is not None
         assert tool.annotations.readOnlyHint
-        assert tool.inputSchema["required"] == ["result_ref"]
+        assert tool.inputSchema["required"] == ["job_id"]
         assert tool.inputSchema["additionalProperties"] is False
-        result = await session.call_tool(tool.name, {"result_ref": expected.result_ref})
+        result = await session.call_tool(tool.name, {"job_id": expected.job_id})
         assert not result.isError
         validate(result.structuredContent, tool.outputSchema)
         assert result.structuredContent is not None
         assert result.structuredContent["result"]["kind"] == kind
         for arguments in (
             {},
-            {"result_ref": 5},
-            {"result_ref": expected.result_ref, "extra": 1},
+            {"job_id": 5},
+            {"job_id": "bad"},
+            {"job_id": expected.job_id, "extra": 1},
         ):
             invalid = await session.call_tool(tool.name, arguments)
             assert invalid.isError
             assert invalid.structuredContent is None
-        for reference, error in (
-            ("bad", InvalidResultReferenceError("bad")),
-            ("0" * 32, ResultNotFoundError("0" * 32)),
-        ):
-            failed = await session.call_tool(tool.name, {"result_ref": reference})
+        for reference, error in (("0" * 32, ResultNotFoundError("0" * 32)),):
+            failed = await session.call_tool(tool.name, {"job_id": reference})
             assert failed.isError
             assert failed.structuredContent == {
                 "error": error_payload(error).model_dump()

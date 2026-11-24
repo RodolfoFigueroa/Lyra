@@ -141,7 +141,7 @@ def test_inline_handoff(
     native = native_job(monkeypatch)
     native.id = envelope.job_id
     saved = worker.run_metric_task(wire)
-    received = read_retained(str(saved["result_ref"])).report.request
+    received = read_retained(str(saved["job_id"])).report.request
     assert received == plan.request
     restored = accepted_additions(received.interventions[0])
     assert restored is not None
@@ -320,7 +320,7 @@ def test_worker_checks_accepted_target_bindings(
     native = native_job(monkeypatch)
     native.id = envelope.job_id
     if change == "legacy_plain":
-        assert worker.run_metric_task(wire)["result_ref"]
+        assert worker.run_metric_task(wire)["job_id"]
         return
     store = Mock(side_effect=AssertionError("opened result store"))
     monkeypatch.setattr(worker, "SQLiteStore", store)
@@ -376,7 +376,7 @@ def test_worker_preserves_removals_for_each_target(
     envelope = runtime.jobs.enqueue.call_args.args[0]
     native_job(monkeypatch).id = envelope.job_id
     saved = worker.run_metric_task(json.loads(envelope.model_dump_json()))
-    received = read_retained(str(saved["result_ref"])).report.request
+    received = read_retained(str(saved["job_id"])).report.request
     assert received == envelope.accepted.plan.request
     expected = [change | {"add": []} for change in changes]
     assert received.submission_payload()["interventions"] == expected
@@ -472,9 +472,7 @@ def test_client_worker_retains_native_request(
     assert [req.method for req in native_api.requests] == (
         ["POST"] if empty else ["GET", "POST"]
     )
-    accepted, parks = read_retained(
-        str(result["result_ref"])
-    ).report.request.interventions
+    accepted, parks = read_retained(str(result["job_id"])).report.request.interventions
     assert parks.submission_payload() == {
         "id": "p",
         "catalog": "parks",

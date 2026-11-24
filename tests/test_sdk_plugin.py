@@ -208,7 +208,6 @@ def test_manifest_roundtrip_refs_and_cli(
 def test_resolved_invocation_and_input_keys(
     plugin: PluginDefinition, location: GeoDataFrame
 ) -> None:
-    context = create_autospec(RunContext, instance=True)
     inputs = {
         "location": {
             "provider": "test_units",
@@ -219,7 +218,6 @@ def test_resolved_invocation_and_input_keys(
         {
             "test": plugin,
         },
-        context_factory=lambda _: context,
     )
     frame = runner.run_development("capacity", inputs=inputs).tables["capacity"]
     assert isinstance(frame, pd.DataFrame)

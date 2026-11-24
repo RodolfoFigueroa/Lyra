@@ -19,6 +19,7 @@ from lyra.server.runtime import require_runtime
 from test_support.mcp import call_tool
 from test_support.plugin_graph import manifest, node
 from tests.config_helpers import api_credentials, load_test_config
+from tests.job_id_helpers import TEST_JOB_ID
 from tests.plugin_helpers import plugin_config
 
 
@@ -67,7 +68,7 @@ def test_concurrent_applications_own_resources(
                 assert await backend.get_discovery() is runtime_a.catalog.discovery
                 observation = object()
                 runtime_a.results.observe_job = AsyncMock(return_value=observation)
-                assert await backend.observe_job("job") is observation
+                assert await backend.observe_job(TEST_JOB_ID) is observation
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app_a), base_url="http://test"
                 ) as client:

@@ -18,7 +18,6 @@ from mcp.types import CallToolResult
 
 from lyra.api import AsyncLyraClient, LyraClient
 from lyra.contracts.errors import (
-    InvalidExecutionIDError,
     ReportIntegrityError,
     ReportNotFoundError,
 )
@@ -67,7 +66,7 @@ def test_complete_report_http_and_clients(
 ) -> None:
     expected = retained.report
     before = deepcopy(database.rows)
-    path = f"/executions/{expected.execution_id}/report"
+    path = f"/executions/{expected.job_id}/report"
     with asyncio.Runner() as runner:
         http = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=retained.public), base_url=_BASE + "/"
@@ -86,7 +85,7 @@ def test_complete_report_http_and_clients(
         else:
             assert inspection.json() == {
                 "kind": "preview",
-                "execution_id": expected.execution_id,
+                "job_id": expected.job_id,
                 "metric": expected.request.metric,
                 "status": "succeeded",
                 "omitted": ["report"],
@@ -133,21 +132,21 @@ def test_complete_report_http_and_clients(
                 with LyraClient(
                     _BASE.removeprefix("https://"), agent_api_key="agent-secret"
                 ) as client:
-                    inspected = client.reports.inspect(expected.execution_id)
+                    inspected = client.reports.inspect(expected.job_id)
                     assert inspected.kind == inspection.json()["kind"]
                     if inspected.kind == "complete":
                         assert inspected.report == expected
-                    return client.reports.get(expected.execution_id)
+                    return client.reports.get(expected.job_id)
 
             async def run() -> ExecutionReport:
                 async with AsyncLyraClient(
                     _BASE.removeprefix("https://"), agent_api_key="agent-secret"
                 ) as client:
-                    inspected = await client.reports.inspect(expected.execution_id)
+                    inspected = await client.reports.inspect(expected.job_id)
                     assert inspected.kind == inspection.json()["kind"]
                     if inspected.kind == "complete":
                         assert inspected.report == expected
-                    return await client.reports.get(expected.execution_id)
+                    return await client.reports.get(expected.job_id)
 
             return runner.run(run())
 
@@ -193,7 +192,7 @@ def test_http_boundary_uses_encoded_response(
                     partial(original_budget, limit=limit),
                 )
                 response = await client.get(
-                    f"{_BASE}/executions/{expected.execution_id}/report/inspection",
+                    f"{_BASE}/executions/{expected.job_id}/report/inspection",
                     headers=mcp_headers(),
                 )
                 assert response.json()["kind"] == kind
@@ -211,18 +210,18 @@ def test_http_boundary_uses_encoded_response(
 def test_report_domain_errors(
     retained: Retained, database: Database, damage: str, suffix: str
 ) -> None:
-    execution_id = retained.report.execution_id
+    job_id = retained.report.job_id
     if damage == "invalid":
-        execution_id = "invalid"
-        expected = InvalidExecutionIDError(execution_id)
+        job_id = "invalid"
+        expected = None
     elif damage == "absent":
-        execution_id = "0" * 32
-        expected = ReportNotFoundError(execution_id)
+        job_id = "0" * 32
+        expected = ReportNotFoundError(job_id)
     elif damage == "store":
         retained.runtime.config.result_store_path.unlink()
-        expected = ReportNotFoundError(execution_id)
+        expected = ReportNotFoundError(job_id)
     else:
-        expected = ReportIntegrityError(execution_id)
+        expected = ReportIntegrityError(job_id)
         database.rows["final_results"][0][damage] = None
 
     async def run() -> None:
@@ -234,18 +233,20 @@ def test_report_domain_errors(
             ) as client,
         ):
             response = await client.get(
-                f"{_BASE}/executions/{execution_id}/report/{suffix}",
+                f"{_BASE}/executions/{job_id}/report/{suffix}",
                 headers=mcp_headers(),
             )
+            if expected is None:
+                assert response.status_code == 422
+                assert response.json()["detail"][0]["loc"] == ["path", "job_id"]
+                return
             payload = error_payload(expected)
             assert response.status_code == error_status(payload)
             assert response.json() == {"detail": payload.model_dump()}
             mcp = await client.post(
                 _BASE + "/mcp/",
                 headers=mcp_headers(),
-                json=tool_call_payload(
-                    "lyra_inspect_report", {"execution_id": execution_id}
-                ),
+                json=tool_call_payload("lyra_inspect_report", {"job_id": job_id}),
             )
             assert mcp.json()["result"]["isError"]
             assert mcp.json()["result"]["structuredContent"] == {
@@ -303,7 +304,7 @@ def test_mcp_report_sdk_and_boundaries(
             response = await http.post(
                 url,
                 json=tool_call_payload(
-                    "lyra_inspect_report", {"execution_id": expected.execution_id}
+                    "lyra_inspect_report", {"job_id": expected.job_id}
                 ),
             )
             body = response.json()["result"]["structuredContent"]["result"]
@@ -318,7 +319,7 @@ def test_mcp_report_sdk_and_boundaries(
                 exact = await http.post(
                     url,
                     json=tool_call_payload(
-                        "lyra_inspect_report", {"execution_id": expected.execution_id}
+                        "lyra_inspect_report", {"job_id": expected.job_id}
                     ),
                 )
                 assert exact.content == response.content
@@ -326,18 +327,18 @@ def test_mcp_report_sdk_and_boundaries(
                 response = await http.post(
                     url,
                     json=tool_call_payload(
-                        "lyra_inspect_report", {"execution_id": expected.execution_id}
+                        "lyra_inspect_report", {"job_id": expected.job_id}
                     ),
                 )
                 body = response.json()["result"]["structuredContent"]["result"]
             assert body == {
                 "kind": "preview",
-                "execution_id": expected.execution_id,
+                "job_id": expected.job_id,
                 "metric": expected.request.metric,
                 "status": "succeeded",
                 "omitted": ["report"],
                 "download_url": (
-                    f"{_BASE}/executions/{expected.execution_id}/report/download"
+                    f"{_BASE}/executions/{expected.job_id}/report/download"
                 ),
             }
             assert len(response.content) <= limit
@@ -369,28 +370,24 @@ async def _check_sdk(
         )
         assert tool.annotations is not None
         assert tool.annotations.readOnlyHint
-        assert tool.inputSchema["required"] == ["execution_id"]
+        assert tool.inputSchema["required"] == ["job_id"]
         assert tool.inputSchema["additionalProperties"] is False
-        result = await session.call_tool(
-            tool.name, {"execution_id": expected.execution_id}
-        )
+        result = await session.call_tool(tool.name, {"job_id": expected.job_id})
         assert not result.isError
         validate(result.structuredContent, tool.outputSchema)
         assert result.structuredContent is not None
         assert result.structuredContent["result"]["kind"] == kind
         for arguments in (
             {},
-            {"execution_id": 5},
-            {"execution_id": expected.execution_id, "extra": 1},
+            {"job_id": 5},
+            {"job_id": "bad"},
+            {"job_id": expected.job_id, "extra": 1},
         ):
             invalid = await session.call_tool(tool.name, arguments)
             assert invalid.isError
             assert invalid.structuredContent is None
-        for reference, error in (
-            ("bad", InvalidExecutionIDError("bad")),
-            ("0" * 32, ReportNotFoundError("0" * 32)),
-        ):
-            failed = await session.call_tool(tool.name, {"execution_id": reference})
+        for reference, error in (("0" * 32, ReportNotFoundError("0" * 32)),):
+            failed = await session.call_tool(tool.name, {"job_id": reference})
             assert failed.isError
             assert failed.structuredContent == {
                 "error": error_payload(error).model_dump()

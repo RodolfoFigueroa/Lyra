@@ -127,7 +127,7 @@ def prepare(case: Case, path: Path) -> str:
     )
     return runner.run(
         "root", inputs=retained_inputs(count, case.references)
-    ).metadata.result_ref
+    ).metadata.job_id
 
 
 def operation(case: Case, path: Path, reference: str) -> tuple[Callable, list]:
