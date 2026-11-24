@@ -280,6 +280,9 @@ class LocalRunner:
         )
         try:
             outcome = executor.execute(invocation, report=report)
+            if outcome.committed_report is None:
+                msg = "Local execution requires a committed report"
+                raise RuntimeError(msg)
             metadata = RunMetadata.model_validate(
                 outcome.metadata.model_dump()
                 | {
@@ -293,7 +296,7 @@ class LocalRunner:
                     name: copy_frame(frame) for name, frame in outcome.outputs.items()
                 },
                 metadata=metadata,
-                report=report.complete(metadata.result_ref).model_copy(deep=True),
+                report=outcome.committed_report.model_copy(deep=True),
             )
         except GraphExecutionError as error:
             cause = error.__cause__

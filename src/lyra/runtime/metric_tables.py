@@ -38,11 +38,7 @@ class MetricTables:
         *,
         location_inputs: Mapping[str, InputBindings],
     ) -> None:
-        """Publish one invocation atomically, keeping independently reusable keys.
-
-        Raises:
-            DamagedDataError: If retained bindings differ from the invocation.
-        """
+        """Publish one invocation atomically, keeping independently reusable keys."""
         if not selections:
             return
         publications = _prepare_publications(
@@ -55,19 +51,10 @@ class MetricTables:
             )
             for name, description in descriptions.items()
         )
-        self.store.initialize(registrations)
-        with self.store.transaction() as connection:
-            pending = []
-            for publication in publications:
-                header = publication.header.model_copy(update={"output_rows": None})
-                if self._lookup_connection(connection, header) is None:
-                    pending.append(publication)
-                elif (
-                    LocationInputs(self.store).bindings(connection, header.value_key)
-                    != publication.bindings
-                ):
-                    msg = "Retained metric input bindings differ"
-                    raise DamagedDataError(msg)
+        with self.store.schema_transaction() as connection:
+            pending = self._pending(connection, publications, registrations)
+            if pending:
+                self.store.register(connection, registrations)
             LocationInputs(self.store).validate_bindings(
                 connection, tuple(p.bindings for p in pending)
             )
@@ -114,6 +101,44 @@ class MetricTables:
                             ],
                         )
 
+    def _pending(
+        self,
+        connection: sa.Connection,
+        publications: list[_MetricPublication],
+        registrations: tuple[Registration, ...],
+    ) -> list[_MetricPublication]:
+        names = {registration.output_name for registration in registrations}
+        pending = []
+        registrations_match = all(
+            self.store.layout.descriptions.get(registration.key) == registration
+            for registration in registrations
+        )
+        for publication in publications:
+            header = publication.header
+            try:
+                saved = self.store.header(connection, header.value_key)
+            except MissingValueError:
+                pending.append(publication)
+                continue
+            if (
+                saved.model_copy(update={"output_rows": None})
+                != header.model_copy(update={"output_rows": None})
+                or saved.output_rows is None
+                or saved.output_rows.keys() != names
+                or not registrations_match
+            ):
+                msg = "Retained metric header or output registrations differ"
+                raise DamagedDataError(msg)
+            if (
+                LocationInputs(self.store).bindings(connection, header.value_key)
+                != publication.bindings
+            ):
+                msg = "Retained metric input bindings differ"
+                raise DamagedDataError(msg)
+            for registration in registrations:
+                prepare_computation(self.store, connection, registration, saved, None)
+        return pending
+
     def lookup(
         self,
         header: Header,
@@ -127,7 +152,10 @@ class MetricTables:
         Returns:
             Named tables, or None for an optional absent computation.
         """
-        self.store.load_registrations()
+        try:
+            self.store.load_registrations(allow_uninitialized=not required)
+        except MissingValueError:
+            return None
         with self.store.engine.connect() as connection:
             return self._lookup_connection(
                 connection,

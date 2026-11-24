@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import math
+import struct
 from dataclasses import dataclass
 from itertools import islice
-from typing import TYPE_CHECKING, TypeAlias, cast
+from typing import TYPE_CHECKING, TypeAlias
 
 import geopandas as gpd
 import numpy as np
@@ -13,7 +13,7 @@ import pandas as pd
 import shapely
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable, Sequence
 
     from lyra.contracts.outputs import OutputMetadata
 
@@ -96,37 +96,73 @@ def rows_from_validated(
     return list(zip(*columns, strict=True))
 
 
-_VALID_CELL: dict[str, Callable[[Cell], bool]] = {
-    "string": lambda v: type(v) is str,
-    "Int64": lambda v: type(v) is int and -(2**63) <= v < 2**63,
-    "boolean": lambda v: type(v) is int and v in {0, 1},
-    "Float64": lambda v: type(v) is float and math.isfinite(v),
-    "geometry": lambda v: isinstance(v, bytes) and v[:1] in {b"\x00", b"\x01"},
-}
+_WKB_UINT32 = (struct.Struct(">I"), struct.Struct("<I"))
 
 
-def checked_column(
-    rows: Iterable[tuple[Cell, ...]], index: int, layout: RowLayout
-) -> list[Cell]:
-    """Collect SQL cells in one pass, checking their physical representation.
-
-    Returns:
-        Values suitable for conversion to the declared dtype.
+def _wkb_member(blob: bytes, offset: int) -> tuple[int, int]:
+    """Return the next byte offset and number of nested geometry headers.
 
     Raises:
-        ValueError: If a cell violates its declared type or nullability.
+        ValueError: If a header specifies an unknown byte order or type.
     """
-    dtype = layout.pandas_dtypes[index]
-    valid = _VALID_CELL[dtype]
-    nullable = layout.nullable[index]
-    values = []
-    for row in rows:
-        value = row[index]
-        if not (nullable if value is None else valid(value)):
-            msg = f"Invalid stored {dtype} in column {layout.columns[index]!r}"
-            raise ValueError(msg)
-        values.append(value)
-    return values
+    order = blob[offset]
+    if order > 1:
+        msg = "Invalid WKB byte order"
+        raise ValueError(msg)
+    uint32 = _WKB_UINT32[order]
+    (type_code,) = uint32.unpack_from(blob, offset + 1)
+    # EWKB encodes Z, M, and SRID as flags. ISO WKB uses type offsets for Z/M.
+    dimensions, kind = divmod(type_code & 0x1FFFFFFF, 1000)
+    if dimensions > 3 or kind not in range(1, 8):
+        msg = "Invalid WKB geometry type"
+        raise ValueError(msg)
+    has_z = bool(type_code & 0x80000000 or dimensions in {1, 3})
+    has_m = bool(type_code & 0x40000000 or dimensions in {2, 3})
+    stride = 8 * (2 + has_z + has_m)
+    offset += 5 + (4 if type_code & 0x20000000 else 0)
+    if kind == 1:  # Point
+        return offset + stride, 0
+    (count,) = uint32.unpack_from(blob, offset)
+    offset += 4
+    if kind == 2:  # LineString
+        return offset + count * stride, 0
+    if kind == 3:  # Polygon
+        for _ in range(count):
+            (points,) = uint32.unpack_from(blob, offset)
+            offset += 4 + points * stride
+        return offset, 0
+    return offset, count  # Multi-geometries and GeometryCollection
+
+
+def binary_geometry(value: Cell) -> bytes:
+    """Return a blob containing exactly one complete binary WKB geometry.
+
+    Raises:
+        TypeError: If the cell is not binary.
+        ValueError: If the WKB is malformed, truncated, or has trailing bytes.
+    """
+    if not isinstance(value, bytes):
+        msg = "Invalid binary WKB geometry"
+        raise TypeError(msg)
+    offset = 0
+    pending = 1
+    try:
+        while pending:
+            offset, children = _wkb_member(value, offset)
+            pending += children - 1
+    except (IndexError, struct.error) as error:
+        msg = "Truncated binary WKB geometry"
+        raise ValueError(msg) from error
+    if offset != len(value):
+        msg = "Invalid binary WKB geometry length"
+        raise ValueError(msg)
+    return value
+
+
+def decode_geometries(values: Sequence[Cell]) -> np.ndarray:
+    """Return decoded geometries from a bounded batch, preserving nulls."""
+    binary = [None if value is None else binary_geometry(value) for value in values]
+    return shapely.from_wkb(np.asarray(binary, dtype=object))
 
 
 def frame_from_rows(
@@ -153,11 +189,9 @@ def _frame_batch(
     for index, (name, dtype) in enumerate(
         zip(description.columns, description.pandas_dtypes, strict=True)
     ):
-        values = checked_column(records, index, description)
+        values = [row[index] for row in records]
         data[name] = (
-            gpd.GeoSeries(
-                shapely.from_wkb(np.asarray(values, dtype=object)), crs=description.crs
-            )
+            gpd.GeoSeries(decode_geometries(values), crs=description.crs)
             if dtype == "geometry"
             else pd.Series(values, dtype=dtype)
         )
@@ -186,25 +220,18 @@ def encode_row(
 
     Returns:
         Every declared column mapped to its fixed JSON cell representation.
-
-    Raises:
-        ValueError: If a cell violates its declared representation.
     """
     row: dict[str, str | float | bool | None] = {}
-    for name, dtype, nullable, value in zip(
+    for name, dtype, value in zip(
         description.columns,
         description.pandas_dtypes,
-        description.nullable,
         cells,
         strict=True,
     ):
-        if not (nullable if value is None else _VALID_CELL[dtype](value)):
-            msg = f"Invalid stored {dtype} in column {name!r}"
-            raise ValueError(msg)
         if value is None:
             row[name] = None
         elif dtype == "geometry":
-            row[name] = geometry_wkt(shapely.from_wkb(cast("bytes", value)))
+            row[name] = geometry_wkt(shapely.from_wkb(binary_geometry(value)))
         elif dtype == "boolean":
             row[name] = bool(value)
         elif dtype == "Float64":

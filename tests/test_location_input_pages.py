@@ -114,7 +114,6 @@ def test_union_traversal_without_eager_reads(
             ).clear()
     forbidden = Mock(side_effect=AssertionError("eager input read"))
     monkeypatch.setattr(ResultStore, "read_location_input", forbidden)
-    monkeypatch.setattr(LocationInputs, "rows", forbidden)
     monkeypatch.setattr(LocationInputs, "frame", forbidden)
     monkeypatch.setattr(InputRows, "frame", forbidden)
     monkeypatch.setattr(OperationPairs, "read_connection", forbidden)
@@ -320,7 +319,6 @@ def test_encoded_boundaries_preserve_prefetched_row(
         "record",
         "header",
         "partition",
-        "required",
         "pair",
         "duplicate",
         "completion",
@@ -340,8 +338,6 @@ def test_required_damage_is_integrity_failure(
     ]
     if damage == "record":
         data.clear()
-    elif damage == "required":
-        data[0]["geometry"] = None
     elif damage == "pair":
         operations.clear()
     elif damage == "duplicate":

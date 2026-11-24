@@ -54,7 +54,7 @@ def test_report_is_independent_of_jobs_values_and_plugins(
     monkeypatch.setattr(Job, "fetch", Mock(side_effect=AssertionError("Job expired")))
     for target, names in (
         (LocalRunner, ("__init__",)),
-        (ResultDescriptions, ("_assemble", "_read_outputs")),
+        (ResultDescriptions, ("_read_outputs",)),
         (SQLiteStore, ("initialize", "load_registrations", "header")),
         (loading, ("load_plugin_definition", "load_installed_plugin_definition")),
         (

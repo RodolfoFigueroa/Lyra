@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 from lyra.contracts.provider_scope import RecordReferences
 from lyra.data.relational import frame_from_rows
-from lyra.runtime.operation_pairs import operation_registration
+from lyra.runtime.operation_pairs import pair_completion, validate_pair_counts
 from lyra.runtime.output_selection import RowAddress, RowBatch, _read
 from lyra.runtime.sqlite_store import DamagedDataError, Header
 
@@ -77,63 +77,10 @@ def prepare_pairs(
 
     Returns:
         A restricted reader with an indexed private continuation.
-
-    Raises:
-        DamagedDataError: If required operation metadata or selected pairs differ.
     """
     saved = store.header(connection, operation.header.value_key, required=True)
-    counts = (saved.output_rows or {}).get("pairs")
-    if (
-        saved.model_copy(update={"output_rows": None})
-        != operation.header.model_copy(update={"output_rows": None})
-        or saved.target_scope is None
-        or not isinstance(counts, dict)
-        or set(saved.output_rows or {}) != {"pairs"}
-        or not set(operation.sources) <= counts.keys()
-    ):
-        msg = "Incomplete retained operation selection"
-        raise DamagedDataError(msg)
-    registration = operation_registration(saved.node_id)
-    store.load_registrations((registration.key,))
-    if store.layout.descriptions[registration.key] != registration:
-        msg = "Retained operation schema differs"
-        raise DamagedDataError(msg)
-    partitions = store.layout.partitions
-    owners = _read(
-        connection,
-        sa.select(partitions.c.location_id).where(
-            partitions.c.value_key == saved.value_key
-        ),
-    )
-    if (
-        len(owners) != len(counts)
-        or {row["location_id"] for row in owners} != counts.keys()
-    ):
-        msg = "Incomplete operation partitions"
-        raise DamagedDataError(msg)
-    data = store.layout.tables[registration.key]
-    table = data.table.c
-    # Count before applying target restrictions: those restrict inspection, not
-    # the operation's durable completion contract.
-    observed = _read(
-        connection,
-        sa.select(
-            table.source_location_id,
-            sa.func.count().label("rows"),
-            sa.func.count(table.location_id.distinct()).label("identities"),
-        )
-        .where(
-            table[data.value_column] == saved.value_key,
-            table.source_location_id.in_(operation.sources),
-        )
-        .group_by(table.source_location_id),
-    )
-    actual = {row["source_location_id"]: row["rows"] for row in observed}
-    if any(row["rows"] != row["identities"] for row in observed) or any(
-        actual.get(source, 0) != counts[source] for source in operation.sources
-    ):
-        msg = "Incomplete or duplicate retained operation pairs"
-        raise DamagedDataError(msg)
+    data, counts = pair_completion(store, connection, operation.header, saved)
+    validate_pair_counts(connection, data, saved.value_key, counts, operation.sources)
     return PairRows(data, operation)
 
 
@@ -232,12 +179,13 @@ class InputRows:
             for pair, _ in groupby(heapq.merge(*streams)):
                 yield pair
 
-    def _records(self, members: list[tuple[str, ...]]) -> dict[str, sa.RowMapping]:
+    def _records(
+        self, members: list[tuple[str, ...]], *, identities_only: bool = False
+    ) -> dict[str, sa.RowMapping]:
         references = self.references.by_key(member[-1] for member in members)
         expected = {key: ref.location_id for key, ref in references.items()}
         registration = self.registration
-        self.store.load_registrations((registration.key,))
-        retained = self.store.layout.descriptions[registration.key]
+        retained = self.store.read_registration(self.connection, registration.key)
         columns = tuple(
             c for c in registration.columns if c.name != "source_location_id"
         )
@@ -277,22 +225,30 @@ class InputRows:
             msg = "Incomplete retained provider partitions"
             raise DamagedDataError(msg)
         data = self.store.layout.tables[registration.key]
+        projection = (
+            (data.table.c[data.value_column], data.table.c.location_id)
+            if identities_only
+            else data.logical_columns
+        )
         rows = _read(
             self.connection,
-            sa.select(*data.logical_columns)
+            sa.select(*projection)
             .where(data.table.c[data.value_column].in_(expected))
             .limit(len(expected) + 1),
         )
         if (
             len(rows) != len(expected)
             or {row[data.value_column]: row["location_id"] for row in rows} != expected
-            or any(
-                row[c.name] is None for row in rows for c in columns if not c.nullable
-            )
         ):
             msg = "Incomplete retained provider records"
             raise DamagedDataError(msg)
         return {row["location_id"]: row for row in rows}
+
+    def validate_records(self) -> None:
+        """Verify each selected provider row using only its retained identity."""
+        with closing(self._members(1024, None)) as members:
+            while batch := list(islice(members, 1024)):
+                self._records(batch, identities_only=True)
 
     def batches(
         self,

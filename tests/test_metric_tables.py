@@ -23,9 +23,9 @@ from lyra.runtime.sqlite_store import (
 from lyra.sdk.storage_schema import describe, prepare_native
 from test_support.table_fixtures import value_schema
 from tests.metric_execution_helpers import schema as scoped_schema
-from tests.sqlite_helpers import Database, database
+from tests.sqlite_helpers import Database, database, schema_database
 
-__all__ = ["database"]
+__all__ = ["database", "schema_database"]
 
 
 def header(key: str = "whole") -> Header:
@@ -95,6 +95,12 @@ def test_native_roundtrip(
         {"a": layout, "b": layout},
         location_inputs={header().value_key: InputBindings()},
     )
+    tables.publish(
+        ((header(), ()),),
+        {"a": owned, "b": owned},
+        {"a": layout, "b": layout},
+        location_inputs={header().value_key: InputBindings()},
+    )
     expected = owned.copy(deep=True)
     owned["i"] = 99
     restored = tables.lookup(header(), required=True)
@@ -104,7 +110,7 @@ def test_native_roundtrip(
     restored["a"]["i"] = 44
     tables.publish(
         ((header(), ()),),
-        {"a": owned, "b": owned},
+        {"a": owned.iloc[:1], "b": owned},
         {"a": layout, "b": layout},
         location_inputs={header().value_key: InputBindings()},
     )
@@ -126,7 +132,7 @@ def test_native_roundtrip(
 @pytest.mark.parametrize("scoped", [False, True])
 @pytest.mark.parametrize("failure", ["insert", "commit"])
 def test_atomic_outputs(
-    database: Database, tmp_path: Path, failure: str, *, scoped: bool
+    schema_database: Database, tmp_path: Path, failure: str, *, scoped: bool
 ) -> None:
     schema = pa.DataFrameSchema(
         {"v": pa.Column("Int64", description="Value", metadata={"unit": None})},
@@ -156,7 +162,7 @@ def test_atomic_outputs(
         )
         partitions = ("a", "empty")
     tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
-    original = database.execute
+    original = schema_database.connection.execute.side_effect
     writes = []
 
     def execute(statement: object, parameters: object = None) -> object:
@@ -166,10 +172,10 @@ def test_atomic_outputs(
                 if failure == "insert":
                     message = "later output failure"
                     raise RuntimeError(message)
-                database.fail_commit = True
+                schema_database.fail_commit = True
         return original(statement, parameters)
 
-    database.connection.execute.side_effect = execute
+    schema_database.connection.execute.side_effect = execute
     with pytest.raises(RuntimeError, match="failure"):
         tables.publish(
             ((h, partitions),),
@@ -177,14 +183,15 @@ def test_atomic_outputs(
             {"a": layout, "b": layout},
             location_inputs={h.value_key: InputBindings()},
         )
-    assert not database.rows.get("stored_partitions")
     assert len(writes) == 2
-    assert not database.rows.get("stored_results")
-    assert all(not database.rows.get(name) for name in writes)
+    assert not schema_database.rows
     # A failed publication must remain a miss, then permit complete recovery.
+    tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
     assert tables.lookup(h) is None
-    database.fail_commit = False
-    database.connection.execute.side_effect = original
+    with pytest.raises(DamagedDataError):
+        tables.lookup(h, required=True)
+    schema_database.fail_commit = False
+    schema_database.connection.execute.side_effect = original
     tables.publish(
         ((h, partitions),),
         {"a": value, "b": value},
@@ -200,6 +207,16 @@ def test_atomic_outputs(
                 {"location_id": "string", "row_key": "string"} if scoped else {}
             ),
         )
+
+
+def test_optional_lookup_rejects_partial_schema(
+    schema_database: Database, tmp_path: Path
+) -> None:
+    tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
+    tables.store.initialize()
+    del schema_database.rows["storage_registrations"]
+    with pytest.raises(DamagedDataError):
+        tables.lookup(header())
 
 
 @pytest.mark.parametrize("names", [(), ("a", "extra")])
@@ -218,7 +235,7 @@ def test_exact_output_names(
     assert not database.rows
 
 
-@pytest.mark.parametrize("damage", ["rows", "description", "null", "scope"])
+@pytest.mark.parametrize("damage", ["rows", "description", "scope"])
 def test_damaged_required_data(database: Database, tmp_path: Path, damage: str) -> None:
     schema = pa.DataFrameSchema(
         {"v": pa.Column("Int64", description="Value", metadata={"unit": None})},
@@ -237,8 +254,6 @@ def test_damaged_required_data(database: Database, tmp_path: Path, damage: str) 
         database.rows[table].clear()
     elif damage == "description":
         database.rows["stored_results"][-1]["output_rows"] = None
-    elif damage == "null":
-        database.rows[table][0]["v"] = None
     else:
         database.rows["stored_results"][0]["node_id"] = "wrong"
     with pytest.raises(DamagedDataError):

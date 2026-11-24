@@ -41,6 +41,9 @@ def test_batch_idempotence_rollback_and_typed_read(
     store = SQLiteStore(tmp_path / "records.sqlite")
     records = ProviderRecords(store)
     validated = provider.schema.validate(frame())
+    store.initialize((provider_registration(provider),))
+    assert records.lookup(provider, ["a", "b"]).empty
+    records.publish(provider, validated)
     records.publish(provider, validated)
     original = records.lookup(provider, ["a", "b"], required=True)
     assert_geodataframe_equal(original, validated, check_dtype=False)
@@ -87,7 +90,7 @@ def test_scope_isolation(
     assert len(records.lookup(other, ["a"], required=True)) == 1
 
 
-@pytest.mark.parametrize("damage", ["partition", "row", "null", "geometry", "header"])
+@pytest.mark.parametrize("damage", ["partition", "row", "geometry", "header"])
 def test_damage_is_not_reacquisition(
     database: Database, tmp_path: Path, damage: str
 ) -> None:
@@ -102,8 +105,6 @@ def test_damage_is_not_reacquisition(
         database.rows["stored_partitions"].clear()
     elif damage == "row":
         database.rows[table].clear()
-    elif damage == "null":
-        database.rows[table][0]["geometry"] = None
     elif damage == "geometry":
         database.rows[table][0]["geometry"] = b"broken"
     else:
@@ -234,6 +235,9 @@ def test_failed_row_insert_rolls_back_batch(database: Database, tmp_path: Path) 
     store = SQLiteStore(tmp_path / "records.sqlite")
     store.initialize((provider_registration(selection.provider),))
     data = store.layout.tables[provider_registration(selection.provider).key]
+    records = ProviderRecords(store)
+    validated = selection.provider.schema.validate(frame())
+    records.publish(selection.provider, validated.iloc[:1])
     execute = database.execute
 
     def fail_rows(statement: object, parameters: object = None) -> object:
@@ -244,9 +248,7 @@ def test_failed_row_insert_rolls_back_batch(database: Database, tmp_path: Path) 
 
     database.connection.execute.side_effect = fail_rows
     with pytest.raises(RuntimeError, match="row insertion"):
-        ProviderRecords(store).publish(
-            selection.provider, selection.provider.schema.validate(frame())
-        )
-    assert not database.rows.get("stored_results")
-    assert not database.rows.get("stored_partitions")
-    assert not database.rows.get(data.table.name)
+        records.publish(selection.provider, validated.assign(count=999))
+    saved = records.lookup(selection.provider, ["a", "b"])
+    assert_geodataframe_equal(saved, validated.iloc[:1], check_dtype=False)
+    assert len(database.rows[data.table.name]) == 1

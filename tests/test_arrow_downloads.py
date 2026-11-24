@@ -297,7 +297,7 @@ def test_stream_resources_close(
         row = next(
             rows for name, rows in database.rows.items() if name.startswith("data_")
         )[0]
-        row["ratio"] = float("inf")
+        row["geometry"] = b"\x01truncated"
     database.connection.reset_mock()
     database.engine.reset_mock()
     response = TableResponse(retained.service.stream_table(retained.reference, "rows"))
@@ -402,7 +402,7 @@ async def test_mcp_download_link_defers_cell_integrity_to_get(
     rows = next(
         rows for name, rows in database.rows.items() if name.startswith("data_")
     )
-    rows[damaged]["geometry"] = b"damaged"
+    rows[damaged]["geometry"] = b"\x01truncated"
     app = retained.app.state.mcp_app
     async with (
         app.router.lifespan_context(app),
@@ -444,7 +444,7 @@ def test_damaged_geometry_returns_json_and_preserves_destination(
     rows = next(
         rows for name, rows in database.rows.items() if name.startswith("data_")
     )
-    rows[damaged]["geometry"] = b"damaged"
+    rows[damaged]["geometry"] = rows[0]["geometry"] + b"junk"
     path = retained.service.result_store_path.with_suffix(".arrow")
     path.write_bytes(b"previous download")
     with (

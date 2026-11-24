@@ -20,7 +20,7 @@ from lyra.runtime.result_descriptions import (
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.sqlite_store import DamagedDataError, SQLiteStore
 from lyra.sdk import loading
-from test_support.publication import publish_result
+from test_support.publication import publication_report, publish_result
 from tests.result_description_helpers import (
     location_descriptions,
     publish_values,
@@ -179,7 +179,9 @@ def test_reopen_assembly(
     assert reopened.read(second)[0] == description
 
 
-@pytest.mark.parametrize("failure", ["insert", "commit", "missing", "group", "input"])
+@pytest.mark.parametrize(
+    "failure", ["insert", "commit", "missing", "group", "input", "partition", "rows"]
+)
 def test_failed_description_keeps_values(
     database: Database, tmp_path: Path, failure: str
 ) -> None:
@@ -189,7 +191,15 @@ def test_failed_description_keeps_values(
         update={"location_inputs": retain_descriptions(store)}
     )
     valid = description.model_copy(deep=True)
-    values = deepcopy(database.rows)
+    writer = ResultDescriptions(store)
+    report = publication_report(writer, valid)
+    undamaged = deepcopy(database.rows)
+    if failure == "partition":
+        database.rows["stored_partitions"].clear()
+    elif failure == "rows":
+        data = store.layout.tables[description.outputs["a"].registration_key]
+        database.rows[data.table.name].clear()
+    values = deepcopy({name: rows for name, rows in database.rows.items() if rows})
     if failure == "input":
         description = description.model_copy(
             update={"input_computations": (ComputationSelection(value_key="absent"),)}
@@ -217,14 +227,15 @@ def test_failed_description_keeps_values(
 
     database.connection.execute.side_effect = inject
     with pytest.raises((RuntimeError, ValueError, DamagedDataError)):
-        publish_result(ResultDescriptions(store), description)
+        writer.publish(description, report)
     assert not database.rows.get("final_results")
     assert len(database.rows["stored_results"]) == 1
     assert {name: rows for name, rows in database.rows.items() if rows} == values
     assert not database.in_transaction
     database.connection.execute.side_effect = execute
     database.fail_commit = False
-    writer = ResultDescriptions(store)
+    if failure in {"partition", "rows"}:
+        database.rows = undamaged
     reference = publish_result(writer, valid)
     assert writer.describe(reference).location_inputs == location_descriptions()
 
@@ -235,11 +246,43 @@ def test_incomplete_description_is_not_published(
 ) -> None:
     store = SQLiteStore(tmp_path / "values.sqlite")
     description = publish_values(store, ())
+    writer = ResultDescriptions(store)
+    report = publication_report(writer, description)
     if damage == "missing":
         del description.outputs["b"]
     else:
         description.outputs["extra"] = description.outputs["b"]
     with pytest.raises(DamagedDataError):
+        writer.publish(description, report)
+    assert not database.rows.get("final_results")
+
+
+@pytest.mark.parametrize(
+    ("first", "second_key", "second"),
+    [
+        (("one",), "one", ("one",)),
+        (None, "one", ("one",)),
+        (("empty",), "two", ("empty",)),
+    ],
+)
+def test_overlapping_output_selections_fail_publication(
+    database: Database,
+    tmp_path: Path,
+    first: tuple[str, ...] | None,
+    second_key: str,
+    second: tuple[str, ...],
+) -> None:
+    store = SQLiteStore(tmp_path / "values.sqlite")
+    description = publish_values(store, ("one", "two"))
+    description.outputs["a"] = description.outputs["a"].model_copy(
+        update={
+            "computations": (
+                ComputationSelection(value_key="one", groups=first),
+                ComputationSelection(value_key=second_key, groups=second),
+            )
+        }
+    )
+    with pytest.raises(DamagedDataError, match="Overlapping"):
         publish_result(ResultDescriptions(store), description)
     assert not database.rows.get("final_results")
 

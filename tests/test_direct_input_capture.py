@@ -252,7 +252,10 @@ def test_complete_hit_restores_inputs_without_geometry(
     )
     runner = LocalRunner.from_definitions(plugins, result_store_path=path)
     with monkeypatch.context() as patch:
-        patch.setattr(LocationInputs, "rows", Mock(side_effect=AssertionError))
+        patch.setattr(
+            "lyra.data.relational.decode_geometries",
+            Mock(side_effect=AssertionError("cache hit decoded provider geometry")),
+        )
         run = runner.run_development if development else runner.run
         reused = run("count", inputs=inputs)
     assert not events

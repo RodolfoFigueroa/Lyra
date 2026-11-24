@@ -100,23 +100,14 @@ class ComputationRows:
         return query
 
     def validate(self, connection: sa.Connection, counts: int | dict[str, int]) -> None:
-        """Check completion, identity uniqueness and required cells in SQL.
+        """Check completion counts and identity uniqueness in SQL.
 
         Raises:
             DamagedDataError: If selected rows disagree with retained completion.
         """
-        required = [
-            self.data.table.c[column.name]
-            for column in self.registration.columns
-            if not column.nullable
-        ]
         query = self.select(
             sa.func.count().label("rows"),
             sa.func.count(self.keys[-1].distinct()).label("identities"),
-            *(
-                sa.func.count(column).label(f"required_{i}")
-                for i, column in enumerate(required)
-            ),
         )
         expected = (
             {None: counts}
@@ -134,10 +125,8 @@ class ComputationRows:
         for row in _read(connection, query):
             group = row["location_id"] if isinstance(counts, dict) else None
             observed[group] = row["rows"]
-            if row["identities"] != row["rows"] or any(
-                row[f"required_{i}"] != row["rows"] for i in range(len(required))
-            ):
-                msg = "Invalid metric row identities or required cells"
+            if row["identities"] != row["rows"]:
+                msg = "Invalid metric row identities"
                 raise DamagedDataError(msg)
         if observed.keys() - expected.keys() or any(
             observed.get(group, 0) != count for group, count in expected.items()

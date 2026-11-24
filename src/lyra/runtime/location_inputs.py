@@ -11,7 +11,6 @@ from lyra.contracts.provider_scope import EffectiveScope
 from lyra.contracts.references import RetrievalName
 from lyra.contracts.results import LocationInputDescription
 from lyra.contracts.value_identity import value_key
-from lyra.data.relational import frame_from_rows
 from lyra.runtime.input_selection import InputRows
 from lyra.runtime.sqlite_schema import Registration
 from lyra.runtime.sqlite_store import DamagedDataError, Header
@@ -175,10 +174,7 @@ class LocationInputs:
             self.store.initialize((selection.registration,))
 
         with self.store.transaction() as connection:
-            frame_from_rows(
-                self.rows(connection, selection),
-                selection.registration.storage_description(),
-            )
+            InputRows.prepare(self.store, connection, (selection,)).validate_records()
             table = self.store.layout.input_selections
             if (
                 connection.execute(
@@ -313,10 +309,9 @@ class LocationInputs:
                     references.update(dict.fromkeys(keys))
             for key in references:
                 selection = inputs.borrow_selection(connection, key)
-                frame_from_rows(
-                    self.rows(connection, selection),
-                    selection.registration.storage_description(),
-                )
+                InputRows.prepare(
+                    self.store, connection, (selection,)
+                ).validate_records()
 
     def bindings(self, connection: sa.Connection, key: str) -> InputBindings:
         """Read a computation's complete named bindings independently of reports.
@@ -372,15 +367,6 @@ class LocationInputs:
             ):
                 msg = "Damaged retained input operation relationship"
                 raise DamagedDataError(msg)
-
-    def rows(self, connection: sa.Connection, selection: InputSelection) -> list[tuple]:
-        """Select qualified native cells, preserving immediate pairs and restrictions.
-
-        Returns:
-            Cells in the captured schema's order; no frame is required for selection.
-        """
-        selected = InputRows.prepare(self.store, connection, (selection,))
-        return [row for batch in selected.batches() for row in batch.rows]
 
     def frame(
         self, connection: sa.Connection, keys: tuple[str, ...]

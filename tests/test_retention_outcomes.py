@@ -286,7 +286,10 @@ def test_intermediate_inputs_reused_as_root(
     events.clear()
     executor = graph(tmp_path, events, [], policy)
     with monkeypatch.context() as patch:
-        patch.setattr(LocationInputs, "rows", Mock(side_effect=AssertionError))
+        patch.setattr(
+            "lyra.data.relational.decode_geometries",
+            Mock(side_effect=AssertionError("cache hit decoded provider geometry")),
+        )
         result = run(executor, "source")
     assert events == []
     assert set(result.outputs["data"].location_id) == {"a", "b"}

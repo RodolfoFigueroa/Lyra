@@ -5,14 +5,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 import pyarrow as pa
-import shapely
 from pyproj import CRS
 
 from lyra.contracts.provider_scope import EffectiveScope
-from lyra.data.relational import checked_column
+from lyra.data.relational import decode_geometries
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -104,9 +102,9 @@ def table_batch(
     """
     arrays = []
     for i, field in enumerate(schema):
-        values = checked_column(rows, i, description)
+        values = [row[i] for row in rows]
         if field.name == description.geometry:
-            shapely.from_wkb(np.asarray(values, dtype=object))
+            decode_geometries(values)
         if pa.types.is_boolean(field.type):
             values = [None if value is None else bool(value) for value in values]
         arrays.append(pa.array(values, type=field.type))

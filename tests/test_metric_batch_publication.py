@@ -141,12 +141,41 @@ def test_invalid_batch_is_not_published(
     assert not database.rows
 
 
+@pytest.mark.usefixtures("database")
+def test_conflicting_bindings_abort_mixed_retry(tmp_path: Path) -> None:
+    tables = MetricTables(SQLiteStore(tmp_path / "store"))
+    direct, _ = retained(tables.store)
+    reference = LocationInputs(tables.store).publish(direct)
+    bindings = InputBindings(names=("shared",), selections={"shared": (reference,)})
+    assert tables.lookup(headers("a")[0][0]) is None
+    publish(tables, ("a",), bindings)
+    with pytest.raises(DamagedDataError, match="bindings differ"):
+        publish(tables, ("new", "a"), InputBindings())
+    assert tables.lookup(headers("new")[0][0]) is None
+    saved = tables.lookup(headers("a")[0][0], required=True)
+    assert saved is not None
+    assert saved["a"].value.tolist() == [0]
+
+
+@pytest.mark.parametrize(
+    "damage", ["binding", "registration", "inventory", "partition", "rows"]
+)
 def test_existing_damage_aborts_pending_batch(
-    database: Database, tmp_path: Path
+    database: Database, tmp_path: Path, damage: str
 ) -> None:
     tables = MetricTables(SQLiteStore(tmp_path / "store"))
     publish(tables, ("a",), InputBindings())
-    database.rows["metric_inputs"].clear()
+    if damage == "binding":
+        database.rows["metric_inputs"].clear()
+    elif damage == "registration":
+        database.rows["storage_registrations"].pop()
+    elif damage == "inventory":
+        database.rows["stored_results"][0]["output_rows"] = '{"a":{"a":1}}'
+    elif damage == "partition":
+        database.rows["stored_partitions"].clear()
+    else:
+        data = next(iter(tables.store.layout.tables.values()))
+        database.rows[data.table.name].clear()
     with pytest.raises(DamagedDataError):
         publish(tables, ("b", "a"), InputBindings())
     assert tables.lookup(headers("b")[0][0]) is None

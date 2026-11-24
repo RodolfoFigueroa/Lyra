@@ -119,7 +119,7 @@ def test_batch_resources_close(
     database.connection.__exit__.assert_called()
 
 
-@pytest.mark.parametrize("damage", ["rows", "duplicate", "null", "partition", "header"])
+@pytest.mark.parametrize("damage", ["rows", "duplicate", "partition", "header"])
 def test_checks_precede_value_batches(
     database: Database, tmp_path: Path, damage: str
 ) -> None:
@@ -136,8 +136,6 @@ def test_checks_precede_value_batches(
         rows.remove(selected)
     elif damage == "duplicate":
         selected["row_key"] = "z"
-    elif damage == "null":
-        selected["row_key"] = None
     elif damage == "partition":
         database.rows["stored_partitions"] = [
             row

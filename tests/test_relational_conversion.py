@@ -1,16 +1,18 @@
 from copy import deepcopy
+from typing import Literal
 
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+import shapely
 from geopandas.testing import assert_geodataframe_equal
 from pandera.api.pandas.model_config import BaseConfig
 from pandera.typing import Series
 from shapely.geometry import Point, Polygon
 
 from lyra.contracts.errors import MetricResultError
-from lyra.data.relational import frame_from_rows, rows_from_validated
+from lyra.data.relational import decode_geometries, frame_from_rows, rows_from_validated
 from lyra.sdk.storage_schema import describe, prepare_native
 from test_support.location_schema import column
 from tests.provider_schema_helpers import declaration, frame
@@ -87,6 +89,29 @@ def test_wkb_and_declared_crs(*, empty: bool) -> None:
     assert_geodataframe_equal(restored, owned.astype({"location_id": "string"}))
     if cells:
         assert isinstance(cells[0][layout.columns.index("geometry")], bytes)
+
+
+@pytest.mark.parametrize("byte_order", [0, 1])
+@pytest.mark.parametrize("flavor", ["iso", "extended"])
+def test_geometry_framing_dimensions_and_nested_members(
+    byte_order: int, flavor: Literal["iso", "extended"]
+) -> None:
+    geometry = shapely.from_wkt(
+        "GEOMETRYCOLLECTION Z (MULTIPOINT Z ((1 2 3), (2 3 4)), "
+        "GEOMETRYCOLLECTION Z (LINESTRING Z EMPTY, "
+        "POLYGON Z ((0 0 1, 1 0 1, 0 1 1, 0 0 1))))"
+    )
+    geometry = shapely.set_srid(geometry, 4326)
+    blob = shapely.to_wkb(
+        geometry,
+        byte_order=byte_order,
+        flavor=flavor,
+        include_srid=flavor == "extended",
+    )
+    decoded = decode_geometries([None, blob])
+    assert decoded[0] is None
+    assert decoded[1] == geometry
+    assert shapely.get_srid(decoded[1]) == (4326 if flavor == "extended" else 0)
 
 
 def test_producer_check_runs_once_and_handoff_is_owned() -> None:

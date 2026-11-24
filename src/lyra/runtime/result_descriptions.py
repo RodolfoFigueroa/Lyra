@@ -33,6 +33,7 @@ from lyra.runtime.sqlite_store import DamagedDataError, MissingValueError
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from lyra.contracts.reports import ReportNode
     from lyra.data.results import NativeOutputs
     from lyra.runtime.sqlite_schema import Registration
     from lyra.runtime.sqlite_store import Header, SQLiteStore
@@ -110,21 +111,27 @@ class ResultDescriptions:
         return reference
 
     @staticmethod
-    def _check_pair(description: ResultDescription, report: ExecutionReport) -> None:
+    def _check_pair(
+        description: ResultDescription, report: ExecutionReport
+    ) -> "ReportNode":
         root = next(node for node in report.nodes if node.use_id == report.root_use_id)
+        if description.outputs.keys() != set(description.output_names):
+            msg = "Incomplete final output selections"
+            raise DamagedDataError(msg)
         if (
-            description.metric_name != root.node_id
+            description.outputs.keys() != root.outputs.keys()
+            or description.metric_name != root.node_id
             or not same_json(description.parameters, root.parameters)
             or description.code_revision != root.code_revision
-            or set(description.output_names) != set(root.outputs)
             or any(
-                name not in root.outputs
-                or output.owner_scope != root.outputs[name].owner_scope
+                output.owner_scope != root.outputs[name].owner_scope
                 for name, output in description.outputs.items()
             )
         ):
             msg = "Final description and report disagree"
             raise DamagedDataError(msg)
+
+        return root
 
     @classmethod
     def decode(cls, row: sa.RowMapping) -> tuple[ResultDescription, ExecutionReport]:
@@ -155,7 +162,6 @@ class ResultDescriptions:
 
         Raises:
             MissingValueError: If the execution has no retained report.
-            DamagedDataError: If the final output selections are incomplete.
         """
         table = self.store.layout.final_results
         with self.store.engine.connect() as connection:
@@ -168,10 +174,7 @@ class ResultDescriptions:
             )
         if row is None:
             raise MissingValueError(execution_id)
-        description, report = self.decode(row)
-        if set(description.outputs) != set(description.output_names):
-            msg = "Incomplete final output selections"
-            raise DamagedDataError(msg)
+        _, report = self.decode(row)
         return report
 
     def read(
@@ -225,25 +228,34 @@ class ResultDescriptions:
         connection: sa.Connection,
         description: ResultDescription,
         name: str,
+        *,
+        check_overlap: bool = False,
     ) -> OutputSelection:
         output = description.outputs[name]
         registration = self._registration(description, name, output)
-        return OutputSelection(
-            connection,
-            registration,
-            output.owner_scope,
-            tuple(
+        claimed: set[str] = set()
+        computations = []
+        for selection in output.computations:
+            header = self._header(
+                connection, description, output, registration, selection
+            )
+            computations.append(
                 prepare_computation(
-                    self.store,
-                    connection,
-                    registration,
-                    self._header(
-                        connection, description, output, registration, selection
-                    ),
-                    selection.groups,
+                    self.store, connection, registration, header, selection.groups
                 )
-                for selection in output.computations
-            ),
+            )
+            if check_overlap and header.output_scope == "location":
+                counts = (header.output_rows or {})[name]
+                if isinstance(counts, dict):
+                    groups = (
+                        counts.keys() if selection.groups is None else selection.groups
+                    )
+                    if not claimed.isdisjoint(groups):
+                        msg = "Overlapping final output partitions"
+                        raise DamagedDataError(msg)
+                    claimed.update(groups)
+        return OutputSelection(
+            connection, registration, output.owner_scope, tuple(computations)
         )
 
     def _description_record(
@@ -475,7 +487,11 @@ class ResultDescriptions:
         output_name: str | None,
     ) -> "NativeOutputs":
         self._load_outputs(description, output_name)
-        return self._assemble(connection, description, output_name, check_names=False)
+        return {
+            name: self._selection(connection, description, name).frame()
+            for name in description.outputs
+            if output_name is None or name == output_name
+        }
 
     def _load_outputs(
         self, description: ResultDescription, output_name: str | None
@@ -534,32 +550,12 @@ class ResultDescriptions:
         if (
             header.node_id != description.metric_name
             or header.output_scope != registration.output_scope
-            or header.owner_scope != output.owner_scope
+            or (header.owner_scope, header.target_scope) != (output.owner_scope, None)
             or (header.output_scope == "unpartitioned" and selection.groups is not None)
         ):
             msg = "Final output computation scope differs"
             raise DamagedDataError(msg)
         return header
-
-    def _assemble(
-        self,
-        connection: sa.Connection,
-        description: ResultDescription,
-        output_name: str | None = None,
-        *,
-        check_names: bool = True,
-    ) -> "NativeOutputs":
-        outputs = {}
-        if not description.outputs or (
-            check_names and set(description.outputs) != set(description.output_names)
-        ):
-            msg = "Final result requires every registered named output"
-            raise DamagedDataError(msg)
-        for name in description.outputs:
-            if output_name is not None and name != output_name:
-                continue
-            outputs[name] = self._selection(connection, description, name).frame()
-        return outputs
 
 
 class _ResultPublication(ResultDescriptions):
@@ -572,16 +568,40 @@ class _ResultPublication(ResultDescriptions):
 
         Returns:
             The committed reference and independently owned public description.
+
+        Raises:
+            DamagedDataError: If registered and reported output schemas differ.
         """
-        self.store.load_registrations()
         reference = report.result_ref
-        self._check_pair(description, report)
+        root = self._check_pair(description, report)
         with self.store.transaction() as connection:
-            self._assemble(connection, description)
+            for name, output in description.outputs.items():
+                self.store.read_registration(connection, output.registration_key)
+                self._selection(connection, description, name, check_overlap=True)
             with _input_traversal(self.store, connection) as inputs:
                 projection = self._metadata(
                     connection, inputs, description, reference, report.execution_id
                 )
+            if any(
+                output.scope != root.outputs[name].scope
+                or not same_json(
+                    output.table_schema.model_dump(mode="json"),
+                    root.outputs[name].table_schema.model_dump(mode="json"),
+                )
+                for name, output in projection.outputs.items()
+            ):
+                msg = "Final output schema and report disagree"
+                raise DamagedDataError(msg)
+            if {
+                name: binding.provider_scope
+                for name, binding in root.inputs.items()
+                if binding.provider_scope is not None
+            } != {
+                name: retained.provider_scope
+                for name, retained in projection.location_inputs.items()
+            }:
+                msg = "Final location inputs and report disagree"
+                raise DamagedDataError(msg)
             connection.execute(
                 self.store.layout.final_results.insert(),
                 {

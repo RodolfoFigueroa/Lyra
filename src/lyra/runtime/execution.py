@@ -103,6 +103,7 @@ if TYPE_CHECKING:
     from lyra.contracts.metric_scope import OutputScope
     from lyra.contracts.outputs import OutputMetadata
     from lyra.contracts.plugins import NodeManifest
+    from lyra.contracts.reports import ExecutionReport
     from lyra.contracts.resources import ResourceConfig
     from lyra.data.results import NativeOutputs
     from lyra.runtime.planning.catalog import CompiledCatalog
@@ -186,11 +187,16 @@ class ExecutionOutcome:
     """Root tables, their durable description reference, and execution observations."""
 
     outputs: NativeOutputs
-    result_ref: str | None
+    committed_report: ExecutionReport | None
     provenance: ExecutionProvenance
     metadata: ExecutionMetadata
     report_state: ReportCollection
     completions: tuple[MetricCompletion, ...] = ()
+
+    @property
+    def result_ref(self) -> str | None:
+        """Reference of the successfully published result, when retention is enabled."""
+        return self.committed_report.result_ref if self.committed_report else None
 
 
 class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationResult"]):
@@ -204,7 +210,7 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
         self.observations: list[InvocationObservation] = []
         self.native_inputs: list[NativeInputSummary] = []
         self.prepared: dict[str, PreparedResolvedInvocation] = {}
-        self.root_artifact: str | None = None
+        self.committed_report: ExecutionReport | None = None
         self.root_identity: str | None = None
         self.parameter_uses: dict[str, dict] = {}
         self.routes: dict[str, AcceptedSource] = {}
@@ -481,7 +487,7 @@ class GraphExecutor:
             completed.clear()
         return ExecutionOutcome(
             result,
-            completed.root_artifact,
+            completed.committed_report,
             deepcopy(self._provenance),
             metadata,
             completed.report,
@@ -1203,7 +1209,6 @@ class GraphExecutor:
                 )
                 for name, layout in plugin.output_storage(metadata.metric_name).items()
             )
-            store.initialize(registrations)
             outputs = {}
             for registration in registrations:
                 completion = completed.completions[
@@ -1224,6 +1229,8 @@ class GraphExecutor:
                         for group, key in completion.computations
                     ),
                 )
+            if not any(output.computations for output in outputs.values()):
+                store.initialize(registrations)
             description = ResultDescription(
                 metric_name=metadata.metric_name,
                 code_revision=entry.node.code_revision,
@@ -1242,11 +1249,11 @@ class GraphExecutor:
                 else InputBindings(),
             )
             report = completed.report.complete(uuid4().hex)
-            reference, projection = _ResultPublication(store).publish_metadata(
+            _, projection = _ResultPublication(store).publish_metadata(
                 description, report
             )
             metadata.location_inputs = projection.location_inputs
-            completed.root_artifact = reference
+            completed.committed_report = report
 
     def _execute_route(
         self,

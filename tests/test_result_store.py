@@ -29,55 +29,40 @@ from lyra.server.result_rows import RowPageBuilder
 from test_support.publication import publish_result
 from test_support.table_fixtures import value_frame, value_schema
 from tests.result_description_helpers import publish_values
-from tests.retained_table_helpers import retained_service
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
 
 
-@pytest.mark.parametrize(
-    ("dtype", "valid", "damaged"),
-    [
-        ("Float64", 1.5, float("inf")),
-        ("Float64", 1.5, float("-inf")),
-        ("Float64", 1.5, "NaN"),
-        ("Float64", 1.5, b"12.5"),
-        ("Int64", 1, 1.5),
-        ("boolean", True, 2),
-        ("string", "ok", b"abc"),
-    ],
-)
-def test_damaged_cell_is_an_integrity_error(
-    database: Database, tmp_path: Path, dtype: str, valid: object, damaged: object
+@pytest.mark.parametrize("damage", ["truncated", "trailing", "concatenated"])
+def test_damaged_geometry_is_an_integrity_error(
+    database: Database, tmp_path: Path, damage: str
 ) -> None:
     path = tmp_path / "results.sqlite"
-    schema = pa.DataFrameSchema(
-        {
-            "value": pa.Column(
-                dtype, nullable=True, description="Value", metadata={"unit": None}
-            )
-        },
-        strict=True,
-    )
-    frame = pd.DataFrame({"value": pd.Series([valid, None], dtype=dtype)})
-    _, reference = retained_service(path, schema, frame)
-    rows = next(
-        rows for name, rows in database.rows.items() if name.startswith("data_")
-    )
+    writer = SQLiteStore(path)
+    description = publish_values(writer, ("one", "two"), spatial=True)
+    data = writer.layout.tables[description.outputs["a"].registration_key]
+    row = database.rows[data.table.name][1]
+    blob = row["geometry"]
+    row["geometry"] = {
+        "truncated": blob[:-1],
+        "trailing": blob + b"junk",
+        "concatenated": blob * 2,
+    }[damage]
+    reference = publish_result(ResultDescriptions(writer), description)
+    path.touch()
     with ResultStore.open(path) as store:
-        pd.testing.assert_frame_equal(store.read_table(reference, "rows"), frame)
-        rows[1]["value"] = damaged
         pages = RowPageBuilder(store, "https://lyra.test", http_response_budget())
-        first = pages.build(reference, "rows", limit=1)
+        first = pages.build(reference, "a", limit=1)
         assert first.next_cursor
         with pytest.raises(ResultIntegrityError):
-            pages.build(reference, "rows", limit=1, cursor=first.next_cursor)
+            pages.build(reference, "a", limit=1, cursor=first.next_cursor)
         with pytest.raises(ResultIntegrityError):
-            b"".join(store.stream_table(reference, "rows"))
+            b"".join(store.stream_table(reference, "a"))
         with pytest.raises(ResultIntegrityError) as named:
-            store.read_table(reference, "rows")
+            store.read_table(reference, "a")
         assert named.value.result_ref == reference
-        assert named.value.output_name == "rows"
+        assert named.value.output_name == "a"
         with pytest.raises(ResultIntegrityError) as whole:
             store.read_result(reference)
         assert whole.value.result_ref == reference

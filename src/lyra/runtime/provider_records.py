@@ -60,7 +60,9 @@ class ProviderRecords:
             by_id[record["location_id"]] = record
         keys = self._keys(provider, frame["location_id"], references)
         with self.store.transaction() as connection:
-            existing = self._read(connection, provider, keys)
+            existing = self._read_records(
+                connection, provider, keys, identities_only=True
+            )
             pending = {
                 key: by_id[record.location_id]
                 for key, record in keys.items()
@@ -113,12 +115,23 @@ class ProviderRecords:
         if not keys:
             return provider.schema.empty_frame()
         self.store.load_registrations()
-        with self.store.engine.connect() as connection:
-            records = self._read(connection, provider, keys)
+        try:
+            with self.store.engine.connect() as connection:
+                records = self._read_records(connection, provider, keys)
+            frame = self._frame(provider, list(records.values()))
+        except (
+            exc.DatabaseError,
+            ValueError,
+            KeyError,
+            TypeError,
+            GEOSException,
+        ) as error:
+            msg = "Damaged provider record data"
+            raise DamagedDataError(msg) from error
         if required and len(records) != len(keys):
             msg = "Missing required provider records"
             raise DamagedDataError(msg)
-        return self._frame(provider, list(records.values()))
+        return frame
 
     @staticmethod
     def _frame(provider: RegisteredProvider, rows: list[dict]) -> gpd.GeoDataFrame:
@@ -133,29 +146,13 @@ class ProviderRecords:
             ),
         )
 
-    def _read(
-        self,
-        connection: sa.Connection,
-        provider: RegisteredProvider,
-        keys: dict[str, RecordIdentity],
-    ) -> dict[str, dict]:
-        try:
-            return self._read_records(connection, provider, keys)
-        except (
-            exc.DatabaseError,
-            ValueError,
-            KeyError,
-            TypeError,
-            GEOSException,
-        ) as error:
-            msg = "Damaged provider record data"
-            raise DamagedDataError(msg) from error
-
     def _read_records(
         self,
         connection: sa.Connection,
         provider: RegisteredProvider,
         keys: dict[str, RecordIdentity],
+        *,
+        identities_only: bool = False,
     ) -> dict[str, dict]:
         layout = self.store.layout
         headers = list(
@@ -185,11 +182,14 @@ class ProviderRecords:
                 )
             ).mappings()
         )
+        columns = (
+            (data.table.c[data.value_column], data.table.c.location_id)
+            if identities_only
+            else data.logical_columns
+        )
         rows = list(
             connection.execute(
-                sa.select(*data.logical_columns).where(
-                    data.table.c[data.value_column].in_(found)
-                )
+                sa.select(*columns).where(data.table.c[data.value_column].in_(found))
             ).mappings()
         )
         if Counter(row["value_key"] for row in partitions) != Counter(
@@ -206,15 +206,8 @@ class ProviderRecords:
             if (
                 row["location_id"] != owners[key]
                 or row["location_id"] != keys[key].location_id
-                or any(
-                    row[column.name] is None
-                    for column in registration.columns
-                    if not column.nullable
-                )
             ):
                 msg = "Invalid provider record structure"
                 raise DamagedDataError(msg)
             result[key] = dict(row)
-        # Decode existing data too; corruption is not a cache miss.
-        self._frame(provider, list(result.values()))
         return result

@@ -6,14 +6,13 @@ from tempfile import TemporaryDirectory
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
-import sqlalchemy as sa
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import Point
 
 from lyra.contracts.provider_scope import ProviderScope
 from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
-from lyra.runtime.sqlite_schema import Registration, StoredColumn
+from lyra.runtime.sqlite_schema import Registration
 from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk.storage_schema import prepare_native
 
@@ -21,28 +20,34 @@ from lyra.sdk.storage_schema import prepare_native
 class SQLiteFoundationSuite:
     """Measure one transaction containing a header and 1,000 typed rows."""
 
-    version = "1"
+    version = "2"
     number = 1
     warmup_time = 0
 
     def setup(self) -> None:
-        """Initialize a disposable store outside the measured publication."""
+        """Prepare one validated Boolean table outside the measured publication."""
         self.directory = TemporaryDirectory()
         self.path = Path(self.directory.name) / "results.sqlite"
         self.store = SQLiteStore(self.path)
-        self.registration = Registration(
-            node_id="benchmark",
-            output_name="value",
-            kind="metric",
-            output_scope="unpartitioned",
-            columns=(
-                StoredColumn(
-                    name="enabled", dtype="boolean", nullable=False, unit=None
-                ),
-            ),
+        self.tables = MetricTables(self.store)
+        schema = pa.DataFrameSchema(
+            {
+                "enabled": pa.Column(
+                    "boolean", description="Enabled", metadata={"unit": None}
+                )
+            },
+            strict=True,
         )
-        self.store.initialize((self.registration,))
-        self.data = self.store.layout.tables[self.registration.key]
+        self.frame, self.description = prepare_native(
+            pd.DataFrame({"enabled": pd.array([True] * 1000, dtype="boolean")}), schema
+        )
+        self.store.initialize(
+            (
+                Registration.from_description(
+                    "benchmark", "value", self.description, output_scope="unpartitioned"
+                ),
+            )
+        )
         self.sequence = 0
 
     def teardown(self) -> None:
@@ -58,19 +63,15 @@ class SQLiteFoundationSuite:
             node_id="benchmark",
             output_scope="unpartitioned",
         )
-        with self.store.publication(header) as connection:
-            if connection is not None:
-                connection.execute(
-                    self.data.table.insert(),
-                    [
-                        {
-                            self.data.value_column: header.value_key,
-                            self.data.row_column: index,
-                            "enabled": True,
-                        }
-                        for index in range(1000)
-                    ],
-                )
+        self._publish(header)
+
+    def _publish(self, header: Header) -> None:
+        self.tables.publish(
+            ((header, ()),),
+            {"value": self.frame},
+            {"value": self.description},
+            location_inputs={header.value_key: InputBindings()},
+        )
 
     def peakmem_publish(self) -> None:
         """Measure process memory for the same transaction boundary."""
@@ -88,17 +89,14 @@ class SQLiteFoundationSuite:
             node_id="benchmark",
             output_scope="unpartitioned",
         )
-        with self.store.publication(header) as connection:
-            if connection is not None:
-                msg = "Repeated publication must retain the existing value"
-                raise RuntimeError(msg)
+        self._publish(header)
+        self.store.close()
         with SQLiteStore(self.path, read_only=True) as reader:
-            reader.load_registrations()
-            data = reader.layout.tables[self.registration.key]
-            with reader.engine.connect() as connection:
-                return connection.execute(
-                    sa.select(sa.func.count()).select_from(data.table)
-                ).scalar_one()
+            outputs = MetricTables(reader).lookup(header, required=True)
+            if outputs is None or not outputs["value"].equals(self.frame):
+                msg = "Repeat publication must preserve the original 1,000 rows"
+                raise RuntimeError(msg)
+            return len(outputs["value"])
 
 
 class ScopedMetricSuite:

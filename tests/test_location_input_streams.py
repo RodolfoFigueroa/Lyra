@@ -94,23 +94,14 @@ def test_arrow_types_geometry_and_multiple_batches(
 
 
 @pytest.mark.parametrize(
-    ("column", "value"),
-    [
-        ("ratio", "NaN"),
-        ("ratio", float("inf")),
-        ("count", 1.5),
-        ("label", b"text"),
-        ("flag", 2),
-        ("geometry", None),
-        ("geometry", b"010100000000000000000000000000000000000000"),
-    ],
+    "value", [b"010100000000000000000000000000000000000000", b"\x01broken"]
 )
-def test_corrupt_input_cells(
-    retained_input: RetainedInput, database: Database, column: str, value: object
+def test_corrupt_input_geometry(
+    retained_input: RetainedInput, database: Database, value: bytes
 ) -> None:
     retained = retained_input
     table = retained.store.layout.tables[retained.selection.registration.key].table
-    database.rows[table.name][0][column] = value
+    database.rows[table.name][0]["geometry"] = value
     reader = ResultStore(retained.store)
     builder = RowPageBuilder(reader, "https://lyra.test", http_response_budget())
     for read in (
@@ -196,7 +187,7 @@ def test_stream_cleanup(
         data = retained_input.store.layout.tables[
             retained_input.selection.registration.key
         ]
-        database.rows[data.table.name][0]["ratio"] = float("inf")
+        database.rows[data.table.name][0]["geometry"] = b"\x01truncated"
     database.connection.reset_mock()
     stream = retained_input.stream()
     next(stream)
@@ -303,7 +294,8 @@ def test_shared_service_pages_and_missing_store(
 
 
 @pytest.mark.parametrize(
-    ("damaged", "corruption"), [(0, "missing"), (-1, "missing"), (-1, "wkb")]
+    ("damaged", "corruption"),
+    [(0, "missing"), (-1, "missing"), (-1, "wkb"), (-1, "trailing")],
 )
 @pytest.mark.parametrize("retained_input", ["large"], indirect=True)
 def test_damaged_record_returns_integrity_error_before_arrow(
@@ -316,8 +308,10 @@ def test_damaged_record_returns_integrity_error_before_arrow(
     data = retained.store.layout.tables[retained.selection.registration.key]
     if corruption == "missing":
         database.rows[data.table.name].pop(damaged)
+    elif corruption == "trailing":
+        database.rows[data.table.name][damaged]["geometry"] += b"junk"
     else:
-        database.rows[data.table.name][damaged]["geometry"] = b"damaged"
+        database.rows[data.table.name][damaged]["geometry"] = b"\x01truncated"
     events = []
 
     async def send(message: Message) -> None:

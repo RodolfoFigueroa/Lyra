@@ -168,52 +168,87 @@ class SQLiteStore:
             yield connection
 
     def initialize(self, registrations: tuple[Registration, ...] = ()) -> None:
-        """Initialize runtime tables and retain schemas once under a writer lock.
+        """Initialize runtime tables and retain schemas once under a writer lock."""
+        with self.schema_transaction() as connection:
+            self.register(connection, registrations)
+
+    @contextmanager
+    def schema_transaction(self) -> Generator[sa.Connection, None, None]:
+        """Load the current schema under the writer lock and restore it on rollback.
+
+        Yields:
+            A connection for registering tables and publishing their values.
 
         Raises:
-            PermissionError: If initialization is requested on a read-only store.
+            PermissionError: If the store is read-only.
         """
         if self.read_only:
             msg = "Store is read-only"
             raise PermissionError(msg)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         previous = self.layout
-        self.layout = Layout()
         try:
-            self._initialize(registrations)
+            with self.transaction() as connection:
+                self.layout = Layout()
+                self.layout.metadata.create_all(connection)
+                self._load_registrations(connection)
+                yield connection
         except BaseException:
             self.layout = previous
             raise
 
-    def _initialize(self, registrations: tuple[Registration, ...]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.transaction() as connection:
-            self.layout.metadata.create_all(connection)
-            self._load_registrations(connection)
-            for registration in registrations:
-                self.layout.register(registration)
-                statement = sa.select(
-                    self.layout.registrations.c.registration_key
-                ).where(
-                    self.layout.registrations.c.registration_key == registration.key
+    def register(
+        self, connection: sa.Connection, registrations: tuple[Registration, ...]
+    ) -> None:
+        """Register new tables in the current schema transaction."""
+        new_tables = []
+        for registration in registrations:
+            exists = registration.key in self.layout.descriptions
+            data = self.layout.register(registration)
+            if not exists:
+                connection.execute(
+                    self.layout.registrations.insert(),
+                    {
+                        "registration_key": registration.key,
+                        "description": registration.model_dump_json(),
+                    },
                 )
-                if connection.execute(statement).scalar_one_or_none() is None:
-                    connection.execute(
-                        self.layout.registrations.insert(),
-                        {
-                            "registration_key": registration.key,
-                            "description": registration.model_dump_json(),
-                        },
-                    )
-            self.layout.metadata.create_all(connection)
+                new_tables.append(data.table)
+        if new_tables:
+            self.layout.metadata.create_all(connection, tables=new_tables)
 
     def _load_registrations(
-        self, connection: sa.Connection, keys: tuple[str, ...] | None = None
+        self,
+        connection: sa.Connection,
+        keys: tuple[str, ...] | None = None,
+        *,
+        allow_uninitialized: bool = False,
     ) -> None:
         query = sa.select(self.layout.registrations)
         if keys is not None:
             query = query.where(self.layout.registrations.c.registration_key.in_(keys))
         found = set()
-        for row in connection.execute(query).mappings():
+        try:
+            rows = connection.execute(query)
+        except exc.OperationalError as error:
+            if not (
+                allow_uninitialized
+                and isinstance(error.orig, sqlite3.OperationalError)
+                and str(error.orig) == "no such table: storage_registrations"
+            ):
+                raise
+            # A rolled-back first publication leaves an empty SQLite file.
+            if (
+                connection.exec_driver_sql(
+                    "SELECT 1 FROM sqlite_schema LIMIT 1"
+                ).scalar()
+                is None
+            ):
+                msg = "Uninitialized retained store"
+                raise MissingValueError(msg) from error
+            # Initialization may have committed between the failed read and probe.
+            rows = connection.execute(query)
+        for row in rows.mappings():
             found.add(row["registration_key"])
             registration = Registration.model_validate_json(row["description"])
             if registration.key != row["registration_key"]:
@@ -225,7 +260,7 @@ class SQLiteStore:
             raise DamagedDataError(msg)
 
     def read_registration(self, connection: sa.Connection, key: str) -> Registration:
-        """Read a required provider schema in the current transaction.
+        """Read a required table schema in the current transaction.
 
         Returns:
             The retained logical registration.
@@ -234,7 +269,7 @@ class SQLiteStore:
         return self.layout.descriptions[key]
 
     def load_registrations(
-        self, keys: tuple[str, ...] | None = None
+        self, keys: tuple[str, ...] | None = None, *, allow_uninitialized: bool = False
     ) -> tuple[Registration, ...]:
         """Read logical schemas without plugins, directory creation, or DDL.
 
@@ -246,7 +281,9 @@ class SQLiteStore:
         """
         try:
             with self.engine.connect() as connection:
-                self._load_registrations(connection, keys)
+                self._load_registrations(
+                    connection, keys, allow_uninitialized=allow_uninitialized
+                )
         except (exc.DatabaseError, ValueError) as error:
             msg = "Cannot read retained schema registrations"
             raise DamagedDataError(msg) from error
@@ -307,38 +344,3 @@ class SQLiteStore:
         if data.get("output_rows") is not None:
             data["output_rows"] = json.loads(data["output_rows"])
         return Header.model_validate(data)
-
-    @contextmanager
-    def publication(
-        self, header: Header, partitions: tuple[str, ...] = ()
-    ) -> Generator[sa.Connection | None, None, None]:
-        """Publish one complete value; yield None for an already retained key.
-
-        Value-specific writers must insert every validated output using the yielded
-        connection. Exceptions roll back the header, partitions, and all data.
-
-        Yields:
-            The transaction connection, or None when the key already exists.
-
-        Raises:
-            ValueError: If an unpartitioned value supplies partitions.
-        """
-        if header.output_scope == "unpartitioned" and partitions:
-            msg = "Unpartitioned values cannot own partitions"
-            raise ValueError(msg)
-        with self.transaction() as connection:
-            try:
-                self.header(connection, header.value_key)
-            except MissingValueError:
-                connection.execute(self.layout.results.insert(), header.record())
-                if partitions:
-                    connection.execute(
-                        self.layout.partitions.insert(),
-                        [
-                            {"value_key": header.value_key, "location_id": location}
-                            for location in partitions
-                        ],
-                    )
-                yield connection
-            else:
-                yield None

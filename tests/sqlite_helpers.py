@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import TYPE_CHECKING
@@ -9,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy import event
+from sqlalchemy import event, exc
 from sqlalchemy.sql import operators
 from sqlalchemy.sql.dml import Insert
 from sqlalchemy.sql.elements import (
@@ -233,6 +234,40 @@ def database(monkeypatch: pytest.MonkeyPatch) -> Database:
     monkeypatch.setattr(sa, "create_engine", MagicMock(return_value=database.engine))
     monkeypatch.setattr(event, "listen", MagicMock())
     monkeypatch.setattr(sa.MetaData, "create_all", MagicMock())
+    return database
+
+
+@pytest.fixture
+def schema_database(database: Database, monkeypatch: pytest.MonkeyPatch) -> Database:
+    """Include table creation in the transaction snapshot for first-write tests."""
+
+    def create_all(
+        metadata: sa.MetaData,
+        _connection: sa.Connection,
+        tables: list[sa.Table] | None = None,
+    ) -> None:
+        for table in metadata.sorted_tables if tables is None else tables:
+            database.rows.setdefault(table.name, [])
+
+    def execute(statement: object, parameters: object = None) -> MagicMock:
+        if isinstance(statement, sa.Select):
+            table = statement.get_final_froms()[0]
+            if isinstance(table, sa.Table) and table.name not in database.rows:
+                cause = sqlite3.OperationalError(f"no such table: {table.name}")
+                raise exc.OperationalError(str(statement), {}, cause)
+        return database.execute(statement, parameters)
+
+    def driver_sql(statement: str) -> MagicMock:
+        result = MagicMock()
+        if statement == "SELECT 1 FROM sqlite_schema LIMIT 1":
+            result.scalar.return_value = 1 if database.rows else None
+        else:
+            assert statement == "BEGIN IMMEDIATE"
+        return result
+
+    monkeypatch.setattr(sa.MetaData, "create_all", create_all)
+    database.connection.execute.side_effect = execute
+    database.connection.exec_driver_sql.side_effect = driver_sql
     return database
 
 

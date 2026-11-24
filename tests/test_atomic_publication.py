@@ -8,14 +8,15 @@ import pytest
 from sqlalchemy.sql.dml import Insert
 
 from lyra.contracts.errors import ExecutionPersistenceError
+from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.reports import ExecutionReport
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.sqlite_store import DamagedDataError, SQLiteStore
 from lyra.sdk import PluginDefinition, metric
-from test_support.publication import publish_result
+from test_support.publication import publication_report, publish_result
 from tests.provider_execution_helpers import RESULT
-from tests.result_description_helpers import publish_values
+from tests.result_description_helpers import publish_values, retain_descriptions
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
@@ -72,6 +73,12 @@ def test_managed_atomic_success(
     assert first.metadata.result_ref != second.metadata.result_ref
     assert len(database.rows["stored_results"]) == 1
     assert len(calls) == (2 if fault == "value" else 1)
+    assert second.report == reports[-1]
+    second.report.nodes.clear()
+    assert (
+        ResultDescriptions(SQLiteStore(path)).read_report(second.metadata.execution_id)
+        == reports[-1]
+    )
     assert reports[-1].nodes[0].outcome == "reused"
     for row, report in zip(rows, reports, strict=True):
         assert report.execution_id == row["execution_id"]
@@ -123,15 +130,45 @@ def test_execution_cannot_publish_two_results(
     assert writer.read(first)[0] == description
 
 
-def test_mismatched_pair_is_not_published(database: Database, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "parameters",
+        "schema",
+        "schema_type",
+        "missing_input",
+        "extra_input",
+        "input_scope",
+    ],
+)
+def test_mismatched_pair_is_not_published(
+    database: Database, tmp_path: Path, mismatch: str
+) -> None:
     store = SQLiteStore(tmp_path / "results.sqlite")
     writer = ResultDescriptions(store)
-    description = publish_values(store, ())
-    first = publish_result(writer, description)
-    report = ExecutionReport.model_validate_json(
-        database.rows["final_results"][0]["report"]
+    description = publish_values(store, ()).model_copy(
+        update={"location_inputs": retain_descriptions(store)}
     )
-    changed = description.model_copy(update={"parameters": {"different": True}})
+    first = publish_result(writer, description)
+    report = publication_report(writer, description)
+    root = report.nodes[0]
+    changed = description.model_copy(deep=True)
+    if mismatch == "parameters":
+        changed.parameters["different"] = True
+    elif mismatch == "schema":
+        root.outputs["a"].table_schema.columns.clear()
+    elif mismatch == "schema_type":
+        options = root.outputs["a"].table_schema.columns[-1].checks[0].options
+        assert options["ignore_na"] is True
+        options["ignore_na"] = 1
+    elif mismatch == "missing_input":
+        del root.inputs["known_empty"]
+    elif mismatch == "extra_input":
+        root.inputs["other"] = root.inputs["blocks"]
+    else:
+        root.inputs["reference_blocks"] = root.inputs["reference_blocks"].model_copy(
+            update={"provider_scope": ProviderScope(provider_id="other")}
+        )
     with pytest.raises(DamagedDataError, match="disagree"):
         writer.publish(changed, report)
     assert len(database.rows["final_results"]) == 1

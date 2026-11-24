@@ -170,7 +170,7 @@ Fetch `download_url` with your agent Bearer credential and save the response byt
 
 The tool checks that the output exists. MCP limits the link response to 65,536 bytes, including both response representations and the envelope.
 
-When you fetch the URL, Lyra checks the stored values before sending the Arrow stream. If a cell is corrupt, the download returns HTTP `500` with `result_integrity_error`.
+When you fetch the URL, Lyra checks the selected partitions, row counts, and geometry before sending the Arrow stream. Missing rows or malformed geometry return HTTP `500` with `result_integrity_error`.
 
 If `isError` is `true`, inspect `structuredContent.error.code`:
 
@@ -254,7 +254,7 @@ Call `lyra_download_location_input` with `result_ref` and `input_name`. If the i
 - `input_name`: the selected location input
 - `download_url`: the absolute URL, including your deployment’s public path prefix
 
-Fetch `download_url` with your agent Bearer credential. If Lyra finds a corrupt cell, it returns HTTP `500` with `result_integrity_error` before sending the Arrow stream. The stream includes the declared schema and CRS even for empty selections.
+Fetch `download_url` with your agent Bearer credential. If a required record is missing or its geometry is malformed, Lyra returns HTTP `500` with `result_integrity_error` before sending the Arrow stream. The stream includes the declared schema and CRS even for empty selections.
 
 When `isError` is `true`, inspect `structuredContent.error` using the [HTTP error codes and fields](../rest-api/#read-retained-location-inputs). Handle input-specific failures as follows:
 

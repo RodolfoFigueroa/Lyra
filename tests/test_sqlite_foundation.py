@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from copy import deepcopy
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -12,7 +11,6 @@ from sqlalchemy import event
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateTable
 
-from lyra.contracts.provider_scope import ProviderScope
 from lyra.runtime.sqlite_schema import Layout, Registration, StoredColumn
 from lyra.runtime.sqlite_store import (
     DamagedDataError,
@@ -157,77 +155,13 @@ def test_invalid_structural_layouts() -> None:
         Header(value_key="key", node_id="node", output_scope="location")
 
 
-def test_publication_rollback_and_immutability(
-    database: Database, tmp_path: Path
-) -> None:
-    header = Header(
-        value_key="key",
-        node_id="metric",
-        output_scope="location",
-        owner_scope=ProviderScope(provider_id="places"),
-    )
-    with SQLiteStore(tmp_path / "store.sqlite") as store:
-        store.initialize((registration(),))
-        data = store.layout.tables[registration().key]
-
-        def fail_publication() -> None:
-            with store.publication(header, ("a",)) as connection:
-                assert connection is not None
-                connection.execute(
-                    data.table.insert(),
-                    {
-                        "value_key": "key",
-                        "location_id": "a",
-                        "row_key": "r",
-                        "enabled": True,
-                    },
-                )
-                msg = "write failure"
-                raise RuntimeError(msg)
-
-        with pytest.raises(RuntimeError, match="write failure"):
-            fail_publication()
-        assert not database.rows.get("stored_results")
-        assert not database.rows.get(data.table.name)
-        with store.publication(header, ("a",)) as connection:
-            assert connection is not None
-            connection.execute(
-                data.table.insert(),
-                {
-                    "value_key": "key",
-                    "location_id": "a",
-                    "row_key": "r",
-                    "enabled": True,
-                },
-            )
-        original = deepcopy(database.rows)
-        with store.publication(header, ("different",)) as connection:
-            assert connection is None
-        assert database.rows == original
-        assert store.header(database.connection, "key") == header
-        database.connection.exec_driver_sql.assert_called_with("BEGIN IMMEDIATE")
-    database.engine.dispose.assert_called_once()
-    assert database.connection.__exit__.called
-
-
-def test_commit_failure_and_missing_relationship(
-    database: Database, tmp_path: Path
-) -> None:
+def test_missing_and_damaged_headers(database: Database, tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "store.sqlite")
     header = Header(value_key="key", node_id="metric", output_scope="unpartitioned")
-    database.fail_commit = True
-    with pytest.raises(RuntimeError, match="commit failure"), store.publication(header):
-        pass
-    assert not database.rows
     with pytest.raises(MissingValueError):
         store.header(database.connection, "key")
     with pytest.raises(DamagedDataError):
         store.header(database.connection, "key", required=True)
-    with (
-        pytest.raises(ValueError, match="partitions"),
-        store.publication(header, ("a",)),
-    ):
-        pass
     database.rows["stored_results"] = [{**header.record(), "owner_scope": "broken"}]
     with pytest.raises(DamagedDataError):
         store.header(database.connection, "key")
