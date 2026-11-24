@@ -28,7 +28,7 @@ class ClientHarness:
         self.requests.append(request)
         assert request.method == "GET"
         assert request.headers["authorization"] == "Bearer secret"
-        assert request.url.path.startswith("/api/results/")
+        assert request.url.path.startswith(("/api/results/", "/api/jobs/"))
         return self.responses.pop(0)
 
     def resolve(self, value: _T | Awaitable[_T]) -> _T:

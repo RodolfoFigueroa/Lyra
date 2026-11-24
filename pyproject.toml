@@ -17,10 +17,11 @@ tables = [
     "geopandas>=1.2.0",
     "numpy",
     "pandas>=2.3.3",
+    "pyarrow>=26.0.0",
     "pyproj",
     "shapely>=2.1.2",
 ]
-data = ["lyra[tables]", "pyarrow>=26.0.0", "pyogrio"]
+data = ["lyra[tables]", "pyogrio"]
 # Ibis major upgrades require the offline compiler checks in test_ibis_compatibility.
 sdk = [
     "ibis-framework>=12,<13",

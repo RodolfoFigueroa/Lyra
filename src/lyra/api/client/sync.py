@@ -16,7 +16,13 @@ from typing import (
 from lyra.api.client import endpoints, submission
 from lyra.api.client.httpx import SyncHTTPTransport
 from lyra.api.client.polling import PollingState
-from lyra.api.client.results import successful_result, successful_status
+from lyra.api.client.results import (
+    accepted_metric,
+    result_identity_errors,
+    successful_result,
+    successful_status,
+    verified_output_names,
+)
 from lyra.api.exceptions import (
     DownloadError,
     JobNotReadyError,
@@ -346,13 +352,12 @@ class _ResultsResource:
         Returns:
             Tables keyed by their declared output names.
         """
-        result = successful_result(self.get(job_id))
-        # Load the private table adapter only when optional tables are requested.
-        from lyra.api.client._tables import (  # ruff: ignore[import-outside-top-level] - optional private adapter
-            decode_tables,
-        )
-
-        return decode_tables(result)
+        with result_identity_errors(job_id):
+            status = self._transport.request(endpoints.get_job(job_id))
+            metric = accepted_metric(job_id, status)
+            description = self.describe(job_id)
+        names = verified_output_names(job_id, metric, description)
+        return {name: self.table(job_id, name) for name in names}
 
     def inspect(self, job_id: str) -> ResultInspection:
         return self._transport.request(endpoints.get_result_inspection(job_id))
@@ -414,15 +419,14 @@ class _JobsResource:
             ),
         )
 
-    def run(
+    def _submit_and_wait(
         self,
         metric: str,
-        *,
-        inputs: JsonObject | None = None,
-        parameters: JsonObject | None = None,
-        interventions: Sequence[Intervention] | None = None,
-        **kwargs: Unpack[RunRequestOptions],
-    ) -> SuccessfulJobResult:
+        inputs: JsonObject | None,
+        parameters: JsonObject | None,
+        interventions: Sequence[Intervention] | None,
+        kwargs: RunRequestOptions,
+    ) -> PollingState:
         if kwargs.keys() - {"options"}:
             message = "Unsupported run options"
             raise TypeError(message)
@@ -439,15 +443,20 @@ class _JobsResource:
             options.poll_interval if options else 5.0,
         )
         handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
-        state.remaining()
-        try:
-            result = self._transport.request(
-                endpoints.get_job_result(handle.job_id),
-            )
-        except (DownloadError, ServiceUnavailableError, JobNotReadyError):
-            state.remaining()
-            raise
-        state.remaining()
+        return state
+
+    def run(
+        self,
+        metric: str,
+        *,
+        inputs: JsonObject | None = None,
+        parameters: JsonObject | None = None,
+        interventions: Sequence[Intervention] | None = None,
+        **kwargs: Unpack[RunRequestOptions],
+    ) -> SuccessfulJobResult:
+        state = self._submit_and_wait(metric, inputs, parameters, interventions, kwargs)
+        with state.final_transfer():
+            result = self._transport.request(endpoints.get_job_result(state.job_id))
         return successful_result(result)
 
     def run_to_file(
@@ -460,34 +469,14 @@ class _JobsResource:
         path: str | os.PathLike[str],
         **kwargs: Unpack[RunRequestOptions],
     ) -> None:
-        if kwargs.keys() - {"options"}:
-            message = "Unsupported run options"
-            raise TypeError(message)
-        options = kwargs.get("options")
-        handle = self.submit(
-            metric,
-            inputs=inputs,
-            parameters=parameters,
-            interventions=interventions,
-        )
-        state = PollingState(
-            handle.job_id,
-            options.timeout if options else None,
-            options.poll_interval if options else 5.0,
-        )
-        handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
-        state.remaining()
-        try:
+        state = self._submit_and_wait(metric, inputs, parameters, interventions, kwargs)
+        with state.final_transfer():
             self._transport.download(
-                endpoints.result_download_path(handle.job_id),
+                endpoints.result_download_path(state.job_id),
                 path,
                 operation="download result",
                 atomic=False,
             )
-        except (DownloadError, ServiceUnavailableError, JobNotReadyError):
-            state.remaining()
-            raise
-        state.remaining()
 
 
 class _AdminJobsResource:
@@ -608,7 +597,7 @@ class LyraClient(_ClientLifetime):
     def result_tables(self, job_id: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch named tables by job ID.
 
-        Tables restore declared dtypes and CRS from saved output descriptions.
+        Each frame retains the logical types, geometry, and CRS of its Arrow stream.
         Returned tables use fresh positional indices.
         Failed jobs raise MetricRunError; unavailable or malformed results raise
         the same errors as other result retrieval operations.

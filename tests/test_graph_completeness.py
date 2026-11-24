@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 from pandera.engines.geopandas_engine import Geometry
 from pydantic import Field
 from shapely.geometry import Point
+from starlette.applications import Starlette
+from starlette.routing import Mount
 
 from lyra.contracts.config import JobsConfig
 from lyra.contracts.dependencies import Input
@@ -25,14 +27,17 @@ from lyra.server import job_store, job_submission, worker
 from lyra.server.agent_auth import require_agent_key
 from lyra.server.results import ResultService
 from lyra.server.routes.jobs import router
+from lyra.server.routes.results import router as results_router
 from lyra.server.runtime import get_jobs, get_results
-from tests.client_scenarios import Reply, Scenario
 from tests.job_id_helpers import TEST_JOB_ID
 from tests.queue_helpers import run_and_read
 from tests.retained_job_helpers import retain
+from tests.retrieval_client_helpers import NativeAPI, native_api
+from tests.sqlite_helpers import database
 from tests.worker_graph_integration_helpers import install, native_job
 
-pytestmark = pytest.mark.usefixtures("worker_state")
+__all__ = ["database", "native_api"]
+pytestmark = pytest.mark.usefixtures("worker_state", "database")
 
 TABLE = pa.DataFrameSchema(
     {"producer_id": pa.Column(str, description="Source ID", metadata={"unit": None})},
@@ -64,7 +69,7 @@ class SourceParameters(RootParameters):
 def test_worker_graph_to_public_consumers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    scenario: Scenario,
+    native_api: NativeAPI,
     *,
     empty: bool,
 ) -> None:
@@ -184,18 +189,25 @@ def test_worker_graph_to_public_consumers(
     assert enqueue.call_count == 2
     assert all(table.crs == "EPSG:6372" for table in native_tables)
 
-    verify_public_consumers(monkeypatch, scenario, payload, empty=empty)
+    verify_public_consumers(monkeypatch, native_api, payload, empty=empty)
 
 
 def verify_public_consumers(
-    monkeypatch: pytest.MonkeyPatch, scenario: Scenario, payload: dict, *, empty: bool
+    monkeypatch: pytest.MonkeyPatch,
+    native_api: NativeAPI,
+    payload: dict,
+    *,
+    empty: bool,
 ) -> None:
     app = FastAPI()
     app.include_router(router)
+    app.include_router(results_router)
     store = job_store.JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
 
     path = worker.require_worker_config().result_store_path
-    retain(path, monkeypatch, payload, jobs=store)
+    path.touch()
+    reference = {"job_id": TEST_JOB_ID, "provenance": payload["provenance"]}
+    retain(path, monkeypatch, reference, jobs=store)
     service = ResultService(store, path)
     app.dependency_overrides[get_results] = lambda: service
     app.dependency_overrides[get_jobs] = lambda: store
@@ -219,8 +231,9 @@ def verify_public_consumers(
             == descriptor["outputs"][name]["metadata"]
         )
         assert output.preview == payload["outputs"][name]
-    scenario.replies = [Reply(payload=response.json())]
-    tables = scenario.resolve(scenario.client.results.tables(payload["job_id"]))
+    public = Starlette(routes=[Mount("/public/api", app)])
+    with native_api.serve(public, monkeypatch), native_api.connect() as client:
+        tables = native_api.resolve(client.results.tables(TEST_JOB_ID))
     assert set(tables) == {"parcels", "summary"}
     assert isinstance(tables["parcels"], gpd.GeoDataFrame)
     assert tables["parcels"].crs == "EPSG:6372"

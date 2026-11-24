@@ -264,8 +264,6 @@ def test_native_job_identity(
     prefix = b"/base/admin/jobs/" if operation == "admin" else b"/base/jobs/"
     suffix = {
         "get": b"/result",
-        "tables": b"/result",
-        "result_tables": b"/result",
         "inspect": b"/result/inspection",
         "download": b"/result/download",
     }.get(operation, b"")

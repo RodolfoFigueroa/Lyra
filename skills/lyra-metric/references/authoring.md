@@ -394,7 +394,7 @@ Calculate area fractions and derived columns in your plugin. Each consumer perfo
 
 Zero-row tables succeed and still flow to consumers. Preserve their columns and, for spatial outputs, active geometry and correct CRS. Return every declared table even when empty.
 
-Public ordinary tables encode as record arrays (`[]` when empty), without indices. Spatial tables encode as WGS84 GeoJSON FeatureCollections with no index-derived feature IDs. Missing CRS fails serialization; conversion leaves the native graph table unchanged.
+In the JSON job result, ordinary tables encode as record arrays (`[]` when empty), without indices. Spatial tables encode as WGS84 GeoJSON FeatureCollections with no index-derived feature IDs. Serialization requires a CRS and preserves the native graph table.
 
 Missing cells encode as null; unsupported values fail validation. Empty spatial outputs have an empty `features` array.
 
@@ -404,7 +404,7 @@ Use the job ID returned at submission to retrieve saved outputs:
 - **Schema and provider ownership**: `client.results.describe(job_id)`
 - **Complete report**: `client.reports.get(job_id)`
 
-With an async client, await each method. While the job remains available, read JSON tables with `client.result_tables(job_id)[output_name]` or `client.results.tables(job_id)[output_name]`.
+While a successful job is still available, use `client.results.tables(job_id)` or `client.result_tables(job_id)` to fetch all outputs as a dictionary of native frames keyed by output name. Both methods decode each output from its retained Arrow stream. Use `client.results.get(job_id)` for the full JSON result. With an async client, await each call before selecting an output.
 
 ### Output units
 

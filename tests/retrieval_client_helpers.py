@@ -15,11 +15,9 @@ from lyra.api import AsyncLyraClient, LyraClient
 from tests.arrow_download_helpers import BASE
 
 if TYPE_CHECKING:
-    import pandas as pd
-    from pydantic import BaseModel
     from starlette.applications import Starlette
 
-_T = TypeVar("_T", bound="BaseModel | pd.DataFrame | None")
+_T = TypeVar("_T")
 
 
 class NativeAPI:

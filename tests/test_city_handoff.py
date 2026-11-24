@@ -187,7 +187,6 @@ def city_server(
                 response = server.dispatch(str(args[0]), str(args[1]), **kwargs)
                 return FakeAsyncResponse(
                     status=response.status_code,
-                    payload=response.json(),
                     text=response.text,
                     headers=dict(response.headers),
                     chunks=[response.content],

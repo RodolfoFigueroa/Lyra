@@ -107,7 +107,6 @@ def test_basic_clients_without_native_dependencies() -> None:
                         await client.results.download(job_id, target)
                 asyncio.run(run())
                 assert target.read_bytes() == b'{"raw":true}'
-        assert "lyra.api.client._tables" not in sys.modules
         """,
     )
 
@@ -145,40 +144,25 @@ def test_describe_clients_without_runtime_or_native_dependencies() -> None:
                     result = await client.results.describe(description.job_id)
                 assert result == description
             asyncio.run(run())
-        assert "lyra.api.client._tables" not in sys.modules
         """,
     )
 
 
-def test_conversion_without_execution_or_arrow() -> None:
+def test_arrow_conversion_with_client_table_dependencies() -> None:
     assert_fresh_imports(
         ["lyra.api"],
         blocked=(*HIGHER_LAYERS, "pandera"),
-        unavailable=("pyarrow",),
         assertions="""
-        from lyra.api.client._tables import decode_tables
-        from lyra.contracts.jobs import TableJobResult
-        from tests.client_helpers import _result_response
-        payload = _result_response()
-        payload["outputs"]["sites"] = {"type": "FeatureCollection", "features": [{
-            "type": "Feature", "geometry": {"type": "Point", "coordinates": [3, 4]},
-            "properties": {"id": 1},
-        }]}
-        payload["output_metadata"]["result"] = {"columns": [{
-            "name": "value", "dtype": "int64", "unit": None, "description": "Value"
-        }]}
-        payload["output_metadata"]["sites"] = {"geometry": "geometry", "columns": [
-            {"name": "id", "dtype": "int64", "unit": None, "description": "ID"},
-            {"name": "geometry", "dtype": "geometry", "unit": None,
-             "description": "Geometry", "parameters": {"crs": "EPSG:4326"}}
-        ]}
-        result = TableJobResult.model_validate(payload)
-        tables = decode_tables(result)
-        assert list(tables) == list(result.outputs)
-        assert tables["result"].to_dict("records") == result.outputs["result"]
-        sites = tables["sites"]
-        assert sites.crs.to_epsg() == 4326 and sites.geometry.iloc[0].x == 3
-        assert not any(n == "pyarrow" or n.startswith("pyarrow.") for n in sys.modules)
+        import pyarrow as pa
+        from lyra.api.client._arrow import decode_table
+
+        table = pa.table({"value": [7]})
+        sink = pa.BufferOutputStream()
+        with pa.ipc.new_stream(sink, table.schema) as writer:
+            writer.write_table(table)
+        assert decode_table(sink.getvalue().to_pybytes()).to_dict("records") == [
+            {"value": 7}
+        ]
         """,
     )
 
@@ -203,7 +187,7 @@ def test_conversion_import_errors(dependency: str, failure: str) -> None:
                     raise error
         sys.meta_path.insert(0, Missing())
         try:
-            importlib.import_module("lyra.api.client._tables")
+            importlib.import_module("lyra.api.client._arrow")
         except ImportError as exc:
             if failure == "missing":
                 assert "lyra[client,tables]" in str(exc)
@@ -279,7 +263,7 @@ def test_arrow_conversion_missing_dependency() -> None:
         try:
             importlib.import_module('lyra.api.client._arrow')
         except ImportError as exc:
-            assert 'lyra[client,data]' in str(exc)
+            assert 'lyra[client,tables]' in str(exc)
             assert 'pyarrow' in str(exc)
         else:
             raise AssertionError('Arrow conversion requires pyarrow')

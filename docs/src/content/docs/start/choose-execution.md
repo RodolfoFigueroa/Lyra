@@ -20,7 +20,7 @@ The [first local tutorial](../local/) uses bundled files and needs no external s
 
 Use a server when several people or applications need a shared metric catalog and background workers. The operator installs plugins and configures their data sources. Callers need the server address and an agent key.
 
-The server checks the request, selects the calculation and data versions to use, and queues a job. It returns a job ID while a worker loads the selected locations and runs the calculation. You use the job ID to check progress, then download the result when the job finishes. The server converts tables into a JSON response; the Python client can reconstruct them as tables.
+The server checks the request, selects the calculation and data versions to use, and queues a job. It returns a job ID while a worker loads the selected locations and runs the calculation. Use the job ID to check progress. After success, use `client.results.get(job_id)` for the full JSON result or `client.results.tables(job_id)` to download each output as an Arrow stream and decode it into a DataFrame.
 
 [Run your first server job](../../quickstart/) assumes a working server. If you will operate it yourself, start with [deployment requirements](../../operate/requirements/).
 
@@ -31,11 +31,11 @@ Use these differences to choose where your calculation and its resources should 
 | Question | Local execution | Server job |
 | --- | --- | --- |
 | Where does the calculation run? | Your Python process | An operator-managed worker |
-| What do you install? | `lyra[runtime]`, your plugin, and its dependencies | `lyra[client]` for Python, or an HTTP or Model Context Protocol (MCP) client |
+| What do you install? | `lyra[runtime]`, your plugin, and its dependencies | `lyra[client]` for Python (`lyra[client,tables]` for DataFrames), or an HTTP or Model Context Protocol (MCP) client |
 | How do you supply a region? | Select locations by dataset, feature type, and IDs | Select locations by dataset, feature type, and IDs |
 | When do you receive the result? | When the call returns | After checking that the job has finished |
-| What do you receive? | A dictionary of pandas or GeoPandas tables | JSON; optionally reconstructed tables |
+| What do you receive? | A dictionary of pandas or GeoPandas tables | A JSON result or a dictionary of pandas or GeoPandas tables |
 | Who manages source connections? | The runner and plugin | The deployment and plugin |
-| How long can I access results? | Final results and reports remain in the configured SQLite store | Results and reports remain in SQLite; remote access by job ID ends when the job expires |
+| How long can I access results? | Final results and reports remain in the configured SQLite store | Full job JSON and bulk table retrieval require an initial lookup before job expiry. Individual retained tables, descriptions, and reports remain accessible by job ID. |
 
 A metric can need external data in either mode. Running locally does not make an external source available automatically. Start with the bundled city example to explore Lyra before connecting your own sources.

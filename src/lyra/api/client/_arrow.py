@@ -18,7 +18,7 @@ except ModuleNotFoundError as exc:
     if exc.name not in {"pandas", "geopandas", "numpy", "shapely", "pyproj", "pyarrow"}:
         raise
     message = (
-        f"Arrow table conversion requires {exc.name}. Install 'lyra[client,data]'."
+        f"Arrow table conversion requires {exc.name}. Install 'lyra[client,tables]'."
     )
     raise ImportError(message) from exc
 

@@ -6,10 +6,9 @@ import threading
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest.mock import mock_open
 
-import geopandas as gpd
 import httpx
-import pandas as pd
 import pytest
 
 from lyra.api import (
@@ -495,96 +494,6 @@ def test_ambiguous_submission_explains_duplicate_risk_without_retry(
     assert len(scenario.calls) == 1
 
 
-@pytest.mark.parametrize("job_id", [CLIENT_JOB_ID, "66666666666666666666666666666666"])
-@pytest.mark.parametrize("resource", [False, True])
-@pytest.mark.parametrize(
-    "outputs",
-    ["ordinary", "spatial", "mixed", "empty", "empty_ordinary", "empty_spatial"],
-)
-def test_named_native_tables(
-    scenario: Scenario, job_id: str, outputs: str, *, resource: bool
-) -> None:
-
-    spatial = {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [-99, 19]},
-                "id": "internal-index",
-                "properties": {"code": "b", "date": "2026-10-27", "value": None},
-            },
-            {
-                "type": "Feature",
-                "geometry": None,
-                "properties": {"code": "a", "date": None, "value": 2},
-            },
-        ],
-    }
-    ordinary = [
-        {"code": "b", "date": "2026-10-27", "value": None},
-        {"code": "a", "date": None, "value": 2},
-    ]
-    payload: dict[str, Any] = {
-        "kind": "table",
-        "job_id": CLIENT_JOB_ID,
-        "status": "succeeded",
-        "outputs": {},
-        "output_metadata": {},
-    }
-    columns = [
-        {"name": name, "dtype": "str", "unit": None, "description": name}
-        for name in ["code", "date", "value"]
-    ]
-    empty = outputs.startswith("empty")
-    if outputs in {"ordinary", "mixed", "empty", "empty_ordinary"}:
-        payload["outputs"]["summary"] = [] if empty else ordinary
-        payload["output_metadata"]["summary"] = {"columns": columns}
-    if outputs in {"spatial", "mixed", "empty", "empty_spatial"}:
-        payload["outputs"]["parcels"] = (
-            {"type": "FeatureCollection", "features": []} if empty else spatial
-        )
-        payload["output_metadata"]["parcels"] = {
-            "columns": [
-                *columns,
-                {
-                    "name": "shape",
-                    "dtype": "geometry",
-                    "description": "Geometry",
-                    "unit": None,
-                },
-            ],
-            "geometry": "shape",
-        }
-    scenario.replies = [Reply(payload=payload)]
-    client = scenario.client
-    tables = scenario.resolve(
-        client.results.tables(job_id) if resource else client.result_tables(job_id)
-    )
-    assert set(tables) == set(payload["outputs"])
-    for name, table in tables.items():
-        assert "id" not in table.columns
-        assert isinstance(table, pd.DataFrame)
-        assert isinstance(table, gpd.GeoDataFrame) == (name == "parcels")
-        assert table.index.tolist() == ([] if empty else [0, 1])
-        assert table.code.tolist() == ([] if empty else ["b", "a"])
-        if not empty:
-            assert table.date.iloc[0] == "2026-10-27"
-            assert pd.isna(table.value.iloc[0])
-        if isinstance(table, gpd.GeoDataFrame):
-            assert table.crs is not None
-            assert table.crs.to_epsg() == 4326
-            assert table.geometry.name == "shape"
-            if not empty:
-                assert table.geometry.iloc[0].x == -99
-                assert table.geometry.iloc[1] is None
-    assert len(scenario.calls) == 1
-    assert scenario.calls[0][:2] == (
-        "GET",
-        f"https://example.test/jobs/{job_id}/result",
-    )
-
-
 @pytest.mark.parametrize("resource", [False, True])
 @pytest.mark.parametrize("status", [404, 409, 410, 503])
 def test_tables_lifecycle_errors(
@@ -600,47 +509,13 @@ def test_tables_lifecycle_errors(
 
 
 def test_tables_failed_result(scenario: Scenario) -> None:
-    scenario.replies = [
-        Reply(
-            payload={
-                "kind": "failed",
-                "status": "failed",
-                "job_id": CLIENT_JOB_ID,
-                "error": {"message": "failed"},
-            }
-        )
-    ]
-    with pytest.raises(MetricRunError):
+    details: dict[str, JsonValue] = {"message": "failed", "stage": "execution"}
+    scenario.replies = [Reply(payload=_status_response("failed") | {"error": details})]
+    with pytest.raises(MetricRunError) as caught:
         scenario.resolve(scenario.client.result_tables(CLIENT_JOB_ID))
-
-
-@pytest.mark.parametrize(
-    "output",
-    [
-        None,
-        "encoded",
-        [1],
-        {"type": "Point"},
-        {"type": "FeatureCollection", "features": [None]},
-        {
-            "type": "FeatureCollection",
-            "features": [{"type": "Feature", "properties": [], "geometry": None}],
-        },
-        {
-            "type": "FeatureCollection",
-            "features": [
-                {"type": "Feature", "properties": {}, "geometry": {"type": "Bad"}}
-            ],
-        },
-    ],
-)
-def test_tables_malformed_output(scenario: Scenario, output: JsonValue) -> None:
-    payload = _result_response()
-    payload["outputs"] = {"result": output}
-    scenario.replies = [Reply(payload=payload)]
-    with pytest.raises(DownloadError) as error:
-        scenario.resolve(scenario.client.results.tables(CLIENT_JOB_ID))
-    assert error.value.__cause__ is not None
+    assert caught.value.job_id == CLIENT_JOB_ID
+    assert caught.value.error == details
+    assert len(scenario.calls) == 1
 
 
 def test_tables_structured_unavailability(scenario: Scenario) -> None:
@@ -657,11 +532,12 @@ def test_tables_structured_unavailability(scenario: Scenario) -> None:
 
 
 @pytest.mark.parametrize("operation", ["get", "tables", "download"])
+@pytest.mark.parametrize("status", ["queued", "running"])
 def test_pending_result_operations(
-    scenario: Scenario, tmp_path: Path, operation: str
+    scenario: Scenario, tmp_path: Path, operation: str, status: str
 ) -> None:
-    pending = status_reply(current=2)
-    pending.status = 202
+    pending = status_reply(status, current=2)
+    pending.status = 200 if operation == "tables" else 202
     scenario.replies = [pending]
     destination = tmp_path / "result.json"
     destination.write_text("existing")
@@ -673,7 +549,7 @@ def test_pending_result_operations(
             else call(CLIENT_JOB_ID)
         )
     assert caught.value.job_id == CLIENT_JOB_ID
-    assert caught.value.snapshot.status == "running"
+    assert caught.value.snapshot.status == status
     assert caught.value.snapshot.progress is not None
     assert caught.value.snapshot.progress.current == 2
     assert destination.read_text() == "existing"
@@ -1034,3 +910,47 @@ def test_run_retrieval_failure_checks_deadline(
     assert failure.closed
     assert len(scenario.calls) == 3
     assert scenario.sleeps == []
+
+
+@pytest.mark.parametrize(
+    ("failure", "elapsed", "expected"),
+    [
+        (OSError, 1, OSError),
+        (OSError, 11, JobWaitTimeoutError),
+        (asyncio.CancelledError, 11, asyncio.CancelledError),
+    ],
+)
+def test_run_to_file_write_failure_checks_deadline(
+    scenario: Scenario,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[BaseException],
+    elapsed: int,
+    expected: type[BaseException],
+) -> None:
+    retrieval = Reply(chunks=[b"result"])
+    scenario.replies = [
+        Reply(status=202, payload=_job_response()),
+        status_reply("succeeded"),
+        retrieval,
+    ]
+    write_error = failure()
+
+    def fail_write(_chunk: bytes) -> None:
+        scenario.advance(elapsed)
+        raise write_error
+
+    destination = mock_open()
+    destination.return_value.write.side_effect = fail_write
+    monkeypatch.setattr("lyra.api.client.httpx._open_destination", destination)
+    with pytest.raises(expected) as caught:
+        scenario.resolve(
+            scenario.client.jobs.run_to_file(
+                "metric", path="result.json", options=RunOptions(timeout=10)
+            )
+        )
+    if isinstance(caught.value, JobWaitTimeoutError):
+        assert caught.value.job_id == CLIENT_JOB_ID
+        assert caught.value.__context__ is write_error
+    else:
+        assert caught.value is write_error
+    assert retrieval.closed

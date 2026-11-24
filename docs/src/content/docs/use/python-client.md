@@ -8,7 +8,7 @@ sidebar: { label: "Use The Python Client" }
 
 Run calculations on a Lyra server with the Python client. Discover available metrics and submit jobs, then inspect or download their results.
 
-Get the server address and an agent key from your operator. Install `lyra[client]` to submit jobs and download results. Choose `lyra[client,data]` to read retained Arrow tables as pandas or GeoPandas frames, or `lyra[client,tables]` for job-based JSON table conversion. See the [installation commands](../../start/installation/#add-lyra-to-an-existing-project).
+Get the server address and an agent key from your operator. Install `lyra[client]` to submit jobs and download results. Install `lyra[client,tables]` to read retained Arrow tables as pandas or GeoPandas frames. See the [installation commands](../../start/installation/#add-lyra-to-an-existing-project).
 
 ## Connect and inspect a metric
 
@@ -116,7 +116,7 @@ Each submission helper creates a new, independent job. Status lookup and handle 
 
 Import `RunOptions` from `lyra.api`. The job submission methods accept JSON objects; the server validates them against the selected metric’s contract.
 
-To reconstruct DataFrames and GeoDataFrames from the result JSON, use `client.result_tables(job_id)`. The [results guide](../results/) explains output names, geometry, and what survives reconstruction.
+To retrieve every output as a DataFrame or GeoDataFrame, use `client.result_tables(job_id)` while the successful job is still visible. The [results guide](../results/) explains output names, geometry, and what survives reconstruction.
 
 ## Read retained metadata
 
@@ -126,7 +126,7 @@ With `AsyncLyraClient`, await the same method. Both clients fetch the complete d
 
 ### Reconnect with the job ID
 
-To read a saved run after queue expiry, connect to the original deployment with the same job ID. Install `lyra[client,data]` and set the following environment variables.
+To read a saved run after queue expiry, connect to the original deployment with the same job ID. Install `lyra[client,tables]` and set the following environment variables.
 
 | Variable | Value |
 | --- | --- |
@@ -172,7 +172,7 @@ maintenance = client.results.table(job_id, "maintenance")
 client.results.download_table(job_id, "maintenance", "maintenance.arrow")
 ```
 
-With `AsyncLyraClient`, await each call. `table()` requires `lyra[client,data]` and returns an independent DataFrame or GeoDataFrame with declared nullable types and native geometry/CRS. Returned frames remain usable after client closure. Provider ownership stays in the separate result description.
+With `AsyncLyraClient`, await each call. `table()` requires `lyra[client,tables]` and returns an independent DataFrame or GeoDataFrame with declared nullable types and native geometry/CRS. Returned frames remain usable after client closure. Provider ownership stays in the separate result description.
 
 `download_table()` requires only `lyra[client]`. It streams unchanged Arrow IPC bytes regardless of the filename extension, replaces the destination after successful completion, and returns `None`. Create the parent directory first. Failure or cancellation preserves any original file and cleans up the temporary file.
 
@@ -184,7 +184,7 @@ Use `client.results.inspect(job_id)` for a bounded sample of metric outputs. For
 
 Read a result’s [location inputs](../spatial-inputs/) to inspect the records used in its calculation. Each available input contains the complete selection, including reused records. Choose its name from `description.location_inputs`; inspecting the description doesn’t load input tables.
 
-For the street maintenance example, install `lyra[client,data]` to read `streets` as a GeoDataFrame. Inside your client context, read the input and save a copy as an Arrow IPC stream.
+For the street maintenance example, install `lyra[client,tables]` to read `streets` as a GeoDataFrame. Inside your client context, read the input and save a copy as an Arrow IPC stream.
 
 ```python {1-2}
 streets = client.results.location_input(job_id, "streets")

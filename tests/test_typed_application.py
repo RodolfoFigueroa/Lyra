@@ -9,7 +9,6 @@ import pytest
 from pandera.engines.geopandas_engine import Geometry
 from typing_extensions import override
 
-from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import TableJobResult
 from lyra.contracts.references import new_job_id
@@ -212,9 +211,10 @@ def test_typed_mixed_graph(
         envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)
         payload = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         result = TableJobResult.model_validate(payload)
-        decoded = decode_tables(result)
-        assert list(decoded["vacant"].columns) == list(TABLE.columns)
-        assert decoded["vacant"].empty
+        assert result.outputs["vacant"] == []
+        assert [
+            column.name for column in result.output_metadata["vacant"].columns
+        ] == list(TABLE.columns)
         return result.outputs
 
     try:

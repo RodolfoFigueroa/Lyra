@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 import time
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from lyra.api.exceptions import (
@@ -15,6 +16,8 @@ from lyra.api.exceptions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from lyra.contracts.jobs import JobProgress
 
 
@@ -54,6 +57,26 @@ class PollingState:
             msg = "Job wait timed out."
             raise JobWaitTimeoutError(msg, job_id=self.job_id)
         return remaining
+
+    @contextmanager
+    def final_transfer(self) -> Generator[None]:
+        """Check the wait deadline before the transfer and after it settles.
+
+        An expired deadline raises JobWaitTimeoutError. Transfer errors
+        propagate within the deadline. Cancellation and interrupts propagate
+        regardless of the deadline.
+
+        Yields:
+            Control to the transfer, which uses the transport's own timeout.
+
+        """
+        self.remaining()
+        try:
+            yield
+        except Exception:
+            self.remaining()
+            raise
+        self.remaining()
 
     def delay(self, seconds: float | None = None) -> float:
         """Return a jittered polling delay or bounded explicit retry delay."""

@@ -47,7 +47,7 @@ Python clients raise the corresponding [result lookup exceptions](#handle-lookup
 
 ## Read a retained table
 
-Use an output name from `description.outputs` with the saved `job_id`. Install `lyra[client,data]` to reconstruct native pandas and GeoPandas tables from Arrow:
+Use an output name from `description.outputs` with the saved `job_id`. Install `lyra[client,tables]` to reconstruct native pandas and GeoPandas tables from Arrow:
 
 ```python
 maintenance = client.results.table(job_id, "maintenance")
@@ -317,9 +317,9 @@ table = tables["maintenance"]
 print(table.head())
 ```
 
-`client.results.tables(job_id)` is equivalent. Both methods return a dictionary, including for a single output. Await these methods when using an async client; failed jobs raise `MetricRunError`.
+`client.results.tables(job_id)` is equivalent. Both methods return a dictionary, including for a single output. Await either method when using an async client. The client checks job status once. Queued or running jobs raise `JobNotReadyError`, failed jobs raise `MetricRunError`, and a job that has already expired returns HTTP 404.
 
-Ordinary outputs become pandas DataFrames; spatial outputs become GeoPandas GeoDataFrames. The client reconstructs logical dtypes and CRS from saved output descriptions, including for empty tables.
+Ordinary outputs become pandas DataFrames; spatial outputs become GeoPandas GeoDataFrames. After observing success, the client verifies the retained description and downloads one Arrow stream per output. Each frame has the same logical dtypes, geometry, and CRS as a call to `results.table(job_id, output_name)`, including for typed empty tables. The downloads can finish after the queue record expires.
 
 Returned tables have fresh positional indices. Align rows with declared identifier columns and sort explicitly for presentation; storage and retrieval promise no implicit row order.
 
@@ -368,9 +368,9 @@ When joining results to other data, use the producing plugin’s identifier colu
 
 ## Understand spatial results
 
-Job JSON endpoints return spatial tables as GeoJSON in the World Geodetic System 1984 (WGS84). The Python client’s job-table methods restore declared types and reproject geometries to the saved CRS. Returned tables use fresh positional indices.
+The full job result from `client.results.get(job_id)` represents spatial outputs as GeoJSON in the World Geodetic System 1984 (WGS84).
 
-Use `client.results.table(job_id, output_name)` to read native coordinates directly, or [save and open an Arrow stream](#save-and-open-an-arrow-stream). Empty outputs retain their schema and CRS.
+Use `client.results.table(job_id, output_name)` for one output or `client.results.tables(job_id)` for all outputs. Both decode Arrow streams with the stored column types, native coordinates, and CRS. Returned frames have fresh positional indices, and empty spatial outputs retain their schema and CRS. You can also [save and open an Arrow stream](#save-and-open-an-arrow-stream).
 
 For an AI assistant, use [`lyra_download_table`](../mcp/#download-a-retained-table) to get the table’s download address. Fetch that address with your agent Bearer credential.
 

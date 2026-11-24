@@ -9,8 +9,8 @@ from test_support.imports import assert_fresh_imports
 
 BASE = {"jsonschema", "pydantic", "typing-extensions"}
 CLIENT = {"httpx"}
-TABLES = {"geopandas", "numpy", "pandas", "pyproj", "shapely"}
-DATA = TABLES | {"pyarrow", "pyogrio"}
+TABLES = {"geopandas", "numpy", "pandas", "pyarrow", "pyproj", "shapely"}
+DATA = TABLES | {"pyogrio"}
 SDK = DATA | {"pandera"}
 RUNTIME = SDK
 SERVER = RUNTIME | CLIENT | {"fastapi", "mcp", "redis", "rq", "starlette", "uvicorn"}

@@ -6,6 +6,7 @@ import asyncio
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
 
 import geopandas as gpd
 import httpx
@@ -23,10 +24,13 @@ from lyra.contracts.errors import (
     ResultIntegrityError,
     ResultNotFoundError,
 )
+from lyra.contracts.jobs import JobStatusInfo
 from lyra.contracts.retrieval_errors import error_payload, error_status
 from lyra.contracts.retrieval_paths import table_download_path
 from tests.arrow_download_helpers import Retained, retained
+from tests.client_helpers import _status_response
 from tests.httpx_download_helpers import ChunkStream, destinations
+from tests.retrieval_client_helpers import NativeAPI, native_api
 from tests.sqlite_helpers import database
 from tests.table_client_helpers import ClientHarness, arrow_response, client
 
@@ -34,9 +38,155 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
     from typing import IO
 
-__all__ = ["client", "database", "destinations", "retained"]
+__all__ = ["client", "database", "destinations", "native_api", "retained"]
 _ID = "a" * 32
 _MEDIA = "application/vnd.apache.arrow.stream"
+
+
+def bulk_description(*names: str) -> dict:
+    column = {
+        "name": "index",
+        "dtype": "int64",
+        "unit": None,
+        "description": "Output index",
+    }
+    return {
+        "job_id": _ID,
+        "metric_name": "heavy_metric",
+        "outputs": {
+            name: {
+                "scope": "unpartitioned",
+                "owner_scope": None,
+                "table_schema": {"columns": [column]},
+            }
+            for name in names
+        },
+        "parameters": {},
+    }
+
+
+@pytest.mark.parametrize(
+    ("source", "field"),
+    [
+        ("status", "job_id"),
+        ("status", "metric"),
+        ("description", "job_id"),
+        ("description", "metric_name"),
+    ],
+)
+@pytest.mark.parametrize("fault", ["missing", "null", "mismatch"])
+def test_bulk_requires_matching_identity(
+    client: ClientHarness, source: str, field: str, fault: str
+) -> None:
+    status = _status_response("succeeded") | {"job_id": _ID}
+    description = bulk_description("rows")
+    payload = status if source == "status" else description
+    if fault == "missing":
+        del payload[field]
+    elif fault == "null":
+        payload[field] = None
+    else:
+        payload[field] = "b" * 32 if field == "job_id" else "other"
+    paths = [f"/api/jobs/{_ID}"]
+    client.responses.append(httpx.Response(200, json=status))
+    if source == "description" or (field == "metric" and fault == "mismatch"):
+        paths.append(f"/api/results/{_ID}")
+        client.responses.append(httpx.Response(200, json=description))
+    with pytest.raises(ResultIntegrityError) as caught:
+        client.resolve(client.client.results.tables(_ID))
+    assert caught.value.job_id == _ID
+    assert [request.url.path for request in client.requests] == paths
+
+
+def test_bulk_rejects_invalid_output_metadata(client: ClientHarness) -> None:
+    description = bulk_description("rows")
+    del description["outputs"]["rows"]["table_schema"]
+    client.responses.extend(
+        [
+            httpx.Response(200, json=_status_response("succeeded") | {"job_id": _ID}),
+            httpx.Response(200, json=description),
+        ]
+    )
+    with pytest.raises(DownloadError) as caught:
+        client.resolve(client.client.results.tables(_ID))
+    assert isinstance(caught.value.__cause__, ValidationError)
+    assert [request.url.path for request in client.requests] == [
+        f"/api/jobs/{_ID}",
+        f"/api/results/{_ID}",
+    ]
+
+
+@pytest.mark.parametrize("outcome", ["empty", "success", "failed_download"])
+def test_bulk_downloads_only_described_outputs(
+    client: ClientHarness, outcome: str
+) -> None:
+    names = [] if outcome == "empty" else ["rows", "second / 雪", "last"]
+    description = bulk_description(*names)
+    description["parameters"]["large"] = "x" * 65537
+    status = _status_response("succeeded") | {"job_id": _ID}
+    client.responses.extend(
+        [httpx.Response(200, json=status), httpx.Response(200, json=description)]
+    )
+    paths = [f"/api/jobs/{_ID}".encode(), f"/api/results/{_ID}".encode()]
+    for index, name in enumerate(names):
+        paths.append(("/api/" + table_download_path(_ID, name)).encode())
+        if outcome == "failed_download" and index == 1:
+            error = ResultIntegrityError(_ID, name)
+            client.responses.append(
+                httpx.Response(500, json={"detail": error_payload(error).model_dump()})
+            )
+            break
+        table = pa.table({"index": [index]})
+        sink = pa.BufferOutputStream()
+        with pa.ipc.new_stream(sink, table.schema) as writer:
+            writer.write_table(table)
+        client.responses.append(arrow_response(sink.getvalue().to_pybytes()))
+    if outcome == "failed_download":
+        with pytest.raises(ResultIntegrityError) as caught:
+            client.resolve(client.client.result_tables(_ID))
+        assert caught.value.output_name == names[1]
+    else:
+        frames = client.resolve(client.client.result_tables(_ID))
+        assert list(frames) == names
+        for index, name in enumerate(names):
+            assert frames[name]["index"].tolist() == [index]
+    assert [request.url.raw_path for request in client.requests] == paths
+
+
+@pytest.mark.parametrize(
+    "retained",
+    [(spatial, state) for spatial in (False, True) for state in ("populated", "empty")],
+    indirect=True,
+)
+def test_bulk_matches_single_after_queue_expiry(
+    retained: Retained, native_api: NativeAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = retained.reference
+    status = JobStatusInfo.model_validate(
+        _status_response("succeeded") | {"job_id": job_id, "metric": "native"}
+    )
+    monkeypatch.setattr(
+        retained.service.jobs,
+        "get_job_status_async",
+        AsyncMock(side_effect=[status, None]),
+    )
+    with native_api.serve(retained.public, monkeypatch), native_api.connect() as client:
+        frames = native_api.resolve(client.results.tables(job_id))
+        single = native_api.resolve(client.results.table(job_id, "rows"))
+        with pytest.raises(DownloadError, match="HTTP 404"):
+            native_api.resolve(client.results.tables(job_id))
+    assert list(frames) == ["rows"]
+    bulk = frames["rows"]
+    pd.testing.assert_frame_equal(bulk, single, check_exact=True)
+    pd.testing.assert_frame_equal(bulk, retained.frame, check_exact=True)
+    if isinstance(retained.frame, gpd.GeoDataFrame):
+        assert isinstance(bulk, gpd.GeoDataFrame)
+        assert bulk.crs == retained.frame.crs
+        assert (
+            bulk.geometry.to_wkb().tolist() == retained.frame.geometry.to_wkb().tolist()
+        )
+    del bulk["flag"]
+    assert "flag" in single
 
 
 @pytest.fixture(params=["download_table", "download_location_input"])

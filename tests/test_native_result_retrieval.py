@@ -6,17 +6,12 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from geopandas.testing import assert_geodataframe_equal
 from pandera.engines.geopandas_engine import Geometry
 from pyarrow import ipc, types
 from shapely.geometry import Point
 
-# Exercise client decoding independently of HTTP transport.
-from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
-from lyra.api.exceptions import DownloadError
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import TableJobResult
-from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.provider_scope import ProviderScope
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_descriptions import (
@@ -26,7 +21,6 @@ from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import PluginDefinition, metric
 from lyra.sdk.output_schema import compile_output
-from tests.job_id_helpers import TEST_JOB_ID
 from tests.retained_table_helpers import retained_service
 from tests.sqlite_helpers import database
 
@@ -93,17 +87,12 @@ def test_declared_types_and_independent_reads(
     with ResultStore.open(path) as store:
         stored_tables = store.read_result(key).tables
     original = result.model_dump_json()
-    for tables in [decode_tables(result), stored_tables]:
-        restored = tables["rows"]
-        assert_retrieved_frame(restored, frame)
-        pd.testing.assert_series_equal(
-            restored["count"], frame["count"], check_exact=True
-        )
-        restored.attrs["scope"] = {"provider": "forged"}
-        if len(restored):
-            restored.loc[0, "count"] = 99
-        del restored["flag"]
-    assert_retrieved_frame(decode_tables(result)["rows"], frame)
+    restored = stored_tables["rows"]
+    pd.testing.assert_frame_equal(restored, frame, check_exact=True)
+    restored.attrs["scope"] = {"provider": "forged"}
+    if len(restored):
+        restored.loc[0, "count"] = 99
+    del restored["flag"]
     with ResultStore.open(path) as store:
         pd.testing.assert_frame_equal(store.read_table(key, "rows"), frame)
     assert result.model_dump_json() == original
@@ -111,7 +100,6 @@ def test_declared_types_and_independent_reads(
     repeated = service.read_result(observation)
     assert isinstance(repeated, TableJobResult)
     assert repeated.output_metadata["rows"] == description
-    assert_retrieved_frame(decode_tables(repeated)["rows"], frame)
 
 
 @pytest.mark.usefixtures("database")
@@ -152,71 +140,7 @@ def assert_batched_frame(path: Path, key: str, frame: pd.DataFrame) -> None:
         assert sum(map(len, batches)) == len(frame)
         assert selected.owner_scope is None
         assert [column.name for column in selected.registration.columns] == list(frame)
-        assert_retrieved_frame(selected.frame(), frame)
-
-
-def test_malformed_declared_columns_raise_useful_error() -> None:
-    schema = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Value", metadata={"unit": None})},
-        strict=True,
-    )
-    result = TableJobResult(
-        job_id="f" * 32,
-        outputs={"rows": [{"unexpected": 1}]},
-        output_metadata={"rows": compile_output(schema)[1]},
-    )
-    with pytest.raises(DownloadError, match="invalid output 'rows'"):
-        decode_tables(result)
-
-
-def assert_retrieved_frame(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
-    """Allow only the coordinate rounding from GeoJSON CRS reprojection."""
-    if isinstance(expected, gpd.GeoDataFrame):
-        assert isinstance(actual, gpd.GeoDataFrame)
-        assert_geodataframe_equal(actual, expected, check_less_precise=True)
-        pd.testing.assert_frame_equal(
-            actual.drop(columns="geometry"),
-            expected.drop(columns="geometry"),
-            check_exact=True,
-        )
-    else:
-        pd.testing.assert_frame_equal(actual, expected, check_exact=True)
-
-
-@pytest.mark.parametrize("empty", [False, True])
-@pytest.mark.parametrize(
-    ("declared", "native"),
-    [
-        ("int64", "Int64"),
-        ("float64", "Float64"),
-        ("bool", "boolean"),
-        ("str", "string"),
-    ],
-)
-def test_nullable_scalar_reconstruction(
-    declared: str, native: str, *, empty: bool
-) -> None:
-    result = TableJobResult(
-        job_id=TEST_JOB_ID,
-        outputs={"rows": [] if empty else [{"value": None}]},
-        output_metadata={
-            "rows": OutputMetadata(
-                columns=[
-                    ColumnMetadata(
-                        name="value",
-                        dtype=declared,
-                        nullable=True,
-                        unit=None,
-                        description="Value",
-                    )
-                ]
-            )
-        },
-    )
-    restored = decode_tables(result)["rows"]
-    assert str(restored.value.dtype) == native
-    assert restored.value.isna().all()
-    assert len(restored) == (0 if empty else 1)
+        pd.testing.assert_frame_equal(selected.frame(), frame, check_exact=True)
 
 
 @pytest.mark.usefixtures("database")
