@@ -142,7 +142,6 @@ def test_derived_root_reuses_value_and_summarizes_effective_inputs(
     runner = LocalRunner.from_definitions(provider_execution_definitions([]))
     executor = GraphExecutor(
         runner.catalog,
-        dict(runner.catalog.implementations),
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )

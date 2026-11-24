@@ -27,10 +27,10 @@ def test_launcher_initializes_and_runs_native_pool(
             lambda _config, name=name, **_kwargs: calls.append(name),
         )
     refresh = Mock(
-        side_effect=lambda *_args, **_kwargs: calls.append("refresh_runner_registry")
+        side_effect=lambda *_args, **_kwargs: calls.append("initialize_worker")
     )
     pool.start.side_effect = lambda **_kwargs: calls.append("start_pool")
-    monkeypatch.setattr(worker_launcher, "refresh_runner_registry", refresh)
+    monkeypatch.setattr(worker_launcher, "initialize_worker", refresh)
     monkeypatch.setattr(worker_launcher, "WorkerPool", pool_factory)
     redis_client = Mock()
     monkeypatch.setattr(
@@ -40,7 +40,7 @@ def test_launcher_initializes_and_runs_native_pool(
     assert calls == [
         "ensure_runtime_directories",
         "configure_logging",
-        "refresh_runner_registry",
+        "initialize_worker",
         "start_pool",
     ]
     refresh.assert_called_once_with("interactive", config=config)
@@ -70,7 +70,7 @@ def test_plugin_failure_stops_initialization(
         worker.temp_dir = tmp_path / "scratch"
     probe = Mock(side_effect=RuntimeError("plugin unavailable"))
     initialize = Mock()
-    monkeypatch.setattr(worker_launcher, "refresh_runner_registry", probe)
+    monkeypatch.setattr(worker_launcher, "initialize_worker", probe)
     connection = Mock()
     monkeypatch.setattr(
         worker_launcher, "create_sync_client", Mock(return_value=connection)
@@ -90,7 +90,7 @@ def test_launcher_closes_redis_when_pool_fails(
     for name in (
         "ensure_runtime_directories",
         "configure_logging",
-        "refresh_runner_registry",
+        "initialize_worker",
     ):
         monkeypatch.setattr(worker_launcher, name, Mock())
     connection = Mock()

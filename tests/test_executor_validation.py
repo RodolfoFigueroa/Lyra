@@ -16,9 +16,7 @@ from test_support.canonical_execution import canonical_workload
 from tests.graph_execution_helpers import TABLE, executor
 
 
-@pytest.mark.parametrize(
-    "damage", ["implementation", "root", "outputs", "inputs", "route", "scope"]
-)
+@pytest.mark.parametrize("damage", ["root", "outputs", "inputs", "route", "scope"])
 def test_prepared_rejection_clears_success_before_acquisition(
     damage: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -34,9 +32,7 @@ def test_prepared_rejection_clears_success_before_acquisition(
     )
     assert runner.execute(direct).provenance.execution.succeeded
     item = plan.inputs[0]
-    if damage == "implementation":
-        runner.plugins = {}
-    elif damage == "root":
+    if damage == "root":
         plan = plan.model_copy(update={"node": "missing"})
     elif damage == "outputs":
         plan = plan.model_copy(
@@ -56,7 +52,7 @@ def test_prepared_rejection_clears_success_before_acquisition(
         )
     acquire = Mock(side_effect=AssertionError("acquired resources"))
     cache_read = Mock(side_effect=AssertionError("reused cache"))
-    monkeypatch.setattr(runner, "_collect_resources", acquire)
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
     monkeypatch.setattr("lyra.runtime.metric_tables.MetricTables.lookup", cache_read)
     with pytest.raises(GraphExecutionError):
         runner.execute(plan)
@@ -68,9 +64,7 @@ def test_prepared_rejection_clears_success_before_acquisition(
     assert runner.provenance.execution.native_inputs == ()
 
 
-@pytest.mark.parametrize(
-    "damage", ["implementation", "output", "binding", "root", "inputs"]
-)
+@pytest.mark.parametrize("damage", ["root", "inputs"])
 def test_resolved_validation_precedes_cached_root(
     damage: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -99,21 +93,12 @@ def test_resolved_validation_precedes_cached_root(
     invocation = plugin.prepare_resolved_invocation("root", {})
     runner.execute(invocation)
     assert calls == ["leaf", "root"]
-    if damage == "implementation":
-        runner.plugins = {"plugin_0": plugin}
-    elif damage == "output":
-        edge = runner.graph.dependencies["root"]["table"]
-        runner.graph.dependencies["root"]["table"] = replace(
-            edge, dependency=Dependency(producer="leaf", output="unknown")
-        )
-    elif damage == "binding":
-        runner.graph.dependencies["root"].clear()
-    elif damage == "root":
+    if damage == "root":
         invocation = replace(invocation, node="unknown", parameters=None)
     else:
         invocation.__dict__["locations"] = {"unknown": None}
     acquire = Mock(side_effect=AssertionError("acquired resources"))
-    monkeypatch.setattr(runner, "_collect_resources", acquire)
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
     with pytest.raises(GraphExecutionError):
         runner.execute(invocation)
     acquire.assert_not_called()

@@ -2155,7 +2155,7 @@ def _submission_fixture(
         payload["location"]["ids"] = [""]
     installed = InstalledPlugin("test-plugin", plugin, {"report": "interactive"})
     monkeypatch.setattr(
-        "lyra.server.registry.load_installed_plugins", lambda _: [installed]
+        "lyra.server.plugins.discover_installed_plugins", lambda _: [installed]
     )
     config = load_test_config(tmp_path)
     config.mcp.enabled = True

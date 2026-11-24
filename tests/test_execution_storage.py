@@ -246,7 +246,6 @@ def test_unpartitioned_terminal_retention(
     local = LocalRunner.from_definitions({"p": PluginDefinition(metrics=[terminal])})
     executor = GraphExecutor(
         local.catalog,
-        local.catalog.implementations,
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
         retain_result=True,
@@ -286,7 +285,6 @@ def test_unpartitioned_terminal_retention(
     )
     uncached_executor = GraphExecutor(
         uncached.catalog,
-        uncached.catalog.implementations,
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
         retain_result=True,

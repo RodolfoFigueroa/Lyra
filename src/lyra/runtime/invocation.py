@@ -19,7 +19,6 @@ from lyra.contracts.operations import OPERATION_MAPPING_ADAPTER
 from lyra.contracts.value_identity import check_json_value
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.native_inputs import NativeLocationInput, copy_frame
-from lyra.runtime.planning.computation import executable_contract
 from lyra.runtime.resources import resource_invocation
 from lyra.runtime.selector_validation import validate_selector_expression
 from lyra.sdk.results import validate_registered_result
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from lyra.contracts.plugins import NodeManifest
-    from lyra.contracts.providers import ProviderDeclaration
     from lyra.data.results import NativeOutputs
     from lyra.runtime.planning.provider_registry import RegisteredProvider
     from lyra.sdk.context import RunContext
@@ -63,13 +61,6 @@ class BoundPlugin:
         """Return a copy of the bound node contract for accepted-plan verification."""
         node = self._nodes.get(name)
         return node.manifest.model_copy(deep=True) if node is not None else None
-
-    def matches_location_provider(self, declaration: ProviderDeclaration) -> bool:
-        """Return whether this binding implements the selected provider contract."""
-        return any(
-            executable_contract(provider) == executable_contract(declaration)
-            for provider in self.definition.providers
-        )
 
     def prepare_parameters(self, name: str, value: object) -> BaseModel:
         """Validate parameter JSON before parsing it through the author's model.

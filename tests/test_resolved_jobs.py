@@ -2,7 +2,6 @@
 
 import json
 from collections.abc import Callable, Iterator
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, cast
@@ -17,10 +16,9 @@ from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import JobEnvelope
 from lyra.runtime.arguments import PreparedResolvedInvocation
-from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
@@ -79,7 +77,6 @@ def test_effective_parameters_round_trip() -> None:
     result = (
         GraphExecutor(
             runner.catalog,
-            {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
             Mock(),
         )
         .execute(restored)
@@ -173,11 +170,11 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     }
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
     runtime.config.result_store_path = tmp_path / "cache"
-    worker.refresh_runner_registry("heavy", config=runtime.config)
+    worker.initialize_worker("heavy", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)
-    entry = worker.RUNNER_REGISTRY["root"]
-    definition = entry.implementations[entry.distribution]
+    catalog = worker.require_worker_runtime().catalog.compiled
+    definition = catalog.implementations[catalog.graph.nodes["root"].distribution]
     invocation = definition.prepare_resolved_invocation(
         "root",
         native_inputs(
@@ -198,7 +195,6 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     caller["parameters"] = {"value": 7}
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs=caller)
     yield definition, invocation, envelope, native, seen, sentinel, adapter
-    worker.RUNNER_REGISTRY.clear()
     worker.set_runner_temp_base(None)
 
 
@@ -277,49 +273,14 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
     adapter.query_dataframe.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "issue", ["job_id", "queue", "contract", "implementation", "provider"]
-)
+@pytest.mark.parametrize("issue", ["job_id", "queue"])
 def test_job_integrity_checks(queued: Queued, issue: str) -> None:
     _, _, envelope, native, seen, sentinel, _ = queued
-    entry = worker.RUNNER_REGISTRY["root"]
-    match issue:
-        case "job_id":
-            native.id = "wrong"
-        case "queue":
-            native.origin = "wrong"
-        case "contract":
-            definitions = {
-                name: plugin.definition
-                for name, plugin in entry.implementations.items()
-            }
-            definitions[entry.distribution] = PluginDefinition(
-                metrics=[queued_root(seen, nullable=True)],
-                resources=definitions[entry.distribution].resources,
-            )
-            catalog = compile_live_catalog(definitions)
-            plan = envelope.accepted.plan
-            prepare_execution(
-                catalog,
-                plan.request.submission_payload(),
-                normalized_uses=plan.parameter_uses,
-            )
-            worker.RUNNER_REGISTRY["root"] = replace(entry, catalog=catalog)
-        case "implementation":
-            entry.implementations.pop(entry.distribution)
-        case "provider":
-            entry.implementations.pop("provider")
-    expected_error = (
-        GraphExecutionError
-        if issue in {"provider", "implementation", "contract"}
-        else worker.BoundPlanError
-    )
-    with pytest.raises(
-        expected_error,
-        match="Implementation differs from live declaration: root"
-        if issue == "contract"
-        else None,
-    ):
+    if issue == "job_id":
+        native.id = "wrong"
+    else:
+        native.origin = "wrong"
+    with pytest.raises(worker.BoundPlanError):
         run_and_read(
             worker.execute_job, envelope.model_dump(mode="json"), cast("Job", native)
         )
@@ -360,7 +321,6 @@ def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         assert result["outputs"] == {"answer": [{"value": 7}]}
         sentinel.assert_not_called()
     finally:
-        worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
 
 
@@ -416,7 +376,7 @@ def test_deployment_changed_before_lookup_or_acquisition(
         adapter.reset_mock()
     payload["accepted"]["plan"]["build_revision"] = "older-build"
     if missing_metric:
-        worker.RUNNER_REGISTRY.clear()
+        payload["accepted"]["plan"]["request"]["metric"] = "missing"
     with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
         worker.run_metric_task(payload)
     assert native.meta["failure"]["error"]["type"] == "deployment_changed"

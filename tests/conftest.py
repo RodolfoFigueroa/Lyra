@@ -93,10 +93,13 @@ def dummy_redis_clients(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock]:
 
 
 @pytest.fixture
+def isolate_worker_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(worker, "_WORKER_RUNTIME", None)
+
+
+@pytest.fixture
 def worker_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(worker, "RUNNER_REGISTRY", {})
     monkeypatch.setattr(worker, "_RUNNER_TEMP_BASE", tmp_path / "scratch")
-    monkeypatch.setattr("lyra.server.worker._WORKER_CONFIG.config", None)
 
 
 @pytest.fixture

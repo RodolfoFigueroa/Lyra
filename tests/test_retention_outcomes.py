@@ -89,7 +89,6 @@ def graph(
     local = LocalRunner.from_definitions(definitions)
     return GraphExecutor(
         local.catalog,
-        local.catalog.implementations,
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
         retain_result=True,

@@ -149,8 +149,8 @@ def test_captured_cycle_rejected_before_resources(
     )
     invalid = valid.model_copy(update={"inputs": inputs})
     acquire = Mock(side_effect=AssertionError("resources acquired"))
-    monkeypatch.setattr("lyra.runtime.execution.collect_resources", acquire)
-    executor = GraphExecutor(catalog, {}, Mock())
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
+    executor = GraphExecutor(catalog, Mock())
     expected = GraphExecutionError if boundary == "execute" else ValueError
     with pytest.raises(expected, match="Execution plan cycle"):
         getattr(executor, boundary)(invalid)
@@ -227,8 +227,8 @@ def test_unavailable_captured_node_precedes_acquisition(
     prepared = prepare_execution(catalog, request(left="a", right="b"))
     del catalog.graph.nodes[missing]
     acquire = Mock(side_effect=AssertionError("resources acquired"))
-    monkeypatch.setattr("lyra.runtime.execution.collect_resources", acquire)
-    executor = GraphExecutor(catalog, {}, Mock())
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
+    executor = GraphExecutor(catalog, Mock())
     with pytest.raises(ValueError, match=f"unavailable node {missing!r}"):
         executor.acquire_sources(prepared)
     acquire.assert_not_called()

@@ -43,7 +43,7 @@ def test_submission_native_round_trip(
     events = []
     plugins = definitions(events)
     _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
-    worker.refresh_runner_registry("lightweight", config=runtime.config)
+    worker.initialize_worker("lightweight", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     inputs = {
         "source" if name in {"derived", "receiving_primary"} else "places": {
@@ -213,7 +213,7 @@ def test_worker_failure_lifecycle(
     _, runtime = install_definitions(
         tmp_path, monkeypatch, definitions(events, fail=True)
     )
-    worker.refresh_runner_registry("lightweight", config=runtime.config)
+    worker.initialize_worker("lightweight", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     runtime.jobs.enqueue = Mock()
     assert asyncio.run(

@@ -180,7 +180,7 @@ def test_worker_input_publication_failure(
     _, runtime = install_definitions(
         tmp_path, monkeypatch, definitions([], cache=False)
     )
-    worker.refresh_runner_registry("lightweight", config=runtime.config)
+    worker.initialize_worker("lightweight", config=runtime.config)
     native = native_job(monkeypatch, "count")
     envelope = accepted_envelope(
         job_id=native.id,
@@ -218,9 +218,7 @@ def test_resolved_native_capture(tmp_path: Path, *, empty: bool) -> None:
         {name: NativeLocationInput(original, contract) for name in ("left", "right")},
     )
     with SQLiteStore(tmp_path / "native.sqlite") as store:
-        executor = GraphExecutor(
-            catalog, catalog.implementations, Mock(), store=store, retain_result=False
-        )
+        executor = GraphExecutor(catalog, Mock(), store=store, retain_result=False)
         result = executor.execute(invocation)
         key = result.completions[0].computations[0][1]
         retained = LocationInputs(store)

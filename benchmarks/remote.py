@@ -13,7 +13,7 @@ from lyra.contracts.jobs import AcceptedJob, JobEnvelope
 from lyra.server import worker
 from test_support.canonical_execution import canonical_workload
 from test_support.receiving_workloads import receiving_workload
-from test_support.worker_workloads import canonical_worker_entry
+from test_support.worker_workloads import canonical_worker_catalog
 
 
 class BoundWorkerSuite:
@@ -43,7 +43,7 @@ class BoundWorkerSuite:
             result_store_path=Path(self.scratch.name) / "results.sqlite3",
             resources={},
         )
-        self.entry = canonical_worker_entry(self.work)
+        self.catalog = canonical_worker_catalog(self.work)
 
         self.envelope = JobEnvelope(
             job_id=self.native.id,
@@ -52,7 +52,11 @@ class BoundWorkerSuite:
                     update={"build_revision": "benchmark-build"}
                 ),
                 catalog_fingerprint="benchmark",
-                plugin=self.entry.plugin.plugin,
+                plugin=self.catalog.compiled.manifests[
+                    self.catalog.compiled.graph.nodes[
+                        self.work.prepared.node
+                    ].distribution
+                ].plugin,
                 created_at=datetime.now(UTC),
             ),
         )
@@ -61,11 +65,10 @@ class BoundWorkerSuite:
         """Prepare and execute normalized values without queue connections."""
         with (
             patch.object(worker, "get_current_job", return_value=self.native),
-            patch.dict(worker.RUNNER_REGISTRY, {self.work.prepared.node: self.entry}),
             patch.object(
                 worker,
-                "require_worker_config",
-                return_value=self.config,
+                "_WORKER_RUNTIME",
+                worker.WorkerRuntime(self.catalog, frozenset({"heavy"}), self.config),
             ),
             patch.object(worker, "build_run_context", return_value=Mock()),
         ):

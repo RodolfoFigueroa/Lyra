@@ -11,7 +11,7 @@ import pytest
 from lyra.sdk import loading
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.resources import BaseIO
-from lyra.server import registry, worker
+from lyra.server import worker
 from lyra.server.plugins import InstalledPlugin
 from lyra.server.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
@@ -60,25 +60,25 @@ def install_definitions(
     config.result_store_path = (
         result_store_path or tmp_path / "store" / "results.sqlite3"
     )
-    monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
-    monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
+    monkeypatch.setattr(
+        "lyra.server.plugins.discover_installed_plugins", lambda _: plugins
+    )
     monkeypatch.setattr(
         loading,
         "load_plugin_definition",
         lambda ref: definitions[ref.split(":")[0]],
     )
     runtime = make_runtime(config)
-    worker.refresh_runner_registry("heavy", config=config)
+    worker.initialize_worker("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     return plugins, runtime
 
 
 def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNamespace:
-    entry = worker.RUNNER_REGISTRY[root]
-    assert entry.contract.kind == "metric"
+    catalog = worker.require_worker_runtime().catalog
     native = SimpleNamespace(
         id="graph-job",
-        origin=entry.queue,
+        origin=catalog.metric_queues[root],
         worker_name="fake-worker",
         meta={},
         save_meta=Mock(),

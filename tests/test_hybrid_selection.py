@@ -121,9 +121,7 @@ def test_related_operation_groups(
     invocation = plugin.prepare_resolved_invocation(
         "root", {"main": value}
     ).select_primary("main", frozenset(demand))
-    outcome = GraphExecutor(
-        runner.catalog, runner.catalog.implementations, Mock()
-    ).execute(invocation)
+    outcome = GraphExecutor(runner.catalog, Mock()).execute(invocation)
     assert set(outcome.outputs["data"].location_id) == set(demand)
     owners = set(demand) if policy == "per_location" else {"A", "B"}
     if owners:
@@ -208,9 +206,7 @@ def test_hybrid_summary_retains_complete_context(ids: tuple[str, ...]) -> None:
     )
     demand = frozenset({"B"}) if ids else frozenset()
     reduced = invocation.select_primary("main", demand)
-    outcome = GraphExecutor(
-        runner.catalog, runner.catalog.implementations, Mock()
-    ).execute(reduced)
+    outcome = GraphExecutor(runner.catalog, Mock()).execute(reduced)
     assert set(outcome.outputs["data"].location_id) == set(demand)
     assert seen == [set(ids)]
     permuted = replace(
@@ -305,9 +301,7 @@ def test_operation_primary_keeps_every_incoming_owner_pair(policy: CachePolicy) 
         .prepare_resolved_invocation("root", {"main": value})
         .select_primary("main", frozenset({"B"}))
     )
-    result = GraphExecutor(
-        runner.catalog, runner.catalog.implementations, Mock()
-    ).execute(invocation)
+    result = GraphExecutor(runner.catalog, Mock()).execute(invocation)
     assert result.outputs["data"].value.tolist() == [3]
     expected = {("A", "Y"), ("B", "Y"), ("B", "Z")}
     if policy != "per_location":

@@ -170,10 +170,9 @@ def city_server(
         config.result_store_path = tmp_path / "results.sqlite3"
         config.result_store_path.touch()
         config.workers["interactive"].temp_dir = tmp_path / "scratch"
-        workspace.setattr(worker, "RUNNER_REGISTRY", {})
+        workspace.setattr(worker, "_WORKER_RUNTIME", None)
         workspace.setattr(worker, "_RUNNER_TEMP_BASE", None)
-        workspace.setattr("lyra.server.worker._WORKER_CONFIG.config", None)
-        worker.refresh_runner_registry("interactive", config=config)
+        worker.initialize_worker("interactive", config=config)
         dummy_redis_clients[0].ttl.return_value = 60
         app = main.create_app(config, credentials=api_credentials())
         client = ManagedTestClient(app)

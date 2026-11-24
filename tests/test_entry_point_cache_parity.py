@@ -115,7 +115,7 @@ def entry_point(
         )
         return runner.run if mode == "local" else runner.run_development
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
-    worker.refresh_runner_registry("lightweight", config=runtime.config)
+    worker.initialize_worker("lightweight", config=runtime.config)
     enqueue = Mock()
     runtime.jobs.enqueue = enqueue
 

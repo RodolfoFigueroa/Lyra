@@ -204,7 +204,6 @@ def test_cached_root_retains_forwarding_for_bypassed_dependency(tmp_path: Path) 
     plan = prepare_execution(catalog, {"metric": "root"})
     executor = GraphExecutor(
         catalog,
-        catalog.implementations,
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )

@@ -20,7 +20,7 @@ from lyra.runtime.planning.preparation import PreparationError
 from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
-from lyra.server import plugins, registry, worker
+from lyra.server import plugins, registry
 from lyra.server.plugins import InstalledPlugin
 from test_support.location_operations import (
     Parameters,
@@ -112,7 +112,9 @@ def test_operation_only_catalog_and_metric_boundaries(
     plugin = definition()
     binding = BoundPlugin(plugin)
     installed = InstalledPlugin("places", plugin, {})
-    monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
+    monkeypatch.setattr(
+        "lyra.server.plugins.discover_installed_plugins", lambda _: [installed]
+    )
     catalog = registry.Catalog.load(Mock())
     assert catalog.metric_queues == {}
     assert catalog.discovery.search() == []
@@ -167,11 +169,6 @@ def test_worker_and_installed_routing_exclude_operations(
     monkeypatch.setattr(
         plugins, "load_installed_plugin_definition", lambda *_args, **_kwargs: plugin
     )
-    installed = plugins.load_installed_plugins(config)
-    assert installed[0].metric_queues == {"counts": "default"}
-    monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
-    runtime = Mock(plugins=config)
-    runtime.get_worker.return_value.queues = ["default"]
-    assert set(worker.load_runner_metric_entries("worker", config=runtime)) == {
-        "counts"
-    }
+    compiled, queues = plugins.load_installed_plugins(config)
+    assert queues == {"counts": "default"}
+    assert compiled.graph.nodes["select_places"].node.kind == "location_operation"

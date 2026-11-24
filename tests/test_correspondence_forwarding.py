@@ -252,9 +252,7 @@ def test_receiving_primary_preserves_nullable_pairs_and_empty_completion(
             "inputs": {"source": {"provider": Places.id, "ids": ["A", "B", "C"]}},
         },
     )
-    outcome = GraphExecutor(
-        runner.catalog, runner.catalog.implementations, Mock()
-    ).execute(plan)
+    outcome = GraphExecutor(runner.catalog, Mock()).execute(plan)
     assert outcome.outputs["data"].total.tolist() == [0 if empty else 3]
     completion = next(item for item in outcome.completions if item.scope == "location")
     assert (
@@ -299,7 +297,7 @@ def test_routed_primary_owns_targets_and_preserves_incoming_pairs(
             "inputs": {"places": {"provider": Places.id, "ids": ["C", "B", "A"]}},
         },
     )
-    executor = GraphExecutor(runner.catalog, runner.catalog.implementations, Mock())
+    executor = GraphExecutor(runner.catalog, Mock())
     if duplicate:
         with pytest.raises(GraphExecutionError, match=r"unique|duplicate"):
             executor.execute(plan)

@@ -19,8 +19,10 @@ from lyra.runtime.planning.node_declarations import (
     NodeDeclaration,
     compile_node_declarations,
 )
-from lyra.runtime.planning.provider_registry import capture_provider
-from lyra.runtime.planning.providers import select_location_providers
+from lyra.runtime.planning.provider_registry import (
+    capture_provider,
+    compile_provider_registry,
+)
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from test_support.location_schema import column
 from tests.node_declaration_helpers import Tracts, provider
@@ -146,7 +148,10 @@ def test_captured_node_policies_revalidated(
     )
     with pytest.raises(ValueError, match="cache must"):
         compile_node_declarations(
-            {"test": PluginDefinition(resources={"places": Tracts})}, [declaration]
+            compile_provider_registry(
+                {"test": PluginDefinition(resources={"places": Tracts})}
+            ),
+            [declaration],
         )
     forbidden.assert_not_called()
 
@@ -161,7 +166,10 @@ def test_captured_operation_owns_source_without_marker() -> None:
         cache="per_location",
     )
     compiled = compile_node_declarations(
-        {"test": PluginDefinition(resources={"places": Tracts})}, [declaration]
+        compile_provider_registry(
+            {"test": PluginDefinition(resources={"places": Tracts})}
+        ),
+        [declaration],
     )["select"].declaration
     assert compiled.primary_input == "main"
     assert compiled.scope == "location"
@@ -255,14 +263,6 @@ def test_serialized_metric_cannot_override_ownership(*, primary: bool) -> None:
         MetricManifest.model_validate_json(json.dumps(payload))
 
 
-@pytest.mark.parametrize("cache", INVALID_PROVIDER_POLICIES)
-def test_captured_provider_policy_revalidated(cache: object) -> None:
-    declaration = capture_provider("places", Tracts).declaration
-    declaration = declaration.model_copy(update={"cache": cache})
-    with pytest.raises(ValidationError):
-        select_location_providers({"test": [declaration]})
-
-
 def test_captured_unmarked_metric_rejects_per_location() -> None:
     declaration = NodeDeclaration(
         "measure",
@@ -272,5 +272,8 @@ def test_captured_unmarked_metric_rejects_per_location() -> None:
     )
     with pytest.raises(ValueError, match="Unpartitioned"):
         compile_node_declarations(
-            {"test": PluginDefinition(resources={"places": Tracts})}, [declaration]
+            compile_provider_registry(
+                {"test": PluginDefinition(resources={"places": Tracts})}
+            ),
+            [declaration],
         )

@@ -12,6 +12,7 @@ import pytest
 from pydantic import Field
 
 from lyra.contracts.config import InstalledPluginConfig
+from lyra.contracts.errors import PluginDefinitionError, ResourceConfigurationError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.loading import PluginLoadError
@@ -19,8 +20,9 @@ from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
 from lyra.server.registry import Catalog
-from lyra.server.worker import load_runner_metric_entries
+from lyra.server.worker import initialize_worker, require_worker_runtime
 from tests.config_helpers import load_test_config
+from tests.provider_helpers import FakeProvider
 
 
 class MemoryIO(BaseIO):
@@ -108,12 +110,10 @@ def test_api_worker_and_local_keep_live_definitions(
         InstalledPluginConfig(distribution="disabled-plugin", enabled=False),
     ]
     api = Catalog.load(config.plugins)
-    entries = load_runner_metric_entries("heavy", config=config)
+    entries = initialize_worker("heavy", config=config)
     local = LocalRunner(["Source_Plugin", "root-plugin"])
-    assert set(entries) == {"root"}
-    assert entries["root"].queue == "heavy"
-    assert set(entries["root"].implementations) == {"source-plugin", "root-plugin"}
-    for catalog in [api.compiled, entries["root"].catalog, local.catalog]:
+    assert entries.catalog.metric_queues["root"] == "heavy"
+    for catalog in [api.compiled, entries.catalog.compiled, local.catalog]:
         assert catalog.graph == api.compiled.graph
         binding = catalog.implementations["source-plugin"]
         assert isinstance(binding.prepare_parameters("source", {}), Parameters)
@@ -149,7 +149,7 @@ def test_enabled_import_failure_aborts_startup(
     config.plugins.installed = [InstalledPluginConfig(distribution="broken")]
     start = {
         "api": lambda: Catalog.load(config.plugins),
-        "worker": lambda: load_runner_metric_entries("heavy", config=config),
+        "worker": lambda: initialize_worker("heavy", config=config),
         "local": lambda: LocalRunner(["broken"]),
     }[interface]
     with pytest.raises(PluginLoadError, match="missing import dependency"):
@@ -168,10 +168,11 @@ def test_deployment_revision_is_shared_and_separate(
     ]
     api = Catalog.load(config.plugins, build_revision=config.build_revision)
     for pool in config.workers:
-        entries = load_runner_metric_entries(pool, config=config)
-        for entry in entries.values():
-            assert entry.catalog.build_revision == api.compiled.build_revision
-            assert entry.catalog.computation.nodes == api.compiled.computation.nodes
+        entries = initialize_worker(pool, config=config)
+        assert entries.catalog.compiled.build_revision == api.compiled.build_revision
+        assert (
+            entries.catalog.compiled.computation.nodes == api.compiled.computation.nodes
+        )
     # Deployment tooling assigns a new immutable token for each kind of change.
     changed = type(config).model_validate(
         {**config.model_dump(), "build_revision": f"build-2-{change}"}
@@ -181,9 +182,78 @@ def test_deployment_revision_is_shared_and_separate(
     assert updated.discovery.fingerprint == api.discovery.fingerprint
     assert updated.compiled.computation.nodes == api.compiled.computation.nodes
     config.workers["heavy"].queues = [config.plugins.default_queue]
-    worker = load_runner_metric_entries("heavy", config=config)
-    assert worker["source"].catalog.build_revision == api.compiled.build_revision
+    worker = initialize_worker("heavy", config=config)
+    assert worker.catalog.compiled.build_revision == api.compiled.build_revision
     assert (
         Catalog.load(config.plugins).discovery.fingerprint == api.discovery.fingerprint
     )
     assert LocalRunner(["source-plugin", "root-plugin"]).catalog.build_revision is None
+
+
+def test_installed_provider_with_cross_plugin_resource(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Places(FakeProvider):
+        memory: Annotated[MemoryIO, Resource("memory")]
+
+    definitions = {
+        "places": PluginDefinition(resources={"places": Places}),
+        "shared": PluginDefinition(resources={"places": Places}),
+        "metrics": PluginDefinition(metrics=[source], resources={"memory": MemoryIO}),
+    }
+    monkeypatch.setattr(
+        "lyra.server.plugins.load_installed_plugin_definition", definitions.__getitem__
+    )
+    monkeypatch.setattr(
+        "lyra.runtime.local.load_installed_plugin_definition", definitions.__getitem__
+    )
+    config = load_test_config(tmp_path)
+    config.plugins.installed = [
+        InstalledPluginConfig(distribution=name) for name in definitions
+    ]
+    local = LocalRunner(list(definitions)).catalog
+    installed = initialize_worker("heavy", config=config).catalog.compiled
+    for catalog in (local, installed):
+        assert set(catalog.provider_registry) == {Places.id}
+        assert [p.id for p in catalog.manifests["places"].providers] == [Places.id]
+        assert (
+            catalog.manifests["shared"].providers
+            == catalog.manifests["places"].providers
+        )
+        assert catalog.manifests["metrics"].providers == ()
+    Places.code_revision = "next"
+    rebuilt = LocalRunner.from_definitions(
+        {k: v.definition for k, v in local.implementations.items()}
+    ).catalog
+    assert rebuilt.provider_registry[Places.id].scope.code_revision == "next"
+    assert (
+        local.manifests["shared"].providers[0].contract.provider_scope
+        != rebuilt.manifests["shared"].providers[0].contract.provider_scope
+    )
+
+
+@pytest.mark.parametrize("key", ["places", "alias"])
+def test_worker_rejects_conflicting_registrations_before_replacing_catalog(
+    key: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    definitions = {"first": PluginDefinition(resources={"places": FakeProvider})}
+    config = load_test_config(tmp_path)
+    config.plugins.installed = [InstalledPluginConfig(distribution="first")]
+    monkeypatch.setattr(
+        "lyra.server.plugins.load_installed_plugin_definition", definitions.__getitem__
+    )
+    initialize_worker("heavy", config=config)
+    # Two separate classes can have identical serializable resource metadata.
+    duplicate = type(
+        FakeProvider.__name__, (FakeProvider,), {"__module__": FakeProvider.__module__}
+    )
+    definitions["second"] = PluginDefinition(
+        resources={key: duplicate if key == "places" else FakeProvider}
+    )
+    config.plugins.installed.append(InstalledPluginConfig(distribution="second"))
+    error = ResourceConfigurationError if key == "places" else PluginDefinitionError
+    with pytest.raises(error, match="Conflicting"):
+        initialize_worker("lightweight", config=config)
+    runtime = require_worker_runtime()
+    assert runtime.queues == {"heavy"}
+    assert set(runtime.catalog.compiled.manifests) == {"first"}

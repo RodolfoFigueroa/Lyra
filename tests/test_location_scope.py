@@ -120,9 +120,7 @@ def execution(
         invocation = plugin.prepare_resolved_invocation("select", inputs)
         state = RunState()
         state.resolver = resolver
-        executor = OperationExecutor(
-            runner.catalog, runner.catalog.implementations, Mock()
-        )
+        executor = OperationExecutor(runner.catalog, Mock())
         yield Execution(plugin, resolver, invocation, events, executor, state)
 
 

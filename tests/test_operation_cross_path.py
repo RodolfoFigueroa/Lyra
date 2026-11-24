@@ -187,7 +187,7 @@ def test_managed_operations_round_trip(
         assert result.tables["data"].value.tolist() == [2 * len(set(ids))]
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
     runtime.config.resources = config
-    worker.refresh_runner_registry("heavy", config=runtime.config)
+    worker.initialize_worker("heavy", config=runtime.config)
     runtime.jobs.enqueue = Mock()
     calls_before_submission = len(native.mock_calls)
     assert asyncio.run(

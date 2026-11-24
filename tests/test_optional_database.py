@@ -68,7 +68,7 @@ def test_worker_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "ensure_runtime_directories",
         "configure_logging",
-        "refresh_runner_registry",
+        "initialize_worker",
     ):
         monkeypatch.setattr(worker_launcher, name, Mock())
     connection = Mock()

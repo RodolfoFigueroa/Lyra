@@ -106,7 +106,7 @@ def test_shared_transitive_resource_lives_until_last_consumer(
     retained: list[gpd.GeoDataFrame] = []
     runner = resource_runner(failure, events, instances, retained)
     plugin = runner.catalog.implementations["test"]
-    executor = OperationExecutor(runner.catalog, runner.catalog.implementations, Mock())
+    executor = OperationExecutor(runner.catalog, Mock())
     for _ in range(2):
         events.clear()
         state = RunState()

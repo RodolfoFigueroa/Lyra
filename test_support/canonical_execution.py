@@ -10,7 +10,6 @@ from typing_extensions import override
 
 from lyra.contracts.accepted import PreparedExecution
 from lyra.runtime.execution import GraphExecutor
-from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import LocationDependency
@@ -83,7 +82,7 @@ def canonical_workload(
         resources={"source": Source, "locations": Target},
     )
     runner = LocalRunner.from_definitions({"bench": plugin})
-    executor = GraphExecutor(runner.catalog, {"bench": BoundPlugin(plugin)}, Mock())
+    executor = GraphExecutor(runner.catalog, Mock())
     ids = [str(i) for i in range(rows)]
     value = selection(*ids, provider=Source.id if routed == "routed" else Target.id)
     prepared = prepare_execution(

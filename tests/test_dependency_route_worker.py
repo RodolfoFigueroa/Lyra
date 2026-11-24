@@ -50,42 +50,13 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
     native = native_job(monkeypatch)
     acquire = Mock(side_effect=AssertionError("acquisition"))
     lookup = Mock(side_effect=AssertionError("cache lookup"))
-    monkeypatch.setattr(GraphExecutor, "_collect_resources", acquire)
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
     monkeypatch.setattr(MetricTables, "lookup", lookup)
     with pytest.raises(worker.BoundPlanError, match="provider scopes"):
         worker.run_metric_task(envelope.model_dump(mode="json"))
     acquire.assert_not_called()
     lookup.assert_not_called()
     assert native.meta["failure"]["error"]["type"] == "bound_plan"
-
-
-@pytest.mark.parametrize(
-    "missing", ["first", "finish", "middle_provider", "target_provider"]
-)
-def test_missing_receiving_route_implementation_fails_preflight(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
-) -> None:
-    _, runtime = install_definitions(tmp_path, monkeypatch, definitions())
-    entry = worker.RUNNER_REGISTRY["root"]
-    assert {
-        "first",
-        "finish",
-        "middle_provider",
-        "target_provider",
-    } <= entry.implementations.keys()
-    envelope = accepted_envelope(
-        job_id="graph-job",
-        metric="root",
-        inputs=request()["inputs"],
-        catalog=runtime.catalog.compiled,
-    )
-    del entry.implementations[missing]
-    native_job(monkeypatch)
-    acquire = Mock(side_effect=AssertionError("acquisition"))
-    monkeypatch.setattr(GraphExecutor, "_collect_resources", acquire)
-    with pytest.raises(GraphExecutionError, match="unavailable"):
-        worker.run_metric_task(envelope.model_dump(mode="json"))
-    acquire.assert_not_called()
 
 
 @pytest.mark.parametrize("damage", ["value", "missing_value"])
@@ -109,7 +80,7 @@ def test_worker_rejects_changed_serialized_receiving_acceptance(
     native = native_job(monkeypatch)
     acquire = Mock(side_effect=AssertionError("acquisition"))
     lookup = Mock(side_effect=AssertionError("cache lookup"))
-    monkeypatch.setattr(GraphExecutor, "_collect_resources", acquire)
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
     monkeypatch.setattr(MetricTables, "lookup", lookup)
     with pytest.raises((GraphExecutionError, worker.BoundPlanError)):
         worker.run_metric_task(payload)

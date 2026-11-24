@@ -19,7 +19,7 @@ from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError
 from lyra.sdk import loading
 from lyra.sdk.plugin_cli import render_description, render_manifest
-from lyra.server import job_submission, registry, worker
+from lyra.server import job_submission, worker
 from lyra.server.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config
 from tests.queue_helpers import run_and_read, submitted_input
@@ -38,7 +38,6 @@ def example(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 @pytest.fixture
 def worker_cleanup() -> Iterator[None]:
     yield
-    worker.RUNNER_REGISTRY.clear()
     worker.set_runner_temp_base(None)
 
 
@@ -202,13 +201,14 @@ def test_examples_through_submission_and_fake_worker(
     installed = [
         InstalledPlugin("example", plugin, dict.fromkeys(plugin.metric_names, "heavy"))
     ]
-    monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
-    monkeypatch.setattr(registry, "load_installed_plugins", lambda _: installed)
+    monkeypatch.setattr(
+        "lyra.server.plugins.discover_installed_plugins", lambda _: installed
+    )
     monkeypatch.setattr(loading, "load_plugin_definition", lambda _: plugin)
     config = load_test_config(tmp_path)
     config.result_store_path = tmp_path / "cache"
     runtime = make_runtime(config)
-    worker.refresh_runner_registry("heavy", config=config)
+    worker.initialize_worker("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)

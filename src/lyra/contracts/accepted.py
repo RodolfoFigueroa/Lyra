@@ -267,6 +267,7 @@ class WorkerRequest(BaseModel):
     parameter_uses: dict[str, dict[str, JsonValue]]
     build_revision: BuildRevision | None
     provider_scopes: dict[str, RevisionBinding]
+    intervention_targets: dict[str, ProviderDeclaration] = Field(default_factory=dict)
     has_parameters: bool
 
     @classmethod
@@ -282,6 +283,7 @@ class WorkerRequest(BaseModel):
             parameter_uses=plan.parameter_uses,
             build_revision=plan.build_revision,
             provider_scopes=plan.required_scopes(),
+            intervention_targets=plan.intervention_targets,
             has_parameters=plan.has_parameters,
         ).model_copy(deep=True)
 

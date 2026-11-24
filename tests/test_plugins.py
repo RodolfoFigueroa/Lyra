@@ -56,8 +56,8 @@ def test_disabled_plugins_need_not_be_installed(config: LyraConfig) -> None:
             distribution="missing-disabled", enabled=False, routing={"absent": "batch"}
         )
     )
-    loaded = plugins.load_installed_plugins(config.plugins)
-    assert [plugin.distribution for plugin in loaded] == ["lyra-smoke-plugin"]
+    catalog, _ = plugins.load_installed_plugins(config.plugins)
+    assert list(catalog.manifests) == ["lyra-smoke-plugin"]
     assert admin.list_plugin_routing(make_runtime(config)).disabled_plugins == [
         "missing-disabled"
     ]

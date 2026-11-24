@@ -295,11 +295,13 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         "root", scoped_inputs(inputs)
     )
     edge = runner.graph.dependencies["root"]["a"]
-    middle_input = prepare_dependency(invocation, edge, runner.plugins["plugin_1"])
+    middle_input = prepare_dependency(
+        invocation, edge, runner.catalog.implementations["plugin_1"]
+    )
     source_input = prepare_dependency(
         middle_input,
         runner.graph.dependencies["middle"]["data"],
-        runner.plugins["plugin_2"],
+        runner.catalog.implementations["plugin_2"],
     )
     assert set(source_input.locations) == {"location"}
     assert_records(source_input.locations["location"], shared)
@@ -388,7 +390,7 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
     prepared = prepare_dependency(
         invocation,
         runner.graph.dependencies["root"]["data"],
-        runner.plugins["plugin_1"],
+        runner.catalog.implementations["plugin_1"],
     )
     assert_records(prepared.locations["location"], location)
     assert prepared.inspect_parameters() == Producer()

@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from lyra.contracts.accepted import PreparedExecution, PreparedInput
+from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Input, describe_dependency
 from lyra.contracts.errors import (
     ExecutionPersistenceError,
@@ -69,7 +69,6 @@ from lyra.runtime.planning.computation import (
 from lyra.runtime.planning.graph import (
     ResolvedDependency,
     ResolvedLocationDependency,
-    build_graph,
 )
 from lyra.runtime.planning.parameters import (
     ParameterUseError,
@@ -80,7 +79,7 @@ from lyra.runtime.planning.parameters import (
 )
 from lyra.runtime.planning.provider_registry import capture_provider
 from lyra.runtime.report_collection import ReportCollection
-from lyra.runtime.resources import ResourceScope, collect_resources
+from lyra.runtime.resources import ResourceScope
 from lyra.runtime.result_descriptions import (
     ComputationSelection,
     ResultDescription,
@@ -106,7 +105,6 @@ if TYPE_CHECKING:
     from lyra.contracts.plugins import NodeManifest
     from lyra.contracts.resources import ResourceConfig
     from lyra.data.results import NativeOutputs
-    from lyra.runtime.invocation import BoundPlugin
     from lyra.runtime.planning.catalog import CompiledCatalog
     from lyra.runtime.planning.graph import PluginGraph
     from lyra.runtime.planning.providers import SelectedLocationProvider
@@ -252,7 +250,6 @@ class GraphExecutor:
     """
 
     catalog: CompiledCatalog
-    plugins: Mapping[str, BoundPlugin]
     context_factory: Callable[[str], RunContext]
     resource_config: Mapping[str, ResourceConfig] | None = None
     resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None
@@ -273,21 +270,32 @@ class GraphExecutor:
         """The captured provider declaration."""
         return self.catalog.providers
 
-    def _collect_resources(self) -> dict[str, type[BaseIO[Any]]]:
-        return collect_resources(
-            {name: plugin.resources for name, plugin in self.plugins.items()}
-        )
-
     def validate_plan(self, prepared: PreparedExecution) -> BoundInvocation:
         """Reject incompatible acceptance before acquiring any resource.
 
         Returns:
             The complete bound root and its dependency uses.
+        """
+        bound, _ = self._bind_plan(prepared)
+        return bound
+
+    def _bind_plan(
+        self, prepared: PreparedExecution
+    ) -> tuple[BoundInvocation, ResourceScope]:
+        """Validate the plan and its effective resources before acquisition.
+
+        Returns:
+            The bound root and the resource scope validated for this execution.
 
         Raises:
             ValueError: If accepted contracts, identities or revisions differ.
         """
-        self._validate_implementations(prepared.node, prepared.inputs)
+        validate_execution_plan(
+            self.graph,
+            prepared.node,
+            {item.name: item.binding.operations for item in prepared.inputs},
+            self.catalog.dependency_routes,
+        )
         bound = bind_execution(self.catalog, prepared)
         try:
             identity = self.catalog.computation.plan(
@@ -304,12 +312,11 @@ class GraphExecutor:
             raise ValueError(msg)
         self._validate_root(prepared.node)
         self._validate_scopes(prepared)
-        resources = self._collect_resources()
-        for plugin in self.plugins.values():
-            plugin.definition.validate_resources(resources)
-        scope = ResourceScope(resources, self.resource_config, self.resource_overrides)
-        self._validate_intervention_targets(prepared, scope)
-        return bound
+        scope = ResourceScope(
+            self.catalog.resources, self.resource_config, self.resource_overrides
+        )
+        self._validate_providers(prepared, scope)
+        return bound, scope
 
     def _validate_scopes(self, prepared: PreparedExecution) -> None:
         """Check named selections and pinned scopes against live declarations.
@@ -355,21 +362,7 @@ class GraphExecutor:
             )
             raise ValueError(message)
 
-        required = {item.contract for item in prepared.revisions.bindings}
-        for provider in self.providers.values():
-            if provider.declaration.contract.reference not in required:
-                continue
-            binding = self.plugins.get(provider.distribution)
-            if binding is None or not binding.matches_location_provider(
-                provider.declaration
-            ):
-                message = (
-                    "Accepted location provider implementation "
-                    "differs or is unavailable"
-                )
-                raise ValueError(message)
-
-    def _validate_intervention_targets(
+    def _validate_providers(
         self, prepared: PreparedExecution, scope: ResourceScope
     ) -> None:
         """Verify the live schema and concrete resource class before acquisition.
@@ -377,24 +370,28 @@ class GraphExecutor:
         Raises:
             ValueError: If the registration or its implementation has changed.
         """
-        for name, pinned in prepared.intervention_targets.items():
+        for name in prepared.required_scopes():
             live = self.catalog.provider_registry.get(name)
-            expected = executable_contract(pinned)
-            if live is None or executable_contract(live.declaration) != expected:
+            if live is None:
+                msg = f"Required provider {name!r} is unavailable"
+                raise ValueError(msg)
+            expected = executable_contract(live.declaration)
+            pinned = prepared.intervention_targets.get(name)
+            if pinned is not None and executable_contract(pinned) != expected:
                 msg = (
                     f"Intervention target {name!r} differs from its pinned declaration"
                 )
                 raise ValueError(msg)
-            provider = scope.providers.get(pinned.resource)
+            provider = scope.providers.get(live.resource)
             if (
                 provider is None
                 or not issubclass(provider, LocationProvider)
                 or executable_contract(
-                    capture_provider(pinned.resource, provider).declaration
+                    capture_provider(live.resource, provider).declaration
                 )
                 != expected
             ):
-                msg = f"Provider {name!r} implementation differs or is unavailable"
+                msg = f"Location provider implementation differs: {name!r}"
                 raise ValueError(msg)
 
     _provenance: ExecutionProvenance | None = field(default=None, init=False)
@@ -416,46 +413,11 @@ class GraphExecutor:
             Validated source batches keyed by receiving input.
         """
         prepared = prepared.model_copy(deep=True)
-        self.validate_plan(prepared)
+        _, scope = self._bind_plan(prepared)
         with self._acquisition_scope(
-            prepared.request.interventions, ReportCollection()
+            scope, prepared.request.interventions, ReportCollection()
         ) as resolver:
             return resolver.resolve_prepared(prepared)
-
-    def _validate_implementations(
-        self, node: str, inputs: tuple[PreparedInput, ...] = ()
-    ) -> None:
-        """Check the complete selected graph and its executable declarations.
-
-        Raises:
-            ValueError: If declarations, bindings, or implementations differ.
-        """
-        routes = {item.name: item.binding.operations for item in inputs}
-        required = validate_execution_plan(
-            self.graph, node, routes, self.catalog.dependency_routes
-        )
-        for name in required:
-            entry = self.graph.nodes[name]
-            binding = self.plugins.get(entry.distribution)
-            manifest = binding.node_manifest(name) if binding is not None else None
-            if manifest is None:
-                msg = f"Accepted implementation is unavailable: {name}"
-                raise ValueError(msg)
-            if executable_contract(manifest) != executable_contract(entry.node):
-                msg = f"Implementation differs from live declaration: {name}"
-                raise ValueError(msg)
-
-        resolved = build_graph(
-            {owner: plugin.definition for owner, plugin in self.plugins.items()}
-        )
-        for name in required:
-            if (
-                resolved.dependencies[name] != self.graph.dependencies[name]
-                or resolved.location_dependencies[name]
-                != self.graph.location_dependencies[name]
-            ):
-                msg = f"Dependency bindings differ from live declarations: {name}"
-                raise ValueError(msg)
 
     def execute(
         self,
@@ -479,8 +441,8 @@ class GraphExecutor:
         succeeded = False
         failure: GraphExecutionError | None = None
         try:
-            self._preflight(root, completed)
-            result, metadata = self._run_scoped(root, completed)
+            scope = self._preflight(root, completed)
+            result, metadata = self._run_scoped(root, completed, scope)
             completed.report.finalize()
             if self.retain_result:
                 self._retain_result(metadata, completed)
@@ -544,6 +506,7 @@ class GraphExecutor:
     @contextmanager
     def _acquisition_scope(
         self,
+        scope: ResourceScope,
         interventions: Sequence[AcceptedIntervention],
         report: ReportCollection,
         *,
@@ -564,9 +527,6 @@ class GraphExecutor:
                     msg = "Intervention validation requires a configured store"
                     raise ValueError(msg)
                 store.initialize()
-        scope = ResourceScope(
-            self._collect_resources(), self.resource_config, self.resource_overrides
-        )
         with scope.activate():
             if interventions and store is not None:
                 validate_interventions(
@@ -582,13 +542,16 @@ class GraphExecutor:
             )
 
     def _run_scoped(
-        self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
+        self,
+        root: PreparedResolvedInvocation | PreparedExecution,
+        completed: RunState,
+        scope: ResourceScope,
     ) -> tuple[NativeOutputs, ExecutionMetadata]:
         interventions = (
             root.request.interventions if isinstance(root, PreparedExecution) else ()
         )
         with self._acquisition_scope(
-            interventions, completed.report, retain_result=self.retain_result
+            scope, interventions, completed.report, retain_result=self.retain_result
         ) as resolver:
             completed.resolver = resolver
             bound = completed.bound_root
@@ -916,7 +879,7 @@ class GraphExecutor:
         if node.kind != "metric":
             message = "Bound metric scheduling requires a metric"
             raise TypeError(message)
-        plugin = self.plugins[self.graph.nodes[bound.node].distribution]
+        plugin = self.catalog.implementations[self.graph.nodes[bound.node].distribution]
         primary = bound.locations.get(bound.primary_input or "")
         keys = demand.computation_keys
         if keys is None:
@@ -1052,7 +1015,7 @@ class GraphExecutor:
         arguments: dict[str, object] = dict(locations)
         if self.graph.nodes[bound.node].node.parameters_schema is not None:
             arguments["parameters"] = bound.parameter_values()
-        plugin = self.plugins[self.graph.nodes[bound.node].distribution]
+        plugin = self.catalog.implementations[self.graph.nodes[bound.node].distribution]
         invocation = plugin.prepare_resolved_invocation(bound.node, arguments)
         return replace(
             invocation,
@@ -1082,7 +1045,7 @@ class GraphExecutor:
         saved = self._assemble_metric(
             [value for value in retained if value is not None]
         )
-        plugin = self.plugins[self.graph.nodes[node].distribution]
+        plugin = self.catalog.implementations[self.graph.nodes[node].distribution]
         try:
             outputs = plugin.validate_retained_outputs(node, saved)
         except MetricResultError as error:
@@ -1109,8 +1072,11 @@ class GraphExecutor:
 
     def _preflight(
         self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
-    ) -> None:
+    ) -> ResourceScope:
         """Classify structural failures for worker diagnostics.
+
+        Returns:
+            The validated resource scope for the entire run.
 
         Raises:
             ParameterUseError: If effective parameters are invalid.
@@ -1118,7 +1084,7 @@ class GraphExecutor:
             PlanValidationError: If the selected plan is invalid.
         """
         try:
-            self._validate_execution(root, completed)
+            scope = self._validate_execution(root, completed)
             if completed.bound_root is not None:
                 completed.report.capture(
                     completed.bound_root,
@@ -1129,49 +1095,51 @@ class GraphExecutor:
             raise
         except Exception as exc:
             raise PlanValidationError(str(exc)) from exc
+        return scope
 
     def _validate_execution(
         self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
-    ) -> None:
+    ) -> ResourceScope:
         if isinstance(root, PreparedExecution):
-            completed.bound_root = self.validate_plan(root)
-        else:
-            self._validate_root(root.node)
-            entry = self.graph.nodes[root.node]
-            arguments: dict[str, object] = dict(root.locations)
-            if entry.node.parameters_schema is not None:
-                arguments["parameters"] = root.parameter_values()
-            self.plugins[entry.distribution].prepare_resolved_invocation(
-                root.node, arguments
-            )
-        if isinstance(root, PreparedExecution):
+            completed.bound_root, scope = self._bind_plan(root)
             completed.parameter_uses = deepcopy(root.parameter_uses)
             completed.routes = {
                 item.name: item.binding for item in root.inputs
             } | deepcopy(root.dependency_routes)
-        else:
-            parameters = prepare_parameter_uses(
-                replace(self.catalog, implementations=self.plugins),
-                root.node,
-                root.parameter_values(),
-            )
-            completed.parameter_uses = parameters.uses
-            completed.routes = parameters.routes
-            completed.bound_root = bind_resolved(
-                self.catalog,
-                root.node,
-                {
-                    name: root.bound_use.locations[name]
-                    if root.bound_use is not None
-                    else BoundLocation(value.contract, value.ids)
-                    for name, value in root.original().locations.items()
-                },
-                parameters.uses,
-                parameters.routes,
-            )
+            return scope
 
-        if not isinstance(root, PreparedExecution):
-            self._validate_implementations(root.node)
+        self._validate_root(root.node)
+        validate_execution_plan(
+            self.graph, root.node, {}, self.catalog.dependency_routes
+        )
+        entry = self.graph.nodes[root.node]
+        arguments: dict[str, object] = dict(root.locations)
+        if entry.node.parameters_schema is not None:
+            arguments["parameters"] = root.parameter_values()
+        plugin = self.catalog.implementations[entry.distribution]
+        plugin.prepare_resolved_invocation(root.node, arguments)
+        parameters = prepare_parameter_uses(
+            self.catalog,
+            root.node,
+            root.parameter_values(),
+        )
+        completed.parameter_uses = parameters.uses
+        completed.routes = parameters.routes
+        completed.bound_root = bind_resolved(
+            self.catalog,
+            root.node,
+            {
+                name: root.bound_use.locations[name]
+                if root.bound_use is not None
+                else BoundLocation(value.contract, value.ids)
+                for name, value in root.original().locations.items()
+            },
+            parameters.uses,
+            parameters.routes,
+        )
+        return ResourceScope(
+            self.catalog.resources, self.resource_config, self.resource_overrides
+        )
 
     def _validate_root(self, node: str) -> None:
         """Reject operation roots before acquiring execution resources.
@@ -1238,7 +1206,7 @@ class GraphExecutor:
             else nullcontext(self.store)
         )
         entry = self.graph.nodes[metadata.metric_name]
-        plugin = self.plugins[entry.distribution]
+        plugin = self.catalog.implementations[entry.distribution]
         with storage as store:
             if store is None:
                 message = "Result retention requires a configured store"
@@ -1323,9 +1291,9 @@ class GraphExecutor:
             parameter_key = route_key(key, index)
             if entry.node.parameters_schema is not None:
                 arguments["parameters"] = completed.parameter_uses[parameter_key]
-            hop = self.plugins[entry.distribution].prepare_resolved_invocation(
-                operation, arguments
-            )
+            hop = self.catalog.implementations[
+                entry.distribution
+            ].prepare_resolved_invocation(operation, arguments)
             hop = replace(
                 hop,
                 parameters=hop.inspect_parameters(),
@@ -1553,7 +1521,9 @@ class GraphExecutor:
         context_factory: Callable[[str], RunContext],
     ) -> NativeOutputs | NativeLocationInput | OperationResult:
         key = invocation.identity
-        plugin = self.plugins[self.graph.nodes[invocation.node].distribution]
+        plugin = self.catalog.implementations[
+            self.graph.nodes[invocation.node].distribution
+        ]
         if invocation.kind == "location_operation" and plugin.has_no_primary_work(
             invocation
         ):
@@ -1597,7 +1567,7 @@ class GraphExecutor:
         context_factory: Callable[[str], RunContext],
     ) -> NativeOutputs:
         entry = self.graph.nodes[invocation.node]
-        plugin = self.plugins[entry.distribution]
+        plugin = self.catalog.implementations[entry.distribution]
         key = invocation.identity
         primary_name = entry.node.primary_input
         primary = (
@@ -1724,7 +1694,7 @@ class GraphExecutor:
         captured: dict[str, InputBindings],
     ) -> None:
         """Publish validated complete partitions across all named outputs."""
-        plugin = self.plugins[self.graph.nodes[node].distribution]
+        plugin = self.catalog.implementations[self.graph.nodes[node].distribution]
         tables.publish(
             selections, outputs, plugin.output_storage(node), location_inputs=captured
         )
@@ -1738,7 +1708,9 @@ class GraphExecutor:
         retained: dict[str, tuple[str, ...]] | None = None,
         retain_membership: bool = False,
     ) -> OperationResult:
-        plugin = self.plugins[self.graph.nodes[invocation.node].distribution]
+        plugin = self.catalog.implementations[
+            self.graph.nodes[invocation.node].distribution
+        ]
         node = self.graph.nodes[invocation.node].node
         if (
             node.kind != "location_operation"
@@ -2027,7 +1999,7 @@ class GraphExecutor:
             prepared = prepare_dependency(
                 owner,
                 edge,
-                self.plugins[producer.distribution],
+                self.catalog.implementations[producer.distribution],
                 location_input=location_input,
                 effective_parameters=completed.parameter_uses[parameter_key],
             )

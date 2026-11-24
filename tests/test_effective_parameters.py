@@ -124,7 +124,7 @@ def test_complete_values_transport_execution_and_identity() -> None:
         catalog, restored.request.model_dump(), normalized_uses=restored.parameter_uses
     )
     assert restored.parameter_uses == plan.parameter_uses
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    executor = GraphExecutor(catalog, Mock())
     outcome = executor.execute(restored)
     assert [item["distance"] for item in seen] == [5, 9]
     assert plan.parameter_uses == values
@@ -217,7 +217,7 @@ def test_execution_uses_accepted_factory_values() -> None:
     restored = prepare_execution(
         catalog, restored.request.model_dump(), normalized_uses=restored.parameter_uses
     )
-    GraphExecutor(catalog, catalog.implementations, Mock()).execute(restored)
+    GraphExecutor(catalog, Mock()).execute(restored)
 
 
 @pytest.mark.usefixtures("dummy_redis_clients")
@@ -299,7 +299,6 @@ def test_live_defaults_survive_submission_and_worker(
         # Equivalent HTTP/MCP requests share the computation cache.
         assert seen == [effective]
     finally:
-        worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
 
 
@@ -336,5 +335,5 @@ def test_distinct_defaulted_uses_keep_their_accepted_values_during_execution() -
     assert accepted.parameter_uses[use_key("root", {}, "inputs.left")] == {"value": 3}
     assert accepted.parameter_uses[use_key("root", {}, "inputs.right")] == {"value": 7}
     restored = PreparedExecution.model_validate_json(accepted.model_dump_json())
-    output = GraphExecutor(catalog, catalog.implementations, Mock()).execute(restored)
+    output = GraphExecutor(catalog, Mock()).execute(restored)
     assert output.outputs["answer"].value.tolist() == [10]

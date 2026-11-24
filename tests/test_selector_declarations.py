@@ -14,12 +14,13 @@ from pydantic import Field
 from lyra.contracts.dependencies import Input, LocationDependency
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.plugins import PluginInfo, PluginManifest
-from lyra.runtime.planning.catalog import assemble_catalog, compile_live_catalog
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.native_bindings import bind_native_definitions
 from lyra.runtime.planning.node_declarations import (
     NodeDeclaration,
     compile_node_declarations,
 )
+from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition
 from test_support.location_operations import Places
@@ -162,7 +163,9 @@ def test_invalid_pairs_fail_in_declaration_and_compiler(
         resources={"places": Places, "managed": ManagedProvider}
     )
     with pytest.raises(PluginDefinitionError):
-        compile_node_declarations({"test": providers}, [declaration])
+        compile_node_declarations(
+            compile_provider_registry({"test": providers}), [declaration]
+        )
 
 
 def test_incapable_target_rejected_at_each_binding_entry_point() -> None:
@@ -174,18 +177,14 @@ def test_incapable_target_rejected_at_each_binding_entry_point() -> None:
 
 
 def test_serialized_plan_requires_capable_fixed_target() -> None:
-    catalog = compile_live_catalog({"test": plugin(clone(mapping), select)})
-    manifest = catalog.manifests["test"].model_copy(deep=True)
-    manifest.providers = tuple(
-        provider.model_copy(update={"query_capable": False, "query_schema": None})
-        for provider in manifest.providers
-    )
     with pytest.raises(ValueError, match="managed query capability"):
-        assemble_catalog(catalog.graph, {"test": manifest})
+        compile_live_catalog({"test": plugin(clone(mapping), select, Places.id)})
     declaration = NodeDeclaration("metric", mapping, target_selector=select)
     with pytest.raises(ValueError, match="Only operations"):
         compile_node_declarations(
-            {"test": PluginDefinition(resources={"managed": ManagedProvider})},
+            compile_provider_registry(
+                {"test": PluginDefinition(resources={"managed": ManagedProvider})}
+            ),
             [replace(declaration, function=lambda: None)],
         )
 
@@ -237,9 +236,13 @@ def test_forwarded_parameters_and_operation_derived_source(
     }
     if override_target:
         with pytest.raises(ValueError, match="Unknown receiving location binding"):
-            compile_node_declarations(providers, declarations)
+            compile_node_declarations(
+                compile_provider_registry(providers), declarations
+            )
         return
-    compiled = compile_node_declarations(providers, declarations)
+    compiled = compile_node_declarations(
+        compile_provider_registry(providers), declarations
+    )
     assert compiled["consumer"].locations["result"].scope.provider_id == "managed"
     assert compiled["selected"].declaration.target == "managed"
     assert compiled["selected"].parameters is Parameters

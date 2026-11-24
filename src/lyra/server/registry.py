@@ -9,7 +9,7 @@ from operator import itemgetter
 from types import MappingProxyType
 
 from lyra.contracts.config import PluginsConfig
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
+from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.server.plugins import load_installed_plugins
 
@@ -68,18 +68,10 @@ class Catalog:
         Returns:
             Captured contracts and validated routing for this application.
         """
-        installed = load_installed_plugins(plugins)
-        return cls(
-            compiled=compile_live_catalog(
-                {p.distribution: p.definition for p in installed},
-                build_revision=build_revision,
-            ),
-            metric_queues={
-                name: queue
-                for plugin in installed
-                for name, queue in plugin.metric_queues.items()
-            },
+        compiled, queues = load_installed_plugins(
+            plugins, build_revision=build_revision
         )
+        return cls(compiled, queues)
 
     def get_loaded_metric_names(self) -> list[str]:
         """Return sorted public concrete metric names."""

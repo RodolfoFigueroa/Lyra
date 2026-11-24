@@ -103,7 +103,7 @@ def test_registration_execution_and_inspection_are_independent() -> None:
     assert discovery.inspect("root").outputs
     plan = prepare_execution(catalog, {"metric": "root"})
     original = plan.model_dump()
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    executor = GraphExecutor(catalog, Mock())
     outcome = executor.execute(plan)
     assert outcome.provenance.accepted is not None
     outcome.provenance.accepted.parameter_uses.clear()

@@ -120,7 +120,6 @@ def test_selections_and_shared_origins_remain_distinct(
     store = SQLiteStore(tmp_path / "records.sqlite")
     executor = GraphExecutor(
         runner.catalog,
-        runner.catalog.implementations,
         Mock(),
         store=store,
         provider_records=ProviderRecords(store),
@@ -222,7 +221,6 @@ def test_queries_execute_even_with_cached_overlapping_records(
     store = SQLiteStore(tmp_path / "records.sqlite")
     executor = GraphExecutor(
         runner.catalog,
-        runner.catalog.implementations,
         Mock(),
         resource_config=config,
         store=store,

@@ -211,7 +211,7 @@ def workload(
         identity=identity,
     )
     runner = LocalRunner.from_definitions(definitions)
-    executor = GraphExecutor(runner.catalog, runner.catalog.implementations, Mock())
+    executor = GraphExecutor(runner.catalog, Mock())
     executor.store = SQLiteStore(tmp_path / "values.sqlite")
     executor.provider_records = ProviderRecords(executor.store)
 

@@ -77,18 +77,26 @@ def test_public_submission_equivalence(
         monkeypatch.setattr(
             Provider,
             "resolve",
-            Mock(side_effect=UnresolvedLocationIDsError("test:units", "lot", ["bad"])),
+            create_autospec(
+                Provider.resolve,
+                side_effect=UnresolvedLocationIDsError("test:units", "lot", ["bad"]),
+            ),
         )
     elif scenario == "acquisition":
         monkeypatch.setattr(
-            Provider, "resolve", Mock(side_effect=LocationAcquisitionError("private"))
+            Provider,
+            "resolve",
+            create_autospec(
+                Provider.resolve, side_effect=LocationAcquisitionError("private")
+            ),
         )
     elif scenario in {"missing", "duplicate", "extra"}:
         ids = {"missing": ["wrong"], "duplicate": ["a", "a"], "extra": ["a", "extra"]}
         monkeypatch.setattr(
             Provider,
             "resolve",
-            Mock(
+            create_autospec(
+                Provider.resolve,
                 return_value=features(list(dict.fromkeys(ids[scenario])))
                 .copy(deep=True)
                 .iloc[
@@ -96,7 +104,7 @@ def test_public_submission_equivalence(
                         list(dict.fromkeys(ids[scenario])).index(unit)
                         for unit in ids[scenario]
                     ]
-                ]
+                ],
             ),
         )
     elif scenario == "cleanup":

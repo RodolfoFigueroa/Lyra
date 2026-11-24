@@ -29,9 +29,7 @@ def executor(
     if resources:
         plugins["locations"] = PluginDefinition(resources=resources)
     catalog = LocalRunner.from_definitions(plugins).catalog
-    return GraphExecutor(
-        catalog, catalog.implementations, factory
-    ), catalog.implementations["plugin_0"]
+    return GraphExecutor(catalog, factory), catalog.implementations["plugin_0"]
 
 
 class Label(MetricParameters):

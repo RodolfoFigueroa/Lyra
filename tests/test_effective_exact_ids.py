@@ -59,9 +59,7 @@ def test_direct_exact_ids_preserve_order_ownership_and_qualified_records(
     proposal = replace(proposals()[0], remove=["b"])
     with SQLiteStore(tmp_path / "records") as store:
         held = ProviderRecords(store)
-        executor = GraphExecutor(
-            catalog, catalog.implementations, Mock(), provider_records=held
-        )
+        executor = GraphExecutor(catalog, Mock(), provider_records=held)
 
         def plan(ids: tuple[str, ...], *changes: Intervention) -> PreparedExecution:
             return prepare_execution(

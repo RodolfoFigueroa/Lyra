@@ -23,22 +23,18 @@ class ResultSuite:
         self.fixture = result_workload(
             rows, Path(self.temporary.name) / "results.sqlite3"
         )
-        self.registry_patch = patch.dict(
-            worker.RUNNER_REGISTRY, {"root": self.fixture.entry}, clear=True
+        config = Mock(
+            spec=LyraConfig,
+            jobs=Mock(),
+            result_store_path=Path(self.temporary.name) / "results.sqlite3",
+            resources={},
         )
-        self.config_patch = patch.object(
+        self.registry_patch = patch.object(
             worker,
-            "require_worker_config",
-            return_value=Mock(
-                spec=LyraConfig,
-                build_revision="benchmark-build",
-                jobs=Mock(),
-                result_store_path=Path(self.temporary.name) / "results.sqlite3",
-                resources={},
-            ),
+            "_WORKER_RUNTIME",
+            worker.WorkerRuntime(self.fixture.catalog, frozenset({"default"}), config),
         )
         self.registry_patch.start()
-        self.config_patch.start()
 
     def time_worker(self, _rows: int) -> None:
         """Validate accepted job bindings, execute, and serialize native outputs."""
@@ -62,6 +58,5 @@ class ResultSuite:
 
     def teardown(self, _rows: int) -> None:
         """Restore worker globals after each measurement."""
-        self.config_patch.stop()
         self.registry_patch.stop()
         self.temporary.cleanup()

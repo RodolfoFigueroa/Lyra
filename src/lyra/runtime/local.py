@@ -158,7 +158,6 @@ class LocalRunner:
             else Path(".lyra/results.sqlite3")
         ).resolve()
         self.catalog = compile_live_catalog(plugins)
-        self._plugins = dict(self.catalog.implementations)
         self.providers = self.catalog.providers
         self._graph = self.catalog.graph
         self._context_factory = context_factory
@@ -273,7 +272,6 @@ class LocalRunner:
     ) -> RunResult:
         executor = GraphExecutor(
             self.catalog,
-            self._plugins,
             context_factory,
             self._resource_config,
             self._resource_overrides,

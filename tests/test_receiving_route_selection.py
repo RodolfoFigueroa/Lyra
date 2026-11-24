@@ -94,7 +94,7 @@ def test_receiving_route_selection_and_independent_uses(
             },
         },
     )
-    executor = GraphExecutor(runner.catalog, runner.catalog.implementations, Mock())
+    executor = GraphExecutor(runner.catalog, Mock())
     bound = executor.validate_plan(plan)
     # Inject demand at the existing native boundary; no persistent scheduler.
     frame = gpd.GeoDataFrame(

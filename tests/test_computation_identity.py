@@ -17,7 +17,6 @@ from lyra.contracts.plugins import (
     MetricManifest,
 )
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
-from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
 from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
@@ -108,7 +107,6 @@ def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) ->
     restored = PreparedExecution.model_validate_json(plan.model_dump_json())
     executor = GraphExecutor(
         current.catalog,
-        {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )
@@ -310,7 +308,6 @@ def test_deployment_revision_preserves_persistent_cache(tmp_path: Path) -> None:
         catalog = compile_live_catalog(plugins, build_revision=revision)
         executor = GraphExecutor(
             catalog,
-            dict(catalog.implementations),
             Mock(),
             store=SQLiteStore(tmp_path / "values.sqlite"),
         )
@@ -346,7 +343,6 @@ def test_origin_metadata_and_duplicate_order_preserve_cached_execution(
     restored = PreparedExecution.model_validate_json(plan.model_dump_json())
     executor = GraphExecutor(
         current.catalog,
-        dict(current.catalog.implementations),
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )
@@ -388,9 +384,7 @@ def test_direct_origin_changes_invalidate_only_dependent_cached_nodes(
     )
     # Even when an upstream node declares the same origin, the consumer's own
     # acquisition declaration participates independently in its computation.
-    executor = GraphExecutor(
-        current.catalog, dict(current.catalog.implementations), Mock()
-    )
+    executor = GraphExecutor(current.catalog, Mock())
     with pytest.raises(GraphExecutionError, match="Computation identity differs"):
         executor.execute(PreparedExecution.model_validate_json(plan.model_dump_json()))
     assert calls == []

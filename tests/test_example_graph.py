@@ -15,7 +15,6 @@ from lyra.contracts.errors import LocationProviderContractError
 from lyra.contracts.resources import IOConfig
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
-from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.context import RunContext
@@ -56,14 +55,13 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     factory = Mock(return_value=create_autospec(RunContext, instance=True))
     runner = GraphExecutor(
         LocalRunner.from_definitions({"example": plugin}).catalog,
-        {"example": BoundPlugin(plugin)},
         factory,
         resource_overrides={
             "census_db": census_override(plugin.resources["census_db"], database)
         },
     )
     fixed = runner.execute(
-        runner.plugins["example"].prepare_resolved_invocation(
+        runner.catalog.implementations["example"].prepare_resolved_invocation(
             "example_city_population", {"parameters": {}}
         )
     ).outputs
@@ -98,7 +96,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert records.crs == "EPSG:6372"
     database.reset_mock()
     acquired = runner.execute(
-        runner.plugins["example"].prepare_resolved_invocation(
+        runner.catalog.implementations["example"].prepare_resolved_invocation(
             "example_city_source", {"parameters": {}}
         )
     ).outputs
@@ -160,7 +158,6 @@ def test_smoke_outputs_keep_integer_dtype(
         inputs["parameters"] = {"value": 7}
     runner = GraphExecutor(
         LocalRunner.from_definitions({"example": plugin}).catalog,
-        {"example": BoundPlugin(plugin)},
         Mock(return_value=create_autospec(RunContext, instance=True)),
     )
     outputs = runner.execute(

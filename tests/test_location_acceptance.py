@@ -105,7 +105,6 @@ def test_geometry_survives_local_execution_and_queue(
 
     executor = GraphExecutor(
         runner.catalog,
-        runner.catalog.implementations,
         Mock(),
     )
     assert executor.execute(queued).outputs["result"]["id"].tolist() == ids

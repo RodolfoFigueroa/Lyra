@@ -56,7 +56,7 @@ def setup(
         )
         locations[name] = NativeLocationInput(frame, declaration.contract.reference)
     invocation = plugin.prepare_resolved_invocation("findings", locations)
-    executor = GraphExecutor(runner.catalog, runner.catalog.implementations, Mock())
+    executor = GraphExecutor(runner.catalog, Mock())
     return executor, invocation
 
 

@@ -14,6 +14,7 @@ from lyra.runtime.planning.node_declarations import (
     NodeDeclaration,
     compile_node_declarations,
 )
+from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
 from tests.node_declaration_helpers import (
@@ -38,7 +39,9 @@ def test_combined_live_catalog_preserves_records_bindings_and_direct_origins(
         declared, "resolve", create_autospec(declared.resolve, side_effect=forbidden)
     )
     raw = declarations()
-    compiled = compile_node_declarations({"providers": plugin(alias=declared)}, raw)
+    compiled = compile_node_declarations(
+        compile_provider_registry({"providers": plugin(alias=declared)}), raw
+    )
     consumer = compiled["consumer"]
     assert consumer.locations["tracts"].resource == "alias"
     assert isinstance(declared.schema, pa.DataFrameSchema)
@@ -88,7 +91,8 @@ def test_provider_and_operation_forms_derive_same_complete_schema(
         },
     )
     compiled = compile_node_declarations(
-        {"provider": plugin(binding=provider())}, [*raw, derived]
+        compile_provider_registry({"provider": plugin(binding=provider())}),
+        [*raw, derived],
     )
     assert compiled["derived"].locations["result"].scope.provider_id == provider_id
     assert (
@@ -129,7 +133,9 @@ def test_unknown_provider_or_target(*, target: bool) -> None:
         },
     )
     with pytest.raises(ValueError, match="Unknown provider"):
-        compile_node_declarations({"provider": plugin(binding=provider())}, [raw])
+        compile_node_declarations(
+            compile_provider_registry({"provider": plugin(binding=provider())}), [raw]
+        )
 
 
 def resource_operation(
@@ -171,7 +177,9 @@ def test_operation_restrictions(capability: str) -> None:
         origins=(CENSUS,) if capability == "origins" else (),
     )
     with pytest.raises((ValueError, TypeError)):
-        compile_node_declarations({"provider": plugin(binding=provider())}, [raw])
+        compile_node_declarations(
+            compile_provider_registry({"provider": plugin(binding=provider())}), [raw]
+        )
 
 
 @pytest.mark.parametrize("origins", [(), (CENSUS,), (ELEVATION, CENSUS, CENSUS)])
@@ -198,7 +206,7 @@ def test_metric_decorator_normalizes_own_origins(origins: tuple[Origin, ...]) ->
 def test_invalid_direct_origins() -> None:
     with pytest.raises(ValidationError):
         compile_node_declarations(
-            {},
+            compile_provider_registry({}),
             [
                 NodeDeclaration(
                     "invalid",
@@ -217,7 +225,10 @@ def test_metric_direct_query_remains_distinct_from_provider_origin() -> None:
         origins=(CENSUS,),
     )
     compiled = compile_node_declarations(
-        {"providers": plugin(binding=Tracts), "database": plugin(db=BaseIO)}, [raw]
+        compile_provider_registry(
+            {"providers": plugin(binding=Tracts), "database": plugin(db=BaseIO)}
+        ),
+        [raw],
     )["query"]
     assert compiled.origins == compiled.locations["tracts"].scope.origins
     assert compiled.origins == frozenset({CENSUS})
@@ -237,7 +248,9 @@ def test_unknown_or_nonoperation_dependency(operation_name: str) -> None:
     with pytest.raises(
         ValueError, match=r"Unknown dependency|Expected location operation"
     ):
-        compile_node_declarations({"providers": plugin(binding=Tracts)}, raw)
+        compile_node_declarations(
+            compile_provider_registry({"providers": plugin(binding=Tracts)}), raw
+        )
 
 
 def test_matching_names_supply_metric_location_bindings() -> None:
@@ -255,7 +268,9 @@ def test_matching_names_supply_metric_location_bindings() -> None:
             },
         )
     )
-    result = compile_node_declarations({"providers": plugin(binding=Tracts)}, raw)
+    result = compile_node_declarations(
+        compile_provider_registry({"providers": plugin(binding=Tracts)}), raw
+    )
     assert result["consumer"].locations["tracts"].scope.provider_id == Tracts.id
 
 
@@ -265,7 +280,10 @@ def test_provider_binding_can_be_routed() -> None:
         provider="counties"
     )
     compiled = compile_node_declarations(
-        {"providers": plugin(binding=Tracts, other=provider(id="counties"))}, raw
+        compile_provider_registry(
+            {"providers": plugin(binding=Tracts, other=provider(id="counties"))}
+        ),
+        raw,
     )
     binding = compiled["consumer"].declaration.inputs["table"].locations["tracts"]
     assert isinstance(binding, LocationDependency)
@@ -277,7 +295,7 @@ def test_mutated_provider_invocation_arguments_are_revalidated() -> None:
     dependency.parameters["unexpected"] = 1
     with pytest.raises(ValueError, match="invocation bindings"):
         compile_node_declarations(
-            {"providers": plugin(binding=Tracts)},
+            compile_provider_registry({"providers": plugin(binding=Tracts)}),
             [NodeDeclaration("source", source, inputs={"tracts": dependency})],
         )
 
@@ -306,5 +324,6 @@ def test_derived_location_input_cycles_fail_before_acquisition(*, nested: bool) 
     )
     with pytest.raises(ValueError, match="Location input cycle"):
         compile_node_declarations(
-            {"providers": plugin(tracts=Tracts)}, [*declarations()[:2], consumer]
+            compile_provider_registry({"providers": plugin(tracts=Tracts)}),
+            [*declarations()[:2], consumer],
         )

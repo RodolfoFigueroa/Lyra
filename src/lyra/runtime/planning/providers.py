@@ -1,12 +1,12 @@
 """Acquisition-free public provider lookup over captured declarations."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from pydantic import TypeAdapter
-
 from lyra.contracts.providers import ProviderDeclaration
+from lyra.runtime.planning.provider_registry import RegisteredProvider
+from lyra.sdk.plugin import PluginDefinition
 
 
 @dataclass(frozen=True)
@@ -23,23 +23,23 @@ class SelectedLocationProvider:
 
 
 def select_location_providers(
-    declarations: Mapping[str, Sequence[ProviderDeclaration]],
+    registrations: Mapping[str, RegisteredProvider],
+    definitions: Mapping[str, PluginDefinition],
 ) -> Mapping[str, SelectedLocationProvider]:
-    """Return unique registrations indexed by public provider ID.
+    """Associate each captured provider with its first registering distribution.
 
-    Raises:
-        ValueError: If two distinct registrations claim one public ID.
+    Returns:
+        Read-only discovery declarations indexed by provider ID.
     """
-    selected = {}
-    for distribution, registrations in declarations.items():
-        for declaration in registrations:
-            TypeAdapter(bool).validate_python(declaration.cache, strict=True)
-            identifier = declaration.contract.family.collection
-            existing = selected.get(identifier)
-            if existing is not None:
-                if existing.declaration != declaration:
-                    message = f"Conflicting provider ID {identifier!r}"
-                    raise ValueError(message)
-                continue
-            selected[identifier] = SelectedLocationProvider(distribution, declaration)
-    return MappingProxyType(selected)
+    owners: dict[str, str] = {}
+    for distribution, definition in definitions.items():
+        for key in definition.resources:
+            owners.setdefault(key, distribution)
+    return MappingProxyType(
+        {
+            name: SelectedLocationProvider(
+                owners[provider.resource], provider.declaration
+            )
+            for name, provider in registrations.items()
+        }
+    )

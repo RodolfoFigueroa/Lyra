@@ -163,12 +163,9 @@ def test_split_route_loading_and_execution(
     plugins = definitions(calls)
     acquisition = Mock()
     monkeypatch.setattr(Provider, "setup", acquisition)
-    installed, runtime = install_definitions(tmp_path, monkeypatch, plugins)
+    _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
     assert calls == []
     acquisition.assert_not_called()
-    assert set(worker.RUNNER_REGISTRY) == {"root"}
-    expected_plugins = set(plugins) - {"unrelated", "unused"}
-    assert expected_plugins <= set(worker.RUNNER_REGISTRY["root"].implementations)
     inputs = dict.fromkeys(
         ["left", "right"],
         selection("a", "b", provider=Blocks.id if native else Provider.id),
@@ -207,16 +204,12 @@ def test_split_route_loading_and_execution(
             ("alternate",),
             ("alternate", "finish"),
         )
-        next(
-            p.manifest for p in installed if p.distribution == "provider"
-        ).route_preferences = plugins["provider"].route_preferences
-    if change_preference:
         runtime.config = runtime.config.model_copy(
             update={"build_revision": "new-routing-build"}
         )
     calls.clear()
     acquisition.reset_mock()
-    worker.refresh_runner_registry("heavy", config=runtime.config)
+    worker.initialize_worker("heavy", config=runtime.config)
     assert calls == []
     acquisition.assert_not_called()
     job = native_job(monkeypatch)
@@ -285,7 +278,7 @@ def test_accepted_route_identity_across_worker_reload(
             failure = "bound_plan"
         else:
             current = worker.require_worker_config()
-            worker.refresh_runner_registry(
+            worker.initialize_worker(
                 "heavy",
                 config=current.model_copy(update={"build_revision": "replacement"}),
             )

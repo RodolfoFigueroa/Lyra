@@ -89,7 +89,7 @@ def test_application_registry_uses_captured_contracts() -> None:
     application = catalog(declarations)
     name, entry = next(iter(application.compiled.graph.nodes.items()))
     original = next(
-        node for node in declarations[0].manifest.nodes if node.name == name
+        node for node in declarations[0].definition.node_manifests if node.name == name
     )
     expected_schema = entry.node.request_schema.copy()
     original.request_schema.clear()

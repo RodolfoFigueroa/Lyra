@@ -1,6 +1,6 @@
-"""Worker registry entries, accepted jobs and retained native results."""
+"""Worker catalogs, accepted jobs and retained native results."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
@@ -16,7 +16,6 @@ from lyra.contracts.jobs import (
 from lyra.contracts.outputs import OutputMetadata
 from lyra.data.inspection import summarize_outputs
 from lyra.data.results import serialize_outputs
-from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.location_inputs import InputBindings
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.catalog import compile_live_catalog
@@ -29,32 +28,28 @@ from lyra.runtime.result_descriptions import (
 )
 from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk.storage_schema import describe
-from lyra.server import worker
 from lyra.server.job_store import JobObservation
+from lyra.server.registry import Catalog
 from test_support.canonical_execution import CanonicalWorkload
 from test_support.publication import publish_result
 from test_support.workloads import Workload, frame, installed, workload
 
 
-def canonical_worker_entry(work: CanonicalWorkload) -> worker.RunnerMetricEntry:
-    """Bind the accepted metric to the heavy queue with its captured catalog."""
-    catalog = work.executor.catalog
-    name = work.prepared.node
-    return worker.RunnerMetricEntry(
-        name,
-        "heavy",
-        catalog.graph.nodes[name].node,
-        catalog.manifests["bench"],
-        "bench",
-        catalog,
-        dict(work.executor.plugins),
-    )
+def canonical_worker_catalog(work: CanonicalWorkload) -> Catalog:
+    """Assign all metric roots in this benchmark to the heavy queue."""
+    compiled = replace(work.executor.catalog, build_revision="benchmark-build")
+    queues = {
+        name: "heavy"
+        for name, entry in compiled.graph.nodes.items()
+        if entry.node.kind == "metric"
+    }
+    return Catalog(compiled, queues)
 
 
 @dataclass
 class ResultWorkload:
     work: Workload
-    entry: worker.RunnerMetricEntry
+    catalog: Catalog
     native: Mock
     envelope: dict
     result: TableJobResult
@@ -65,28 +60,23 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     """Build an accepted job and publish its fixture output to the supplied store."""
     work = workload(rows)
     plugin = installed(work.plugin)[0]
-    contract = next(node for node in plugin.manifest.nodes if node.name == "root")
+    catalog = Catalog(
+        compile_live_catalog(
+            {plugin.distribution: work.plugin}, build_revision="benchmark-build"
+        ),
+        plugin.metric_queues,
+    )
+    contract = catalog.compiled.graph.nodes["root"].node
     if contract.kind != "metric":
         message = "Benchmark requires a metric"
         raise ValueError(message)
-    entry = worker.RunnerMetricEntry(
-        metric_name="root",
-        queue="default",
-        contract=contract,
-        plugin=plugin.manifest,
-        distribution=plugin.distribution,
-        catalog=compile_live_catalog(
-            {plugin.distribution: work.plugin}, build_revision="benchmark-build"
-        ),
-        implementations={plugin.distribution: BoundPlugin(work.plugin)},
-    )
     native = Mock(id="benchmark", origin="default")
-    plan = prepare_execution(entry.catalog, {"metric": "root"})
+    plan = prepare_execution(catalog.compiled, {"metric": "root"})
     provenance = JobRunProvenance(
         accepted=AcceptedJob(
             plan=WorkerRequest.from_plan(plan),
             catalog_fingerprint="fixture",
-            plugin=plugin.manifest.plugin,
+            plugin=catalog.compiled.manifests[plugin.distribution].plugin,
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
@@ -127,7 +117,7 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
         inspection=summarize_outputs({"root": frame(rows)}),
         provenance=provenance,
     )
-    return ResultWorkload(work, entry, native, envelope, result, observation)
+    return ResultWorkload(work, catalog, native, envelope, result, observation)
 
 
 def publish_fixture(

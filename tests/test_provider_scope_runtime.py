@@ -1,3 +1,4 @@
+from functools import partial
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -26,8 +27,11 @@ from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.server import worker
 from tests.provider_execution_helpers import provider_execution_definitions
 from tests.provider_schema_helpers import declaration, frame
+from tests.queue_helpers import accepted_envelope
+from tests.worker_graph_integration_helpers import install_definitions, native_job
 
 SCHEMA = LocationOutputSchema(declaration(), id_column="location_id")
 ORIGIN = Origin(id="external", revision="1", description="Initial description")
@@ -146,9 +150,7 @@ def test_scope_retained_by_preparation_execution_and_storage_round_trip(
         binding.contract.provider_scope == scope
         for binding in restored.revisions.bindings
     )
-    executor = GraphExecutor(
-        runner.catalog, dict(runner.catalog.implementations), Mock()
-    )
+    executor = GraphExecutor(runner.catalog, Mock())
     locations = executor.acquire_sources(restored)["places"]
     assert events == ["setup", "resolve", "close"]
     store = SQLiteStore(tmp_path / "values.sqlite")
@@ -297,15 +299,61 @@ def test_scope_changes_separate_equal_bare_ids_and_reject_stale_acceptance(
     current = LocalRunner.from_definitions(
         definitions(changed, events), result_store_path=tmp_path / "results.sqlite3"
     )
-    executor = GraphExecutor(
-        current.catalog, dict(current.catalog.implementations), Mock()
-    )
+    executor = GraphExecutor(current.catalog, Mock())
     with pytest.raises(GraphExecutionError):
         executor.execute(plan)
     assert events == []
     current.run(
         "root", inputs={"places": {"provider": changed.provider_id, "ids": ["a"]}}
     )
+    assert events == ["setup", "resolve", "source", "root", "close"]
+
+
+@pytest.mark.parametrize("entry", ["local", "worker"])
+def test_provider_schema_change_rejected_before_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str
+) -> None:
+    events: list[str] = []
+    plugins = definitions(ProviderScope(provider_id="records"), events)
+    if entry == "local":
+        runner = LocalRunner.from_definitions(plugins)
+        run = partial(runner.run, "root", inputs=inputs())
+    else:
+        _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
+        native = native_job(monkeypatch)
+        envelope = accepted_envelope(
+            job_id=native.id,
+            metric="root",
+            inputs=inputs(),
+            catalog=runtime.catalog.compiled,
+        )
+        run = partial(worker.run_metric_task, envelope.model_dump(mode="json"))
+    changed = declaration()
+    changed.columns["count"].nullable = False
+    monkeypatch.setattr(plugins["test"].resources["records"], "schema", changed)
+    with pytest.raises(
+        GraphExecutionError, match="Location provider implementation differs: 'records'"
+    ):
+        run()
+    assert events == []
+
+
+def test_compatible_override_runs_despite_unrelated_provider_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    plugins = definitions(ProviderScope(provider_id="records"), events)
+    registered = plugins["test"].resources["records"]
+    compatible = type("Compatible", (registered,), {})
+    unrelated = type("Unrelated", (registered,), {"id": "another"})
+    plugins["another"] = PluginDefinition(resources={"another": unrelated})
+    runner = LocalRunner.from_definitions(
+        plugins, resource_overrides={"records": compatible}
+    )
+    changed = declaration()
+    changed.columns["count"].nullable = False
+    monkeypatch.setattr(unrelated, "schema", changed)
+    assert runner.run("root", inputs=inputs()).tables["result"].value.tolist() == [1]
     assert events == ["setup", "resolve", "source", "root", "close"]
 
 
@@ -352,9 +400,7 @@ def test_cache_scope_and_direct_metric_origin_identity(tmp_path: Path) -> None:
     # Mapping hits bypass source acquisition even when the consumer origin changes.
     assert events.count("resolve:source") == 2
     assert events.count("operation") == 2
-    executor = GraphExecutor(
-        runner.catalog, dict(runner.catalog.implementations), Mock()
-    )
+    executor = GraphExecutor(runner.catalog, Mock())
     events.clear()
     with pytest.raises(GraphExecutionError):
         executor.execute(plan)
@@ -373,9 +419,7 @@ def test_equal_bare_ids_retain_distinct_provider_scopes() -> None:
         )
         for provider in ("source", "target")
     ]
-    executor = GraphExecutor(
-        runner.catalog, dict(runner.catalog.implementations), Mock()
-    )
+    executor = GraphExecutor(runner.catalog, Mock())
     resolved = [executor.acquire_sources(plan)["places"] for plan in plans]
     assert resolved[0].ids == resolved[1].ids
     assert resolved[0].contract != resolved[1].contract

@@ -13,7 +13,6 @@ from typing_extensions import override
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.resources import IOConfig
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
-from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
 from lyra.runtime.planning.bindings import bind_execution
@@ -137,9 +136,7 @@ def test_invalid_handler_is_not_published_and_dependencies_survive(
 
 def test_location_preparation_runs_before_persistent_hit(tmp_path: Path) -> None:
     local, cache, _, events, _, _ = location_graph(tmp_path)
-    runner = GraphExecutor(
-        local.catalog, local.catalog.implementations, Mock(), store=cache
-    )
+    runner = GraphExecutor(local.catalog, Mock(), store=cache)
     prepared = prepare_execution(
         runner.catalog,
         {"metric": "root", "inputs": SELECTION, "parameters": {"label": "a"}},
@@ -193,11 +190,12 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
     plugin = PluginDefinition(metrics=[source, root], resources={"support": Support})
     runner = GraphExecutor(
         LocalRunner.from_definitions({"p": plugin}).catalog,
-        {"p": BoundPlugin(plugin)},
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )
-    invocation = runner.plugins["p"].prepare_resolved_invocation("root", {})
+    invocation = runner.catalog.implementations["p"].prepare_resolved_invocation(
+        "root", {}
+    )
     runner.execute(invocation)
     assert acquisitions == ["setup"]
     acquisitions.clear()
@@ -228,7 +226,9 @@ def test_namespace_contract_versions_and_order(
         ).identity
 
     original = key()
-    definitions = {key: value.definition for key, value in runner.plugins.items()}
+    definitions = {
+        key: value.definition for key, value in runner.catalog.implementations.items()
+    }
     runner.catalog = compile_live_catalog(dict(reversed(definitions.items())))
     assert key() == original
     runner, *_ = setup_graph(tmp_path, description="Edited description")
@@ -252,12 +252,14 @@ def test_only_participating_versions_invalidate_seeded_root(
     runner.store = SQLiteStore(tmp_path / "values.sqlite")
 
     def register_provider(executor: GraphExecutor, name: str) -> None:
-        definitions = {key: value.definition for key, value in executor.plugins.items()}
+        definitions = {
+            key: value.definition
+            for key, value in executor.catalog.implementations.items()
+        }
         definitions["unrelated"] = PluginDefinition(
             resources={name: provider("unused")}
         )
         executor.catalog = compile_live_catalog(definitions)
-        executor.plugins = executor.catalog.implementations
 
     register_provider(runner, "locations")
     runner.execute(root)
@@ -277,7 +279,6 @@ def test_location_repeated_execution_preserves_reuse(tmp_path: Path) -> None:
     local, cache, _, events, _, _ = location_graph(tmp_path)
     runner = GraphExecutor(
         local.catalog,
-        local.catalog.implementations,
         Mock(),
         store=cache,
     )

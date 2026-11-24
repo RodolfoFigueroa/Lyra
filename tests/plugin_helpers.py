@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import tomllib
-from types import SimpleNamespace
-from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from typing import TYPE_CHECKING, Annotated
+
+import geopandas as gpd
+import pandas as pd
+import pandera.pandas as pa
+from pydantic import Field
 
 from lyra.contracts.config import InstalledPluginConfig, normalize_distribution_name
-from lyra.contracts.plugins import PluginManifest
+from lyra.contracts.plugins import MetricManifest, PluginManifest
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.loading import load_plugin_definition
-from lyra.sdk.plugin import NodeImplementation, PluginDefinition
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_resolution import Provider
 from tests.contract_helpers import PARAMETER_MODELS
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 MANIFEST_FILENAME = "lyra.plugin.json"
@@ -80,37 +86,62 @@ def fixture_definition(name: str) -> PluginDefinition:
         for item in raw.get("providers", [])
     ]
     manifest = PluginManifest.model_validate(raw)
-    definition = Mock(spec=PluginDefinition)
-    definition.declarations = tuple(
-        SimpleNamespace(name=node.name, inputs=dict(node.inputs))
-        for node in manifest.nodes
-    )
-    definition.node_manifests = manifest.nodes
-    definition.node_names = tuple(node.name for node in manifest.nodes)
-    definition.metric_names = tuple(
-        node.name for node in manifest.nodes if node.kind == "metric"
-    )
-    definition.location_operation_names = tuple(
-        node.name for node in manifest.nodes if node.kind == "location_operation"
-    )
-    definition.resources = {}
-    definition.providers = manifest.providers
-    definition.is_bound = True
-    definition.route_preferences = manifest.route_preferences
-    nodes = {
-        node.name: NodeImplementation(
-            function=lambda: None,
-            parameters=PARAMETER_MODELS.get(
-                json.dumps(node.parameters_schema, sort_keys=True)
-            ),
-            accepts_context=False,
-            manifest=node,
-            schemas={key: Mock() for key in node.outputs}
-            if node.kind == "metric"
-            else {},
+    handlers = []
+    for node in manifest.nodes:
+        if not isinstance(node, MetricManifest):
+            msg = "The test installation requires a metric declaration"
+            raise TypeError(msg)
+        handlers.append(_inspection_metric(node))
+    resources = {value.resource: Provider for value in manifest.providers}
+    if not resources and any(node.location_inputs for node in manifest.nodes):
+        resources["locations"] = Provider
+    return PluginDefinition(metrics=handlers, resources=resources)
+
+
+def _inspection_metric(node: MetricManifest) -> Callable:
+    """Declare a service-free metric with the fixture's named inputs and outputs."""
+
+    def handler(**_arguments: object) -> pd.DataFrame:
+        msg = "Inspection invoked a handler"
+        raise AssertionError(msg)
+
+    inputs: dict[str, Dependency | LocationDependency] = dict(node.inputs)
+    hints: dict[str, object] = dict.fromkeys(inputs, pd.DataFrame)
+    for name, location in node.location_inputs.items():
+        inputs[name] = LocationDependency(provider=location.contract.family.collection)
+        hints[name] = (
+            Annotated[gpd.GeoDataFrame, Field(description=location.description)]
+            if location.description
+            else gpd.GeoDataFrame
         )
-        for node in manifest.nodes
+    if node.parameters_schema is not None:
+        hints["parameters"] = PARAMETER_MODELS[
+            json.dumps(node.parameters_schema, sort_keys=True)
+        ]
+    handler.__annotations__ = hints
+    vars(handler)["__signature__"] = inspect.Signature(
+        [inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY) for name in hints]
+    )
+    outputs = {
+        key: pa.DataFrameSchema(
+            {
+                column.name: pa.Column(
+                    column.dtype,
+                    nullable=column.nullable,
+                    description=column.description,
+                    metadata={"unit": column.unit},
+                )
+                for column in output.columns
+            },
+            strict=True,
+        )
+        for key, output in node.outputs.items()
     }
-    definition.implementation.side_effect = nodes.__getitem__
-    definition.manifest.return_value = manifest
-    return definition
+    return metric(
+        name=node.name,
+        code_revision=node.code_revision,
+        description=node.description,
+        outputs=outputs,
+        inputs=inputs,
+        private=node.private,
+    )(handler)

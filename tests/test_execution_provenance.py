@@ -62,7 +62,7 @@ def test_current_run_cache_provenance(tmp_path: Path) -> None:
 
 def test_failure_retains_completed_selector() -> None:
     work = canonical_workload("routed", 2, 1)
-    plugin = work.executor.plugins["bench"]
+    plugin = work.executor.catalog.implementations["bench"]
     with (
         patch.object(type(plugin), "invoke", side_effect=ValueError("failed")),
         pytest.raises(GraphExecutionError) as error,
@@ -102,7 +102,7 @@ def test_shared_selector_is_observed_once() -> None:
 
 def test_empty_native_summary() -> None:
     work = canonical_workload("routed", 2, 1)
-    plugin = work.executor.plugins["bench"]
+    plugin = work.executor.catalog.implementations["bench"]
     work.executor.execute(work.prepared)
 
     with patch.object(
@@ -136,14 +136,13 @@ def test_rejected_root_replaces_previous_provenance() -> None:
 
 def test_source_metadata_is_captured_at_acceptance() -> None:
     work = canonical_workload("routed", 2, 1)
-    plugin = work.executor.plugins["bench"]
+    plugin = work.executor.catalog.implementations["bench"]
     provider = plugin.resources["source"]
     assert issubclass(provider, LocationProvider)
     provider.origins = (
         Origin(id="fixture", revision="2024", description="release-one"),
     )
     work.executor.catalog = compile_live_catalog({"bench": plugin.definition})
-    work.executor.plugins = work.executor.catalog.implementations
     prepared = prepare_execution(
         work.executor.catalog,
         {"metric": "one", "inputs": {"left": selection("0", "1")}},

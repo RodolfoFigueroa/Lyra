@@ -19,7 +19,7 @@ from shapely.geometry import Point
 from typing_extensions import override
 
 from lyra.api import AsyncLyraClient, DownloadError
-from lyra.contracts.accepted import ExecutionRequest, PreparedExecution
+from lyra.contracts.accepted import ExecutionRequest, PreparedExecution, WorkerRequest
 from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
 from lyra.contracts.origins import Origin
 from lyra.data.intervention_records import accepted_additions
@@ -215,7 +215,7 @@ def test_rejected_requests_never_enqueue_or_acquire(
 
 
 @pytest.mark.parametrize(
-    "change", ["revision", "origin", "schema", "membership", "implementation", "record"]
+    "change", ["revision", "origin", "schema", "membership", "record"]
 )
 def test_worker_rejects_incompatible_unused_targets_before_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
@@ -231,9 +231,7 @@ def test_worker_rejects_incompatible_unused_targets_before_execution(
     )
     envelope = runtime.jobs.enqueue.call_args.args[0]
     payload = json.loads(envelope.model_dump_json())
-    if change == "implementation":
-        worker.RUNNER_REGISTRY["root"].implementations.pop("survey")
-    elif change == "record":
+    if change == "record":
         payload["accepted"]["plan"]["request"]["interventions"][0]["add"][0][
             "geometry"
         ] = "POINT EMPTY"
@@ -283,6 +281,55 @@ def test_plan_requires_consistent_target_and_record_schema() -> None:
             values.append(values[0])
         with pytest.raises(ValidationError, match="pinned"):
             PreparedExecution.model_validate(payload)
+
+
+def test_worker_request_owns_target_declarations() -> None:
+    catalog = LocalRunner.from_definitions(definitions()).catalog
+    plan = prepare_execution(catalog, {"metric": "root", "interventions": [actions()]})
+    queued = WorkerRequest.from_plan(plan)
+    restored = WorkerRequest.model_validate_json(queued.model_dump_json())
+    assert restored.intervention_targets == plan.intervention_targets
+    plan.intervention_targets["trees"].resource = "changed"
+    assert queued.intervention_targets["trees"].resource == "survey_resource"
+
+
+@pytest.mark.parametrize("change", ["resource", "extra", "legacy", "legacy_plain"])
+def test_worker_checks_accepted_target_bindings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    plugins = definitions()
+    _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
+    runtime.jobs.enqueue = Mock()
+    changes = [] if change == "legacy_plain" else [actions()]
+    assert asyncio.run(
+        submit(runtime, "http", {"metric": "root", "interventions": changes})
+    )
+    envelope = runtime.jobs.enqueue.call_args.args[0]
+    wire = json.loads(envelope.model_dump_json())
+    queued = wire["accepted"]["plan"]
+    if change == "resource":
+        plugins["survey"] = PluginDefinition(resources={"replacement": Trees})
+        install_definitions(tmp_path, monkeypatch, plugins)
+    elif change == "extra":
+        queued["intervention_targets"]["extra"] = queued["intervention_targets"][
+            "trees"
+        ]
+    else:
+        del queued["intervention_targets"]
+        assert JobEnvelope.model_validate(wire).accepted.plan.metric == "root"
+    native = native_job(monkeypatch)
+    native.id = envelope.job_id
+    if change == "legacy_plain":
+        assert worker.run_metric_task(wire)["result_ref"]
+        return
+    store = Mock(side_effect=AssertionError("opened result store"))
+    monkeypatch.setattr(worker, "SQLiteStore", store)
+    with pytest.raises(
+        worker.BoundPlanError, match="extra" if change == "extra" else "trees"
+    ):
+        worker.run_metric_task(wire)
+    assert native.meta["failure"]["error"]["type"] == "bound_plan"
+    store.assert_not_called()
 
 
 @pytest.mark.parametrize("model", [ExecutionRequest, JobCreateRequest])

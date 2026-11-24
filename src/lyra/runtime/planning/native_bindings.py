@@ -80,15 +80,15 @@ def bind_self_contained(definition: PluginDefinition) -> PluginDefinition:
 
 def bind_native_definitions(
     definitions: Mapping[str, PluginDefinition],
+    registry: Mapping[str, provider_registry.RegisteredProvider] | None = None,
 ) -> Mapping[str, PluginDefinition]:
     """Compile all active provider requirements before acquisition or execution.
 
     Returns:
         Detached executable definitions sharing the combined provider catalog.
     """
-    if all(definition.is_bound for definition in definitions.values()):
-        return definitions
-    registry = provider_registry.compile_provider_registry(definitions)
+    if registry is None:
+        registry = provider_registry.compile_provider_registry(definitions)
     declarations = [
         node_declarations.NodeDeclaration(
             name=value.name,
@@ -104,7 +104,7 @@ def bind_native_definitions(
         for definition in definitions.values()
         for value in definition.declarations
     ]
-    compiled = node_declarations.compile_node_declarations(definitions, declarations)
+    compiled = node_declarations.compile_node_declarations(registry, declarations)
     return MappingProxyType(
         {
             owner: definition.bind(compiled, registry)

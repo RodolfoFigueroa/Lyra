@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from lyra.contracts.config import LyraConfig
+    from lyra.server.worker import WorkerRuntime
 
 
 def _metric(
@@ -80,10 +81,9 @@ def worker_module(tmp_path: Path) -> Iterator[ModuleType]:
         tmp_path,
     )
     worker = importlib.import_module("lyra.server.worker")
-    worker.refresh_runner_registry("heavy", config=config)
+    worker.initialize_worker("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "runner-temp")
     yield worker
-    worker.RUNNER_REGISTRY.clear()
     worker.set_runner_temp_base(None)
 
 
@@ -158,14 +158,14 @@ def _configure_runner_plugins(config: LyraConfig, path: Path) -> None:
 
 def _load_smoke_runner_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worker: ModuleType
-) -> dict[str, Any]:
+) -> WorkerRuntime:
     config = load_test_config(
         tmp_path, metric_queues=SMOKE_METRIC_QUEUES, plugins=[SMOKE_PLUGIN_DIR]
     )
     for name in ("smoke_plugin.metrics", "smoke_plugin.plugin", "smoke_plugin"):
         sys.modules.pop(name, None)
     monkeypatch.syspath_prepend(str(SMOKE_PLUGIN_DIR))
-    return worker.refresh_runner_registry("interactive", config=config)
+    return worker.initialize_worker("interactive", config=config)
 
 
 def test_runner_loads_only_configured_queue(
@@ -183,13 +183,13 @@ def test_runner_loads_only_configured_queue(
     monkeypatch.syspath_prepend(str(tmp_path))
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
-    entries = worker_module.refresh_runner_registry(
+    entries = worker_module.initialize_worker(
         "heavy",
         config=worker_module.require_worker_config(),
     )
 
-    assert list(entries) == ["heavy_metric"]
-    assert entries["heavy_metric"].queue == "heavy"
+    assert entries.queues == {"heavy"}
+    assert entries.catalog.metric_queues["heavy_metric"] == "heavy"
 
 
 def test_runner_rejects_broken_enabled_plugins_on_other_queues(
@@ -212,7 +212,7 @@ def test_runner_rejects_broken_enabled_plugins_on_other_queues(
     monkeypatch.syspath_prepend(str(tmp_path))
 
     with pytest.raises(RuntimeError, match="uninstalled_factory"):
-        worker_module.refresh_runner_registry(
+        worker_module.initialize_worker(
             "heavy", config=worker_module.require_worker_config()
         )
 
@@ -228,12 +228,12 @@ def test_runner_loads_editable_plugin_before_api_startup(
         plugin_config(source, routing={"heavy_metric": "heavy"})
     ]
     monkeypatch.syspath_prepend(str(source))
-    entries = worker_module.refresh_runner_registry(
+    entries = worker_module.initialize_worker(
         "heavy",
         config=worker_module.require_worker_config(),
     )
-    assert list(entries) == ["heavy_metric"]
-    assert entries["heavy_metric"].queue == "heavy"
+    assert entries.queues == {"heavy"}
+    assert entries.catalog.metric_queues["heavy_metric"] == "heavy"
     assert not (tmp_path / "plugins").exists()
 
 
@@ -241,7 +241,7 @@ def test_runner_loads_smoke_editable_fixture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worker_module: ModuleType
 ) -> None:
     entries = _load_smoke_runner_registry(tmp_path, monkeypatch, worker_module)
-    assert sorted(entries) == [
+    assert sorted(entries.catalog.metric_queues) == [
         "example_city_population",
         "example_city_source",
         "example_population_baseline",
@@ -274,7 +274,7 @@ def test_runner_uses_configured_worker_temp_dir(
     monkeypatch.syspath_prepend(str(tmp_path))
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
-    worker_module.refresh_runner_registry("heavy", config=config)
+    worker_module.initialize_worker("heavy", config=config)
     context = worker_module.build_run_context(
         "job-temp",
         node="heavy_metric",
@@ -298,7 +298,7 @@ def test_runner_rejects_raw_function_factory(
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
     with pytest.raises(RuntimeError, match="must declare no parameters"):
-        worker_module.refresh_runner_registry(
+        worker_module.initialize_worker(
             "heavy",
             config=worker_module.require_worker_config(),
         )
@@ -322,11 +322,12 @@ def test_runner_uses_live_description(
     monkeypatch.syspath_prepend(str(tmp_path))
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
-    entries = worker_module.refresh_runner_registry(
+    entries = worker_module.initialize_worker(
         "heavy", config=worker_module.require_worker_config()
     )
     assert (
-        entries["heavy_metric"].contract.description == live_metrics[0]["description"]
+        entries.catalog.compiled.graph.nodes["heavy_metric"].node.description
+        == live_metrics[0]["description"]
     )
 
 
@@ -336,11 +337,11 @@ def test_worker_encodes_named_outputs_without_request_identity(
     worker_module: ModuleType,
 ) -> None:
     entries = _load_smoke_runner_registry(tmp_path, monkeypatch, worker_module)
-    entry = entries["smoke_table_metric"]
+    node = entries.catalog.compiled.graph.nodes["smoke_table_metric"].node
     worker_module.set_runner_temp_base(tmp_path / "native-results")
     native = SimpleNamespace(
         id="native-result",
-        origin=entry.queue,
+        origin=entries.catalog.metric_queues[node.name],
         meta={},
         worker_name="test-worker",
         save_meta=lambda: None,
@@ -355,7 +356,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
     }
     envelope = accepted_envelope(
         job_id=native.id,
-        metric=entry.metric_name,
+        metric=node.name,
         inputs=inputs,
     )
     result = run_and_read(
@@ -368,5 +369,5 @@ def test_worker_encodes_named_outputs_without_request_identity(
         "job_id": native.id,
         "status": "succeeded",
         "outputs": {"smoke_table_metric": [{"value": 7}]},
-        "output_metadata": entry.contract.model_dump(mode="json")["outputs"],
+        "output_metadata": node.model_dump(mode="json")["outputs"],
     }

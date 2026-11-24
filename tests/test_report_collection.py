@@ -74,7 +74,7 @@ def test_routes_index_only_selected_operations_without_acquisition() -> None:
 
 def test_empty_attempt_indexes_bypassed_dependencies_and_releases_bindings() -> None:
     catalog, plan, _ = bound([])
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    executor = GraphExecutor(catalog, Mock())
     state = RunState()
     state.bound_root = executor.validate_plan(plan)
     state.report.index(state.bound_root)

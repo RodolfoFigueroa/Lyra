@@ -130,7 +130,7 @@ def test_executor_preflight_rejects_missing_parameter_use_before_acquisition() -
         next(key for key in prepared.parameter_uses if key != "root")
     )
     context = Mock(side_effect=AssertionError("handler context acquired"))
-    executor = GraphExecutor(catalog, catalog.implementations, context)
+    executor = GraphExecutor(catalog, context)
     with pytest.raises(ValueError, match="Missing normalized parameter use"):
         executor.validate_plan(prepared)
     context.assert_not_called()
@@ -142,7 +142,7 @@ def test_executor_rejects_changed_effective_binding() -> None:
         if "inputs.first" in key and values == {"year": 2020}:
             values["year"] = 1999
             break
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    executor = GraphExecutor(catalog, Mock())
     with pytest.raises(ValueError, match="bindings disagree"):
         executor.validate_plan(prepared)
 
@@ -167,7 +167,7 @@ def test_resolved_targets_retain_upstream_computation_identity() -> None:
         },
         bound_use=producer,
     )
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    executor = GraphExecutor(catalog, Mock())
     with patch.object(
         type(plugin),
         "invoke",

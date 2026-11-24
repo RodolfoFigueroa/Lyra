@@ -244,5 +244,4 @@ def test_typed_mixed_graph(
         assert isinstance(error.value.__cause__, DamagedDataError)
         assert calls == []
     finally:
-        worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)

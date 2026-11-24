@@ -49,6 +49,7 @@ from lyra.sdk.handler import (
     _operation_arguments,
 )
 from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.locations import LocationProvider
 from lyra.sdk.output_schema import OutputSchema, compile_output, validate_metric_output
 from lyra.sdk.parameters import build_parameter_schema
 from lyra.sdk.resources import (
@@ -414,6 +415,7 @@ class PluginDefinition:
             raise PluginDefinitionError(str(exc)) from exc
         self.resources = MappingProxyType(providers)
         self._declarations = MappingProxyType(declarations)
+        self._providers: tuple[ProviderDeclaration, ...] | None = None
         self._nodes: Mapping[str, NodeImplementation] | None = None
         self.route_preferences = tuple(
             tuple(_registered_definition(op, "location_operation").name for op in route)
@@ -525,6 +527,11 @@ class PluginDefinition:
                 storage=declaration.storage,
             )
         result: Self = copy(self)
+        result._providers = tuple(
+            providers[provider.id].declaration
+            for provider in self.resources.values()
+            if issubclass(provider, LocationProvider)
+        )
         result._nodes = MappingProxyType(implementations)
         return result
 
@@ -553,6 +560,8 @@ class PluginDefinition:
     @property
     def providers(self) -> tuple[ProviderDeclaration, ...]:
         """Provider metadata captured from declarations without resource acquisition."""
+        if self._providers is not None:
+            return tuple(provider.model_copy(deep=True) for provider in self._providers)
         return native_bindings.provider_declarations(self.resources)
 
     def implementation(self, name: str) -> NodeImplementation:

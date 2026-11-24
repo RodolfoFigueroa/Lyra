@@ -18,7 +18,7 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
     work = canonical_workload("routed", 2, 1)
     executor = work.executor
     executor.store = SQLiteStore(tmp_path / "values.sqlite")
-    plugin = executor.plugins["bench"]
+    plugin = executor.catalog.implementations["bench"]
     with (
         patch.object(type(plugin), "invoke", autospec=True) as metric,
         patch.object(type(plugin), "invoke_operation", autospec=True) as operation,
@@ -32,7 +32,6 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
         if revision:
             updated = canonical_workload("routed", 2, 1, revision=revision)
             executor.catalog = updated.executor.catalog
-            executor.plugins = updated.executor.plugins
         catalog = executor.catalog
         prepared = prepare_execution(
             catalog,
@@ -91,7 +90,7 @@ def test_warm_metric_does_not_hide_selector_failure(tmp_path: Path) -> None:
         work.executor.catalog,
         {"metric": "one", "inputs": {"left": selection("different")}},
     )
-    plugin = work.executor.plugins["bench"]
+    plugin = work.executor.catalog.implementations["bench"]
     with (
         patch.object(
             type(plugin), "invoke_operation", side_effect=ValueError("selector failed")
@@ -109,7 +108,7 @@ def test_warm_metric_does_not_hide_selector_failure(tmp_path: Path) -> None:
 def test_declared_identity_does_not_compare_acquired_contents(tmp_path: Path) -> None:
     work = canonical_workload("native", 2, 1)
     work.executor.store = SQLiteStore(tmp_path / "values.sqlite")
-    plugin = work.executor.plugins["bench"]
+    plugin = work.executor.catalog.implementations["bench"]
     provider = plugin.resources["locations"]
     with patch.object(type(plugin), "invoke", autospec=True) as metric:
         metric.side_effect = original_invoke

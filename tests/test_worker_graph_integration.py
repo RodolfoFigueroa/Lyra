@@ -13,17 +13,14 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from lyra.contracts.config import JobsConfig
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.catalog import compile_live_catalog
-from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, LocationDependency
-from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.plugin import metric
 from lyra.sdk.resources import Resource
 from lyra.server import job_store, job_submission, registry, worker
 from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError
@@ -31,7 +28,6 @@ from lyra.server.plugins import InstalledPlugin
 from lyra.server.routes.metrics import get_metric
 from test_support.canonical_execution import canonical_workload
 from test_support.location_resolution import Provider, selection
-from test_support.worker_workloads import canonical_worker_entry
 from tests.config_helpers import load_test_config
 from tests.provider_execution_helpers import provider_execution_definitions
 from tests.queue_helpers import (
@@ -111,13 +107,9 @@ def test_fixed_graph_routes_and_shares_context_services(
 
     database_adapter = Mock()
     resource = database_override(database_adapter)
-    plugins, runtime = install(
+    _, runtime = install(
         tmp_path, monkeypatch, [root, upstream, source], {"database": resource}
     )
-    assert set(worker.RUNNER_REGISTRY) == {"root"}
-    assert set(worker.RUNNER_REGISTRY["root"].implementations) == {
-        p.distribution for p in plugins
-    }
     assert "source" in runtime.catalog.get_loaded_metric_names()
     assert "answer" not in runtime.catalog.get_loaded_metric_names()
     native = native_job(monkeypatch)
@@ -148,9 +140,9 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert native.meta["progress"]["stage"] == "source"
     assert "source acquired" in caplog.text
     enqueue.assert_called_once()
-    worker.refresh_runner_registry("lightweight", config=runtime.config)
-    assert set(worker.RUNNER_REGISTRY) == {"source", "upstream"}
-    assert worker.RUNNER_REGISTRY["upstream"].queue == "lightweight"
+    worker.initialize_worker("lightweight", config=runtime.config)
+    with pytest.raises(worker.BoundPlanError, match="worker pool"):
+        worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
     enqueue.reset_mock()
     asyncio.run(
         job_submission.submit_job(
@@ -180,7 +172,7 @@ def test_source_discovery_submission_and_database_execution(
         return database.query_dataframe("SELECT value FROM source")
 
     _, runtime = install(tmp_path, monkeypatch, [source], {"database": resource})
-    worker.refresh_runner_registry("lightweight", config=runtime.config)
+    worker.initialize_worker("lightweight", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     assert asyncio.run(get_metric("source", runtime.catalog)).metric.name == "source"
     backend = InProcessLyraBackend(lambda: runtime)
@@ -579,7 +571,7 @@ def test_worker_jobs_share_persistent_cache(
             ("heavy", "root"),
         ]
     ):
-        worker.refresh_runner_registry(pool, config=runtime.config)
+        worker.initialize_worker(pool, config=runtime.config)
         native = native_job(monkeypatch, name)
         native.id = f"cached-job-{number}"
         result = run_and_read(
@@ -610,7 +602,7 @@ def test_repeated_submission_to_worker(
 
     _, runtime = install(tmp_path, monkeypatch, [root])
     runtime.config.result_store_path = tmp_path / "tables"
-    worker.refresh_runner_registry("heavy", config=runtime.config)
+    worker.initialize_worker("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     for _ in range(3):
@@ -664,7 +656,7 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
     handlers: list[Callable[..., object]] = [root, file_source]
     runtime = install(tmp_path, monkeypatch, handlers)[1]
-    worker.refresh_runner_registry("heavy", config=runtime.config)
+    worker.initialize_worker("heavy", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)
     enqueue = Mock()
@@ -684,32 +676,28 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     ] == {"answer": [{"value": 7}]}
 
 
-@pytest.mark.parametrize("change", [None, "contract", "missing", "failure"])
+@pytest.mark.parametrize("fails", [False, True])
 def test_serialized_worker_plan(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str | None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fails: bool
 ) -> None:
-
     calls = []
 
-    def root_metric(*, nullable: bool = False) -> "Callable":
-        @metric(
-            cache="full",
-            code_revision="1",
-            name="root",
-            description="Root",
-            outputs={"answer": VALUES.update_column("value", nullable=nullable)},
-        )
-        def root() -> pd.DataFrame:
-            calls.append("root")
-            if change == "failure":
-                raise RuntimeError
-            return pd.DataFrame({"value": [7]})
+    @metric(
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
+    )
+    def root() -> pd.DataFrame:
+        calls.append("root")
+        if fails:
+            raise RuntimeError
+        return pd.DataFrame({"value": [7]})
 
-        return root
-
-    _, runtime = install(tmp_path, monkeypatch, [root_metric()])
+    _, runtime = install(tmp_path, monkeypatch, [root])
     runtime.config.result_store_path = tmp_path / "cache"
-    worker.refresh_runner_registry("heavy", config=runtime.config)
+    worker.initialize_worker("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
@@ -721,38 +709,16 @@ def test_serialized_worker_plan(
         )
     )
     (envelope,) = enqueue.call_args.args
-    provenance = envelope.accepted
     payload = envelope.accepted.plan
-    assert payload == provenance.plan
-    assert envelope.accepted.plan.metric == provenance.plan.metric == "root"
+    assert payload.metric == "root"
     native = native_job(monkeypatch)
     native.args = (envelope.model_dump(mode="json"),)
-    if change == "contract":
-        entry = worker.RUNNER_REGISTRY["root"]
-        catalog = compile_live_catalog(
-            {entry.distribution: PluginDefinition(metrics=[root_metric(nullable=True)])}
-        )
-        prepare_execution(
-            catalog,
-            payload.request.submission_payload(),
-            normalized_uses=payload.parameter_uses,
-        )
-        worker.RUNNER_REGISTRY["root"] = replace(entry, catalog=catalog)
-    elif change == "missing":
-        worker.RUNNER_REGISTRY["root"].implementations.clear()
-    if change is not None:
-        with pytest.raises(
-            (ValueError, GraphExecutionError),
-            match="Implementation differs from live declaration: root"
-            if change == "contract"
-            else None,
-        ):
+    if fails:
+        with pytest.raises(GraphExecutionError):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert "failure" in native.meta
-        if change == "contract":
-            assert native.meta["failure"]["error"]["type"] == "bound_plan"
         assert native.args[0]["accepted"]["plan"] == payload.model_dump(mode="json")
-        assert calls == (["root"] if change == "failure" else [])
+        assert calls == ["root"]
         return
     first = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     second = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
@@ -769,16 +735,15 @@ def test_worker_normalized_route(
     work = canonical_workload("routed", 2, 2)
     expected = work.executor.execute(work.prepared).outputs
     config = load_test_config(tmp_path)
-    monkeypatch.setattr(worker, "require_worker_config", lambda: config)
-    entry = canonical_worker_entry(work)
-    monkeypatch.setitem(worker.RUNNER_REGISTRY, "two", entry)
-    native = native_job(monkeypatch, "two")
+    plugin = work.executor.catalog.implementations["bench"].definition
     installed = InstalledPlugin(
-        "bench",
-        entry.implementations["bench"].definition,
-        dict.fromkeys(entry.implementations["bench"].definition.metric_names, "heavy"),
+        "bench", plugin, dict.fromkeys(plugin.metric_names, "heavy")
     )
-    monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
+    monkeypatch.setattr(
+        "lyra.server.plugins.discover_installed_plugins", lambda _: [installed]
+    )
+    worker.initialize_worker("heavy", config=config)
+    native = native_job(monkeypatch, "two")
     jobs = Mock(spec=job_store.JobStore)
     asyncio.run(
         job_submission.submit_job(
@@ -814,8 +779,12 @@ def test_worker_normalized_route(
     native.args = (envelope.model_dump(mode="json"),)
     if changed:
         revised = canonical_workload("routed", 2, 2, revision="target")
-        worker.RUNNER_REGISTRY["two"] = canonical_worker_entry(revised)
-        with pytest.raises((ValueError, GraphExecutionError)):
+        installed = replace(
+            installed,
+            definition=revised.executor.catalog.implementations["bench"].definition,
+        )
+        worker.initialize_worker("heavy", config=config)
+        with pytest.raises(worker.BoundPlanError, match="provider scopes"):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert "failure" in native.meta
     else:
@@ -825,7 +794,7 @@ def test_worker_normalized_route(
         assert envelope.accepted.plan.request.inputs
 
 
-def test_executor_preflight_failure_replaces_worker_success(
+def test_wrong_queue_failure_replaces_worker_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = []
@@ -848,20 +817,15 @@ def test_executor_preflight_failure_replaces_worker_success(
     )
     worker.run_metric_task(payload)
     assert native.meta["execution"]["succeeded"]
-    worker.RUNNER_REGISTRY["root"].implementations.clear()
+    native.origin = "unassigned"
     acquire = Mock(side_effect=AssertionError("resources acquired"))
-    monkeypatch.setattr("lyra.runtime.execution.collect_resources", acquire)
-    with pytest.raises(GraphExecutionError, match="unavailable"):
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
+    with pytest.raises(worker.BoundPlanError, match="worker pool"):
         worker.run_metric_task(payload)
     acquire.assert_not_called()
     assert calls == ["root"]
     assert native.meta["failure"]["error"]["type"] == "bound_plan"
-    assert "unavailable" in native.meta["failure"]["error"]["message"]
-    assert native.meta["execution"] == {
-        "native_inputs": [],
-        "observations": [],
-        "succeeded": False,
-    }
+    assert "execution" not in native.meta
 
 
 def test_isolated_submission_worker_and_result_round_trip(
@@ -886,35 +850,15 @@ def test_isolated_submission_worker_and_result_round_trip(
     envelope = JobEnvelope.model_validate_json(
         jobs.enqueue.call_args.args[0].model_dump_json()
     )
-    accepted = envelope.accepted.plan
-    plan = prepare_execution(
-        runner.catalog,
-        accepted.request.submission_payload(),
-        normalized_uses=accepted.parameter_uses,
-    )
-    node = runner.catalog.graph.nodes[plan.node]
-    entry = worker.RunnerMetricEntry(
-        plan.node,
-        "default",
-        node.node,
-        runner.catalog.manifests[node.distribution],
-        node.distribution,
-        runner.catalog,
-        dict(runner.catalog.implementations),
-    )
-    monkeypatch.setattr(worker, "RUNNER_REGISTRY", {plan.node: entry})
+    config = load_test_config(tmp_path)
+    config.result_store_path = tmp_path
     monkeypatch.setattr(
         worker,
-        "require_worker_config",
-        lambda: SimpleNamespace(
-            jobs=JobsConfig(),
-            result_store_path=tmp_path,
-            resources={},
-            build_revision=None,
-        ),
+        "_WORKER_RUNTIME",
+        worker.WorkerRuntime(catalog, frozenset({"default"}), config),
     )
     native = Mock(id="native-job", origin="default", meta={})
-    result = worker.execute_job(envelope.model_dump(mode="json"), native)
+    result = worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
     outputs = read_retained(str(result["result_ref"])).tables
     assert outputs["result"].total.tolist() == [1]
     assert events == ["setup:target", "resolve:target", "metric", "close:target"]
@@ -967,12 +911,10 @@ def test_worker_rejects_changed_opaque_revision(
     native = native_job(monkeypatch)
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     install(tmp_path, monkeypatch, [declare(after)])
-    current = worker.require_worker_config()
-    monkeypatch.setattr(
-        worker,
-        "require_worker_config",
-        lambda: current.model_copy(update={"build_revision": "replacement"}),
+    config = worker.require_worker_config().model_copy(
+        update={"build_revision": "replacement"}
     )
+    worker.initialize_worker("heavy", config=config)
     with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
         worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
     calls.assert_not_called()

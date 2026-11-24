@@ -134,7 +134,7 @@ def installed(plugin: PluginDefinition) -> list[InstalledPlugin]:
 
 def catalog(plugins: list[InstalledPlugin]) -> Catalog:
     """Return a compiled catalog with installation lookup substituted."""
-    with patch("lyra.server.registry.load_installed_plugins", return_value=plugins):
+    with patch("lyra.server.plugins.discover_installed_plugins", return_value=plugins):
         return Catalog.load(
             PluginsConfig(default_queue="default", allowed_queues=["default"])
         )

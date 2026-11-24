@@ -193,7 +193,6 @@ def make_executor(
     local = LocalRunner.from_definitions(definitions)
     return GraphExecutor(
         local.catalog,
-        local.catalog.implementations,
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )
@@ -220,7 +219,7 @@ def seed_consumer(
             ),
         ),
         {"data": rows({"a"}, value)},
-        executor.plugins["metrics"].output_storage("comparison"),
+        executor.catalog.implementations["metrics"].output_storage("comparison"),
         location_inputs={
             Header(
                 value_key=keys["a"],

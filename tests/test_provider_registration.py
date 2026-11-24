@@ -158,9 +158,16 @@ def test_distinct_providers_and_repeated_shared_registration(tmp_path: Path) -> 
     }
     runner = LocalRunner.from_definitions(definitions)
     assert set(runner.providers) == {FakeProvider.id, Other.id}
-    assert set(_catalog(tmp_path, definitions).compiled.providers) == set(
-        runner.providers
-    )
+    for catalog in (runner.catalog, _catalog(tmp_path, definitions).compiled):
+        assert set(catalog.provider_registry) == {FakeProvider.id, Other.id}
+        assert {
+            owner: [p.id for p in manifest.providers]
+            for owner, manifest in catalog.manifests.items()
+        } == {
+            "first": [FakeProvider.id],
+            "shared": [FakeProvider.id],
+            "second": [Other.id],
+        }
 
 
 def test_competing_provider_registrations_rejected(tmp_path: Path) -> None:
@@ -206,7 +213,7 @@ def test_conflicting_named_resources_rejected(tmp_path: Path) -> None:
     }
     with pytest.raises(ResourceConfigurationError, match="Conflicting resource"):
         LocalRunner.from_definitions(definitions)
-    with pytest.raises(ValueError, match="Conflicting resource"):
+    with pytest.raises(ResourceConfigurationError, match="Conflicting resource"):
         _catalog(tmp_path, definitions)
 
 

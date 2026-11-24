@@ -64,14 +64,16 @@ def test_worker_jobs_reuse_internal_locations(
             {"root": "heavy", "consume": "heavy", "source": "heavy"},
         )
     ]
-    monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
+    monkeypatch.setattr(
+        "lyra.server.plugins.discover_installed_plugins", lambda _: installed
+    )
     monkeypatch.setattr(loading, "load_plugin_definition", lambda _: definition)
     config = load_test_config(tmp_path)
     config.result_store_path = tmp_path / "cache"
     worker.set_runner_temp_base(tmp_path / "scratch")
     try:
         for label in ("a", "b"):
-            worker.refresh_runner_registry("heavy", config=config)
+            worker.initialize_worker("heavy", config=config)
             native = native_job(monkeypatch)
             native.id = label
             inputs = SELECTION | {"parameters": {"label": label}}
@@ -86,7 +88,6 @@ def test_worker_jobs_reuse_internal_locations(
         assert database.rows["stored_results"]
         assert calls == ["make", "source", "a", "b"]
     finally:
-        worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
 
 

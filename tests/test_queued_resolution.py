@@ -19,7 +19,7 @@ from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
-from lyra.server import job_submission, registry, worker
+from lyra.server import job_submission, worker
 from lyra.server.plugins import InstalledPlugin
 from lyra.server.runtime import ApplicationRuntime
 from test_support.location_resolution import Provider, frame_features, selection
@@ -61,8 +61,8 @@ def test_worker_resolution_lifecycle(
     runtime = _install(tmp_path, monkeypatch, root)
     if failure == "configuration":
         monkeypatch.setattr(Provider, "secret_names", ("credential",))
-    entry = worker.RUNNER_REGISTRY["root"]
-    assert "provider" in entry.implementations
+    catalog = worker.require_worker_runtime().catalog.compiled
+    assert "provider" in catalog.implementations
     native = native_job(monkeypatch)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -90,7 +90,7 @@ def test_worker_resolution_lifecycle(
     assert submitted_input(envelope) == submitted_input(envelope) == inputs
     native.args = (envelope.model_dump(mode="json"),)
     runner = LocalRunner.from_definitions(
-        {name: binding.definition for name, binding in entry.implementations.items()}
+        {name: binding.definition for name, binding in catalog.implementations.items()}
     )
     try:
         if failure:
@@ -125,7 +125,6 @@ def test_worker_resolution_lifecycle(
                 inputs=inputs,
             ).tables["answer"].to_dict("records") == [{"value": 2}]
     finally:
-        worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
 
 
@@ -197,14 +196,15 @@ def _install(
         )
         for name, definition in definitions.items()
     ]
-    monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
-    monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
+    monkeypatch.setattr(
+        "lyra.server.plugins.discover_installed_plugins", lambda _: plugins
+    )
     monkeypatch.setattr(
         loading,
         "load_plugin_definition",
         lambda ref: definitions[ref.split(":")[0]],
     )
     config = load_test_config(tmp_path)
-    worker.refresh_runner_registry("heavy", config=config)
+    worker.initialize_worker("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     return make_runtime(config)

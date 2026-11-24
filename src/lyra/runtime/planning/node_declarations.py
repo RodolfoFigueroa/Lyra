@@ -23,14 +23,12 @@ from lyra.contracts.metric_scope import (
 )
 from lyra.contracts.origins import Origin
 from lyra.contracts.plugins import validate_metric_name
-from lyra.runtime.planning import provider_registry
 from lyra.sdk.handler import _handler_arguments, _handler_hints, _operation_arguments
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from lyra.runtime.planning.provider_registry import RegisteredProvider
-    from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.resources import resource_annotation
 
 
@@ -72,7 +70,7 @@ class CompiledNode:
 
 
 def compile_node_declarations(
-    definitions: Mapping[str, PluginDefinition],
+    providers: Mapping[str, RegisteredProvider],
     declarations: Sequence[NodeDeclaration],
 ) -> Mapping[str, CompiledNode]:
     """Resolve native nodes across the combined active provider catalog.
@@ -83,7 +81,6 @@ def compile_node_declarations(
     Raises:
         ValueError: If names, targets, bindings, capabilities or cycles are invalid.
     """
-    providers = provider_registry.compile_provider_registry(definitions)
     nodes: dict[str, CompiledNode] = {}
     for original in declarations:
         _validate_declaration(original)

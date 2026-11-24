@@ -2,7 +2,7 @@
 
 from collections import deque
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from itertools import pairwise
 from types import MappingProxyType
 
@@ -18,32 +18,26 @@ from lyra.runtime.planning.native_bindings import bind_native_definitions
 from lyra.runtime.planning.parameters import prepare_parameter_uses
 from lyra.runtime.planning.provider_registry import (
     RegisteredProvider,
-    compile_provider_registry,
+    compile_registrations,
 )
 from lyra.runtime.planning.providers import (
     SelectedLocationProvider,
     select_location_providers,
 )
 from lyra.runtime.planning.revisions import CatalogRevisions, compile_revisions
-from lyra.runtime.resources import collect_resources
 from lyra.sdk.plugin import PluginDefinition
-from lyra.sdk.resources import resource_metadata
+from lyra.sdk.resources import BaseIO, resource_metadata
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CompiledCatalog:
     """Captured contracts shared by application and local execution."""
 
-    build_revision: str | None = field(default=None, kw_only=True)
-    implementations: Mapping[str, BoundPlugin] = field(
-        default_factory=dict, kw_only=True
-    )
-    provider_registry: Mapping[str, RegisteredProvider] = field(
-        default_factory=dict, kw_only=True
-    )
-    dependency_routes: Mapping[tuple[str, str, str], AcceptedSource] = field(
-        default_factory=dict, kw_only=True
-    )
+    build_revision: str | None = None
+    resources: Mapping[str, type[BaseIO]]
+    implementations: Mapping[str, BoundPlugin]
+    provider_registry: Mapping[str, RegisteredProvider]
+    dependency_routes: Mapping[tuple[str, str, str], AcceptedSource]
     computation: CatalogComputation
     revisions: CatalogRevisions
     manifests: Mapping[str, PluginManifest]
@@ -67,13 +61,9 @@ def compile_live_catalog(
     Returns:
         Validated catalog with serializable descriptions and live bindings.
     """
-    definitions = bind_native_definitions(definitions)
+    resources, registry = compile_registrations(definitions)
+    definitions = bind_native_definitions(definitions, registry)
     implementations = {name: BoundPlugin(value) for name, value in definitions.items()}
-    providers = collect_resources(
-        {name: value.resources for name, value in implementations.items()}
-    )
-    for definition in definitions.values():
-        definition.validate_resources(providers)
     graph = build_graph(definitions)
     descriptions = {
         name: PluginManifest.model_construct(
@@ -89,42 +79,37 @@ def compile_live_catalog(
         )
         for name, definition in definitions.items()
     }
-    catalog = replace(
-        assemble_catalog(graph, descriptions),
+    selected = select_location_providers(registry, definitions)
+    edges = _canonical_edges(graph)
+    routes = _catalog_routes(graph, selected, edges, descriptions)
+    catalog = CompiledCatalog(
+        computation=compile_computation(graph, selected),
+        revisions=compile_revisions(graph, selected),
+        manifests=MappingProxyType(descriptions),
+        graph=graph,
+        providers=selected,
+        canonical_edges=edges,
+        routes=routes,
+        accepted_sources=_accepted_sources(graph, routes),
+        resources=resources,
         implementations=MappingProxyType(implementations),
-        provider_registry=compile_provider_registry(definitions),
+        provider_registry=registry,
+        dependency_routes=compile_dependency_routes(graph, routes),
         build_revision=build_revision,
     )
-    catalog = replace(
-        catalog, dependency_routes=compile_dependency_routes(graph, catalog.routes)
-    )
-    for edge in catalog.canonical_edges:
+    for edge in edges:
         prepare_parameter_uses(catalog, edge.operation, {})
     return catalog
 
 
-def assemble_catalog(
-    graph: PluginGraph, captured: Mapping[str, PluginManifest]
-) -> CompiledCatalog:
-    """Derive inspection, routing and identity views from the captured graph.
-
-    Returns:
-        Catalog retaining the supplied graph as its executable authority.
-
-    Raises:
-        ValueError: If a selector target lacks managed query capability.
-    """
-    selected = select_location_providers(
-        {key: value.providers for key, value in captured.items()}
-    )
-    for entry in graph.nodes.values():
-        node = entry.node
-        if node.kind == "location_operation" and node.has_target_selector:
-            target = selected.get(str(node.target_provider))
-            if target is None or not target.declaration.query_capable:
-                message = f"Operation {node.name!r} requires managed query capability"
-                raise ValueError(message)
-    edges = _canonical_edges(graph)
+def _catalog_routes(
+    graph: PluginGraph,
+    selected: Mapping[str, SelectedLocationProvider],
+    edges: tuple["CanonicalEdge", ...],
+    captured: Mapping[str, PluginManifest],
+) -> Mapping[
+    tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
+]:
     contracts = [
         contract.reference
         for entry in graph.nodes.values()
@@ -138,7 +123,7 @@ def assemble_catalog(
         if entry.node.kind == "location_operation"
     )
     contracts.extend(p.declaration.contract.reference for p in selected.values())
-    routes = compile_routes(
+    return compile_routes(
         edges,
         contracts,
         (
@@ -146,18 +131,6 @@ def assemble_catalog(
             for manifest in captured.values()
             for route in manifest.route_preferences
         ),
-    )
-    accepted = _accepted_sources(graph, routes)
-    revisions = compile_revisions(graph, selected)
-    return CompiledCatalog(
-        compile_computation(graph, selected),
-        revisions,
-        MappingProxyType(captured),
-        graph,
-        selected,
-        edges,
-        routes,
-        accepted,
     )
 
 

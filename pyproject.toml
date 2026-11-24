@@ -124,7 +124,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-usefixtures = ["no_external_services", "installed_plugin_metadata", "executor_sqlite_boundary"]
+usefixtures = ["isolate_worker_runtime", "no_external_services", "installed_plugin_metadata", "executor_sqlite_boundary"]
 testpaths = ["tests"]
 pythonpath = [".", "examples/lyra-plugin", "examples/city-plugin"]
 

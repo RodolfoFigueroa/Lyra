@@ -195,9 +195,7 @@ def run_chain(
         "inputs": {"seeds": {"provider": "seeds", "ids": ["a", "seed", "empty"]}},
     }
     with SQLiteStore(tmp_path / "chain") as store:
-        executor = GraphExecutor(
-            catalog, catalog.implementations, Mock(), config, store=store
-        )
+        executor = GraphExecutor(catalog, Mock(), config, store=store)
         plan = prepare_execution(catalog, request, native_interventions=changes)
         if outside:
             with pytest.raises(GraphExecutionError, match="original candidates"):

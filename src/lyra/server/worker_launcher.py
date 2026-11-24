@@ -16,7 +16,7 @@ with command_imports(__name__):
     from lyra.server.config import ensure_runtime_directories, load_config
     from lyra.server.db.redis import create_sync_client
     from lyra.server.logging_config import configure_logging
-    from lyra.server.worker import refresh_runner_registry
+    from lyra.server.worker import initialize_worker
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -78,7 +78,7 @@ def launch_worker(
     configure_logging(config)
     connection = create_sync_client(config.redis)
     try:
-        refresh_runner_registry(worker_name, config=config)
+        initialize_worker(worker_name, config=config)
         worker = config.get_worker(worker_name)
         pool = WorkerPool(
             worker.queues,

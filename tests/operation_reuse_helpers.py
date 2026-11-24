@@ -132,7 +132,7 @@ def configured_workload(
         resources={"source": Source, "target": Target},
     )
     runner = LocalRunner.from_definitions({"test": definition})
-    executor = GraphExecutor(runner.catalog, runner.catalog.implementations, Mock())
+    executor = GraphExecutor(runner.catalog, Mock())
     executor.retain_result = retain_result
     executor.store = SQLiteStore(tmp_path / "values.sqlite")
     executor.provider_records = ProviderRecords(executor.store)

@@ -141,7 +141,6 @@ def test_accepted_route_defaults_and_cache_survive_handler_mutation(
     accepting = False
     executor = GraphExecutor(
         runner.catalog,
-        runner.catalog.implementations,
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )

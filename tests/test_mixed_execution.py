@@ -16,7 +16,6 @@ from lyra.contracts.errors import LocationAcquisitionError
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
-from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.provider_registry import capture_provider
@@ -50,7 +49,6 @@ pytestmark = pytest.mark.usefixtures("worker_cleanup")
 @pytest.fixture
 def worker_cleanup() -> Iterator[None]:
     yield
-    worker.RUNNER_REGISTRY.clear()
     worker.set_runner_temp_base(None)
 
 
@@ -175,7 +173,6 @@ def test_nested_ownership_table_conversion_and_reuse(
         definitions,
         result_store_path=tmp_path / "worker-cache" if persistent else None,
     )
-    assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert "construct" not in runtime.catalog.get_loaded_metric_names()
     assert set(
         runtime.catalog.compiled.graph.nodes["root"].node.request_schema["properties"]
@@ -207,7 +204,7 @@ def test_nested_ownership_table_conversion_and_reuse(
                     ).tables,
                 )
             else:
-                worker.refresh_runner_registry("heavy", config=runtime.config)
+                worker.initialize_worker("heavy", config=runtime.config)
                 native = native_job(monkeypatch)
                 asyncio.run(
                     job_submission.submit_job(
@@ -472,13 +469,12 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
     )
     executor = GraphExecutor(
         LocalRunner.from_definitions({"mixed": plugin}).catalog,
-        {"mixed": BoundPlugin(plugin)},
         lambda node: Mock(spec=RunContext, node=node),
     )
     for _ in range(2):
         calls.clear()
         executor.execute(
-            executor.plugins["mixed"].prepare_resolved_invocation(
+            executor.catalog.implementations["mixed"].prepare_resolved_invocation(
                 "root", {"source": sample_source()}
             )
         )
@@ -487,7 +483,7 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         )
     with pytest.raises(GraphExecutionError, match="roots must be metrics"):
         executor.execute(
-            executor.plugins["mixed"].prepare_resolved_invocation(
+            executor.catalog.implementations["mixed"].prepare_resolved_invocation(
                 "make", {"source": sample_source(), "parameters": {}}
             )
         )
@@ -557,7 +553,6 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
     )
     executor = GraphExecutor(
         LocalRunner.from_definitions({"mixed": plugin}).catalog,
-        {"mixed": BoundPlugin(plugin)},
         Mock(),
     )
     for _ in range(2):
@@ -568,16 +563,16 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
         if broken:
             with pytest.raises(GraphExecutionError) as error:
                 executor.execute(
-                    executor.plugins["mixed"].prepare_resolved_invocation(
-                        "root", {"source": sample_source()}
-                    )
+                    executor.catalog.implementations[
+                        "mixed"
+                    ].prepare_resolved_invocation("root", {"source": sample_source()})
                 )
             assert error.value.node == "consume"
             assert error.value.path == ("root", "consume")
             assert error.value.receiving_input == "inputs.second"
         else:
             executor.execute(
-                executor.plugins["mixed"].prepare_resolved_invocation(
+                executor.catalog.implementations["mixed"].prepare_resolved_invocation(
                     "root", {"source": sample_source()}
                 )
             )

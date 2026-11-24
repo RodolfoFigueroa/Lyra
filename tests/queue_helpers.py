@@ -1,7 +1,6 @@
 """Accept real bound plans for worker tests with in-process registries."""
 
 from collections.abc import Callable, Mapping
-from dataclasses import replace
 from datetime import UTC, datetime
 
 from lyra.contracts.accepted import WorkerRequest
@@ -23,11 +22,7 @@ def accepted_envelope(
 ) -> JobEnvelope:
     """Capture a real request against supplied or installed worker contracts."""
     if catalog is None:
-        entry = worker.RUNNER_REGISTRY[metric]
-        catalog = entry.catalog
-        catalog = replace(
-            catalog, build_revision=worker.require_worker_config().build_revision
-        )
+        catalog = worker.require_worker_runtime().catalog.compiled
     plan = prepare_execution(
         catalog,
         {

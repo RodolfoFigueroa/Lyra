@@ -711,7 +711,10 @@ def test_local_repeated_run_reuses_result(tmp_path: Path) -> None:
 def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -> None:
     work = canonical_workload(routed, 2, inputs)
     runner = LocalRunner.from_definitions(
-        {name: binding.definition for name, binding in work.executor.plugins.items()},
+        {
+            name: binding.definition
+            for name, binding in work.executor.catalog.implementations.items()
+        },
         result_store_path=tmp_path / "results.sqlite3",
     )
     request = {
@@ -782,7 +785,7 @@ def test_required_local_edition() -> None:
 
 def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
     work = canonical_workload("native", 1, 1)
-    plugin = work.executor.plugins["bench"]
+    plugin = work.executor.catalog.implementations["bench"]
     provider = plugin.resources["locations"]
     assert issubclass(provider, LocationProvider)
     monkeypatch.setattr(

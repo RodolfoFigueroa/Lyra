@@ -77,7 +77,7 @@ def test_capture_preserves_empty_ownership_and_detaches_declarations(
             "inputs": {"places": {"provider": "records", "ids": ids}},
         },
     )
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    executor = GraphExecutor(catalog, Mock())
     root = executor.validate_plan(plan)
     report = ReportCollection()
     report.capture(root, catalog, plan)

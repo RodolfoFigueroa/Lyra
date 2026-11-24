@@ -31,9 +31,7 @@ def test_matching_and_explicit_routes_have_equivalent_effective_bindings() -> No
         catalog = compile_live_catalog(definitions(binding=binding))
         plan = prepare_execution(catalog, request())
         routes.append(plan.dependency_routes)
-        root = GraphExecutor(catalog, catalog.implementations, Mock()).validate_plan(
-            plan
-        )
+        root = GraphExecutor(catalog, Mock()).validate_plan(plan)
         roots.append(root)
         left, right = root.dependencies["left"], root.dependencies["right"]
         assert left.identity != right.identity
@@ -129,11 +127,11 @@ def test_live_route_changes_invalidate_only_selected_computations(
     changed = prepare_execution(current, request())
     invalid = change not in {"description", "unused", "alternate"}
     assert (changed.computation_identity != restored.computation_identity) == invalid
-    executor = GraphExecutor(current, current.implementations, Mock())
+    executor = GraphExecutor(current, Mock())
     if invalid:
-        # This boundary must fail before even collecting resources or reading cache.
+        # This boundary must fail before acquiring resources or reading cache.
         acquire = Mock(side_effect=AssertionError("acquisition"))
-        monkeypatch.setattr(executor, "_collect_resources", acquire)
+        monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
         executor.store = Mock(side_effect=AssertionError("cache lookup"))
         with pytest.raises(
             GraphExecutionError, match=r"identity differs|routes differ"
@@ -167,8 +165,8 @@ def test_serialized_route_acceptance_cannot_change_silently(
     else:
         del restored.parameter_uses[route_key(key, 0)]
     acquire = Mock(side_effect=AssertionError("acquisition"))
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
-    monkeypatch.setattr(executor, "_collect_resources", acquire)
+    executor = GraphExecutor(catalog, Mock())
+    monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
     with pytest.raises(
         GraphExecutionError, match=r"routes differ|identity differs|Missing normalized"
     ):
@@ -196,9 +194,7 @@ def test_normalized_route_factories_survive_transport_and_ownership() -> None:
         catalog, restored.request.model_dump(), normalized_uses=restored.parameter_uses
     )
     assert normalized == plan
-    root = GraphExecutor(catalog, catalog.implementations, Mock()).validate_plan(
-        restored
-    )
+    root = GraphExecutor(catalog, Mock()).validate_plan(restored)
     left = root.dependencies["left"].locations["places"].upstream
     right = root.dependencies["right"].locations["places"].upstream
     assert left is not None
@@ -296,7 +292,7 @@ def test_independent_receiving_uses_may_order_operations_differently() -> None:
             },
         },
     )
-    bound = GraphExecutor(catalog, catalog.implementations, Mock()).validate_plan(plan)
+    bound = GraphExecutor(catalog, Mock()).validate_plan(plan)
     assert bound.locations["left"].provider.collection == "b"
     assert bound.locations["right"].provider.collection == "a"
     assert plan.dependency_routes[
@@ -364,7 +360,7 @@ def test_routes_below_repeated_producer_uses_have_independent_defaults() -> None
     catalog = compile_live_catalog(plugins)
     plan = prepare_execution(catalog, request() | {"metric": "outer", "parameters": {}})
     accepting = False
-    bound = GraphExecutor(catalog, catalog.implementations, Mock()).validate_plan(plan)
+    bound = GraphExecutor(catalog, Mock()).validate_plan(plan)
     left = bound.dependencies["left"].dependencies["data"].locations["places"].upstream
     right = (
         bound.dependencies["right"].dependencies["data"].locations["places"].upstream

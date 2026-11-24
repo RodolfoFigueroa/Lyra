@@ -160,8 +160,6 @@ def test_worker_graph_to_public_consumers(
         return {"parcels": data, "summary": plain}
 
     _plugins, runtime = install(tmp_path, monkeypatch, [root, upstream, branch, source])
-    assert set(worker.RUNNER_REGISTRY) == {"root"}
-    assert len(worker.RUNNER_REGISTRY["root"].implementations) == 4
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     payload = {}

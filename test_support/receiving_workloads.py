@@ -126,6 +126,4 @@ def receiving_workload(rows: int, *, nested: bool) -> CanonicalWorkload:
             "parameters": {"stride": 2},
         },
     )
-    return CanonicalWorkload(
-        GraphExecutor(runner.catalog, runner.catalog.implementations, Mock()), plan
-    )
+    return CanonicalWorkload(GraphExecutor(runner.catalog, Mock()), plan)

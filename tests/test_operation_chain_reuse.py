@@ -151,7 +151,6 @@ def chain(
     )
     executor = GraphExecutor(
         runner.catalog,
-        runner.catalog.implementations,
         Mock(),
         store=SQLiteStore(tmp_path / "values.sqlite"),
     )

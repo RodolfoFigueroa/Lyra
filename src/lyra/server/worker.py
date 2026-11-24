@@ -2,7 +2,6 @@
 
 import logging
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,47 +27,29 @@ from lyra.contracts.jobs import (
     JobEnvelope,
     JobProgress,
 )
-from lyra.contracts.plugins import NodeManifest, PluginManifest
 from lyra.contracts.types import JsonObject
 from lyra.runtime.execution import (
     GraphExecutionError,
     GraphExecutor,
     PlanValidationError,
 )
-from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
-from lyra.runtime.planning.graph import PluginGraph
+from lyra.runtime.planning.computation import executable_contract
 from lyra.runtime.planning.preparation import prepare_execution
-from lyra.runtime.planning.providers import SelectedLocationProvider
 from lyra.runtime.provider_records import ProviderRecords
 from lyra.runtime.report_collection import ReportCollection
 from lyra.runtime.sqlite_store import SQLiteStore
-from lyra.server.plugins import load_installed_plugins
+from lyra.server.registry import Catalog
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class RunnerMetricEntry:
-    """Bundle a runner metric's queue, output contract, and callable."""
+class WorkerRuntime:
+    """One pool's catalog, queue assignments and execution settings."""
 
-    metric_name: str
-    queue: str
-    contract: NodeManifest
-    plugin: PluginManifest
-    distribution: str
-    catalog: CompiledCatalog
-    implementations: dict[str, BoundPlugin]
-
-    @property
-    def graph(self) -> PluginGraph:
-        """The worker's captured graph."""
-        return self.catalog.graph
-
-    @property
-    def providers(self) -> Mapping[str, SelectedLocationProvider]:
-        """The worker's captured provider."""
-        return self.catalog.providers
+    catalog: Catalog
+    queues: frozenset[str]
+    config: LyraConfig
 
 
 @dataclass
@@ -156,7 +137,7 @@ class WorkerRunContext:
         self.progress.flush_progress()
 
 
-RUNNER_REGISTRY: dict[str, RunnerMetricEntry] = {}
+_WORKER_RUNTIME: WorkerRuntime | None = None
 _RUNNER_TEMP_BASE: Path | None = None
 
 
@@ -167,71 +148,33 @@ def set_runner_temp_base(path: Path | None) -> None:
     _RUNNER_TEMP_BASE = path
 
 
-def load_runner_metric_entries(
-    worker_name: str,
-    *,
-    config: LyraConfig,
-) -> dict[str, RunnerMetricEntry]:
-    """Load executable metric entries assigned to one worker pool.
+def initialize_worker(worker_name: str, *, config: LyraConfig) -> WorkerRuntime:
+    """Load all enabled plugins and bind a worker to its configured queues.
 
     Returns:
-        A mapping from metric name to its validated runner contract and the
-        transitive implementations required by its graph.
+        The process runtime for subsequent jobs.
     """
-    queues = set(config.get_worker(worker_name).queues)
-    plugins = load_installed_plugins(config.plugins)
-    catalog = compile_live_catalog(
-        {p.distribution: p.definition for p in plugins},
-        build_revision=config.build_revision,
-    )
-    graph = catalog.graph
-    selected = {
-        metric.name: (plugin, metric, plugin.metric_queues[metric.name])
-        for plugin in plugins
-        for metric in catalog.manifests[plugin.distribution].nodes
-        if metric.kind == "metric" and plugin.metric_queues[metric.name] in queues
-    }
-    # Keep canonical implementations and their dependencies available for live planning.
-    graph.dependency_closure(
-        [*selected, *(edge.operation for edge in catalog.canonical_edges)]
-    )
-    implementations = dict(catalog.implementations)
-    return {
-        name: RunnerMetricEntry(
-            metric_name=name,
-            contract=metric,
-            plugin=catalog.manifests[plugin.distribution],
-            distribution=plugin.distribution,
-            queue=queue,
-            catalog=catalog,
-            implementations=implementations,
-        )
-        for name, (plugin, metric, queue) in selected.items()
-    }
+    global _WORKER_RUNTIME  # ruff:ignore[global-statement]
+
+    config = config.model_copy(deep=True)
+    queues = frozenset(config.get_worker(worker_name).queues)
+    catalog = Catalog.load(config.plugins, build_revision=config.build_revision)
+    runtime = WorkerRuntime(catalog, queues, config)
+    set_runner_temp_base(config.worker_temp_dir(worker_name))
+    _WORKER_RUNTIME = runtime
+    return runtime
 
 
-def refresh_runner_registry(
-    worker_name: str,
-    *,
-    config: LyraConfig,
-) -> dict[str, RunnerMetricEntry]:
-    """Replace the process runner registry for one configured worker pool.
+def require_worker_runtime() -> WorkerRuntime:
+    """Return the runtime initialized for this worker process.
 
-    Returns:
-        A copy of the newly loaded runner registry.
+    Raises:
+        RuntimeError: If worker startup has not completed.
     """
-    global _RUNNER_TEMP_BASE  # ruff:ignore[global-statement]
-
-    _WORKER_CONFIG.config = config.model_copy(deep=True)
-    registry = load_runner_metric_entries(worker_name, config=config)
-    RUNNER_REGISTRY.clear()
-    RUNNER_REGISTRY.update(registry)
-    _RUNNER_TEMP_BASE = config.worker_temp_dir(worker_name)
-    logger.info(
-        "Loaded %d runner metric(s).",
-        len(RUNNER_REGISTRY),
-    )
-    return dict(RUNNER_REGISTRY)
+    if _WORKER_RUNTIME is None:
+        message = "Worker configuration has not been initialized."
+        raise RuntimeError(message)
+    return _WORKER_RUNTIME
 
 
 def _runner_temp_base() -> Path:
@@ -388,30 +331,16 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
     if job.job_id != native.id:
         message = "Accepted job identity differs from worker job"
         raise BoundPlanError(message)
-    if job.accepted.plan.build_revision != require_worker_config().build_revision:
+    runtime = require_worker_runtime()
+    if job.accepted.plan.build_revision != runtime.catalog.compiled.build_revision:
         message = "deployment_changed: resubmit against the current deployment"
         raise DeploymentChangedError(message)
-    return _execute_bound_job(job.accepted.plan, native)
-
-
-@dataclass
-class _WorkerConfiguration:
-    config: LyraConfig | None = None
-
-
-_WORKER_CONFIG = _WorkerConfiguration()
+    return _execute_bound_job(job.accepted.plan, native, runtime)
 
 
 def require_worker_config() -> LyraConfig:
-    """Return configuration bound during worker startup.
-
-    Raises:
-        RuntimeError: If worker startup has not bound configuration.
-    """
-    if _WORKER_CONFIG.config is None:
-        message = "Worker configuration has not been initialized."
-        raise RuntimeError(message)
-    return _WORKER_CONFIG.config
+    """Return configuration bound during worker startup."""
+    return require_worker_runtime().config
 
 
 class DeploymentChangedError(ValueError):
@@ -422,7 +351,9 @@ class BoundPlanError(ValueError):
     """The worker cannot honor an accepted computation binding."""
 
 
-def _execute_bound_job(plan: WorkerRequest, native: Job) -> JsonObject:
+def _execute_bound_job(
+    plan: WorkerRequest, native: Job, runtime: WorkerRuntime
+) -> JsonObject:
     """Prepare normalized values against the compatible live worker catalog.
 
     Returns:
@@ -432,18 +363,28 @@ def _execute_bound_job(plan: WorkerRequest, native: Job) -> JsonObject:
         BoundPlanError: If this installation cannot honor the accepted computation.
         RuntimeError: If execution did not publish a terminal result description.
     """
-    entry = RUNNER_REGISTRY.get(plan.metric)
-    if entry is None or entry.queue != native.origin:
+    queue = runtime.catalog.metric_queues.get(plan.metric)
+    if queue not in runtime.queues or queue != native.origin:
         message = "Accepted metric is unavailable in this worker pool"
         raise BoundPlanError(message)
     try:
         live = prepare_execution(
-            entry.catalog,
+            runtime.catalog.compiled,
             plan.request.submission_payload(),
             normalized_uses=plan.parameter_uses,
         )
     except ValueError as exc:
         raise BoundPlanError(str(exc)) from exc
+    for name in sorted(plan.intervention_targets.keys() | live.intervention_targets):
+        pinned = plan.intervention_targets.get(name)
+        current = live.intervention_targets.get(name)
+        if (
+            pinned is None
+            or current is None
+            or executable_contract(pinned) != executable_contract(current)
+        ):
+            msg = f"Intervention target {name!r} differs from its pinned declaration"
+            raise BoundPlanError(msg)
     if live.request.interventions != plan.request.interventions:
         msg = "Intervention differs from its pinned declaration"
         raise BoundPlanError(msg)
@@ -451,13 +392,12 @@ def _execute_bound_job(plan: WorkerRequest, native: Job) -> JsonObject:
         msg = "Required provider scopes differ from acceptance"
         raise BoundPlanError(msg)
     report = ReportCollection()
-    progress = WorkerProgress(native.id, require_worker_config().jobs)
-    with SQLiteStore(require_worker_config().result_store_path) as store:
+    progress = WorkerProgress(native.id, runtime.config.jobs)
+    with SQLiteStore(runtime.config.result_store_path) as store:
         executor = GraphExecutor(
-            entry.catalog,
-            entry.implementations,
+            runtime.catalog.compiled,
             lambda node: build_run_context(native.id, node=node, progress=progress),
-            require_worker_config().resources,
+            runtime.config.resources,
             provider_records=ProviderRecords(store),
             retain_result=True,
         )

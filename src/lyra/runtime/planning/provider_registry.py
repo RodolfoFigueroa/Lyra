@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from lyra.sdk.plugin import PluginDefinition
+    from lyra.sdk.resources import BaseIO
 
 
 @dataclass(frozen=True)
@@ -94,9 +95,20 @@ def compile_provider_registry(
 
     Returns:
         Read-only lookup with metadata detached from caller-owned containers.
+    """
+    return compile_registrations(definitions)[1]
+
+
+def compile_registrations(
+    definitions: Mapping[str, PluginDefinition],
+) -> tuple[Mapping[str, type[BaseIO[Any]]], Mapping[str, RegisteredProvider]]:
+    """Capture resource classes and provider contracts for one active catalog.
+
+    Returns:
+        Read-only indexes by resource key and public provider ID.
 
     Raises:
-        PluginDefinitionError: If a provider declaration is invalid or ambiguous.
+        PluginDefinitionError: If distinct registrations claim one provider ID.
     """
     resources = collect_resources(
         {name: definition.resources for name, definition in definitions.items()}
@@ -117,7 +129,7 @@ def compile_provider_registry(
             )
             raise PluginDefinitionError(msg)
         result[scope.provider_id] = captured
-    return MappingProxyType(result)
+    return MappingProxyType(resources), MappingProxyType(result)
 
 
 def capture_provider(

@@ -133,7 +133,7 @@ def setup_graph(
         {"p": plugin}, result_store_path=tmp_path / "results.sqlite3"
     )
     cache = SQLiteStore(tmp_path / "values.sqlite")
-    executor = GraphExecutor(runner.catalog, runner.catalog.implementations, Mock())
+    executor = GraphExecutor(runner.catalog, Mock())
     prepared = prepare_execution(
         executor.catalog,
         {
@@ -150,7 +150,7 @@ def setup_graph(
         source_values = resolver.resolve(
             {"source": LocationSelection(provider=Source.id, ids=list(ids))}
         )
-    invocation = executor.plugins["p"].prepare_resolved_invocation(
+    invocation = executor.catalog.implementations["p"].prepare_resolved_invocation(
         "make", source_values
     )
     invocation = replace(

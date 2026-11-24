@@ -35,7 +35,7 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
             }
         ),
     )
-    executor = GraphExecutor(catalog, plugins, Mock())
+    executor = GraphExecutor(catalog, Mock())
     executor.execute(owner)
     assert [name for name, _, _ in seen] == [
         "inner",
@@ -89,7 +89,7 @@ def test_invalid_operation_result_prevents_consumer_preparation(
         ),
     )
     with pytest.raises(GraphExecutionError, match="inner") as error:
-        GraphExecutor(catalog, plugins, Mock()).execute(owner)
+        GraphExecutor(catalog, Mock()).execute(owner)
     assert error.value.node == "inner"
     assert error.value.path == ("root", "middle", "outer", "inner")
     assert (
@@ -111,7 +111,7 @@ def test_invalid_operation_parameters_fail_before_evaluation() -> None:
     owner = replace(owner, parameters=Producer().model_copy(update={"year": "bad"}))
 
     with pytest.raises(GraphExecutionError, match="year"):
-        GraphExecutor(catalog, plugins, Mock()).execute(owner)
+        GraphExecutor(catalog, Mock()).execute(owner)
     assert seen == []
 
 

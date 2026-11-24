@@ -99,7 +99,6 @@ def test_downstream_hit_keeps_target_details(
     store = SQLiteStore(tmp_path / "values.sqlite")
     executor = GraphExecutor(
         runner.catalog,
-        runner.catalog.implementations,
         Mock(),
         store=store,
         provider_records=ProviderRecords(store),
@@ -159,7 +158,7 @@ def test_shared_operation_and_finalized_data_are_complete_and_detached() -> None
             "inputs": {"source": {"provider": "sources", "ids": ["a", "b"]}},
         },
     )
-    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    executor = GraphExecutor(catalog, Mock())
     result = executor.execute(plan)
     state = result.report_state
     assert state.nodes is not None
