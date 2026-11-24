@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+from itertools import starmap
 from pathlib import Path
 from typing import Annotated
 from unittest.mock import Mock
@@ -188,14 +189,7 @@ def _install(
         "metric": PluginDefinition(metrics=[root], resources={"locations": Provider}),
         "provider": PluginDefinition(resources={"locations": Provider}),
     }
-    plugins = [
-        InstalledPlugin(
-            name,
-            definition,
-            dict.fromkeys(definition.metric_names, "heavy"),
-        )
-        for name, definition in definitions.items()
-    ]
+    plugins = list(starmap(InstalledPlugin, definitions.items()))
     monkeypatch.setattr(
         "lyra.server.plugins.discover_installed_plugins", lambda _: plugins
     )
@@ -205,6 +199,6 @@ def _install(
         lambda ref: definitions[ref.split(":")[0]],
     )
     config = load_test_config(tmp_path)
-    worker.initialize_worker("heavy", config=config)
+    worker.initialize_worker(config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     return make_runtime(config)

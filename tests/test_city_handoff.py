@@ -169,10 +169,10 @@ def city_server(
         )
         config.result_store_path = tmp_path / "results.sqlite3"
         config.result_store_path.touch()
-        config.workers["interactive"].temp_dir = tmp_path / "scratch"
+        config.worker.temp_dir = tmp_path / "scratch"
         workspace.setattr(worker, "_WORKER_RUNTIME", None)
         workspace.setattr(worker, "_RUNNER_TEMP_BASE", None)
-        worker.initialize_worker("interactive", config=config)
+        worker.initialize_worker(config=config)
         dummy_redis_clients[0].ttl.return_value = 60
         app = main.create_app(config, credentials=api_credentials())
         client = ManagedTestClient(app)

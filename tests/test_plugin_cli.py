@@ -281,7 +281,7 @@ def test_project_entry_point_is_required(
 def test_deployment_uses_shared_image_configuration_and_dependencies() -> None:
     root = Path(__file__).parents[1] / "examples/lyra-deployment"
     compose = safe_load((root / "compose.yml").read_text())
-    services = [compose["services"][name] for name in ("api", "interactive", "batch")]
+    services = [compose["services"][name] for name in ("api", "worker")]
     assert len({service["image"] for service in services}) == 1
     assert all(service["build"] == services[0]["build"] for service in services)
     assert all(service["volumes"] == services[0]["volumes"] for service in services)

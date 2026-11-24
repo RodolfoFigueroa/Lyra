@@ -616,7 +616,7 @@ def generate_cli_reference(generated: Path) -> None:
         ),
         (
             "Use `lyra-plugin` for authoring, `lyra-admin` for server inspection, and "
-            "the worker launcher to start a configured pool."
+            "the worker launcher to start processes on the deployment queue."
         ),
         "",
         (

@@ -114,7 +114,7 @@ def test_invalid_persisted_state_is_rejected(change: str) -> None:
 
 @pytest.mark.parametrize("explicit", [False, True])
 def test_http_adapter_captures_effective_values(*, explicit: bool) -> None:
-    catalog = Catalog(parameter_catalog(), {"root": "default"})
+    catalog = Catalog(parameter_catalog())
     jobs = Mock()
     data: dict = {"metric": "root", "inputs": {}}
     if explicit:
@@ -148,7 +148,7 @@ def test_submission_rejects_nested_union_default_that_changes_type_on_replay() -
         pytest.fail(f"Submission invoked the handler with {parameters!r}")
 
     compiled = compile_live_catalog({"fixture": PluginDefinition(metrics=[root])})
-    catalog = Catalog(compiled, {"root": "default"})
+    catalog = Catalog(compiled)
     jobs = Mock()
     # The factory constructs IntChoice, but its JSON object matches FloatChoice first.
     with pytest.raises(MetricPayloadValidationError) as error:

@@ -112,11 +112,7 @@ def _catalog(tmp_path: Path, definitions: dict[str, PluginDefinition]) -> Catalo
             _manifest(definition, name).model_dump_json()
         )
         installed.append(plugin_config(directory))
-    return Catalog.load(
-        PluginsConfig(
-            installed=installed, default_queue="default", allowed_queues=["default"]
-        )
-    )
+    return Catalog.load(PluginsConfig(installed=installed))
 
 
 def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> None:
@@ -236,11 +232,7 @@ def test_disabled_provider_does_not_compete(tmp_path: Path) -> None:
         entry = plugin_config(directory)
         entry.enabled = name == "active"
         installed.append(entry)
-    catalog = Catalog.load(
-        PluginsConfig(
-            installed=installed, default_queue="default", allowed_queues=["default"]
-        )
-    )
+    catalog = Catalog.load(PluginsConfig(installed=installed))
     assert catalog.compiled.providers[FakeProvider.id].distribution == "active"
     assert catalog.get_loaded_metric_names() == []
 

@@ -14,7 +14,7 @@ Open questions: None.
 
 # Run and compare performance benchmarks
 
-Use [Airspeed Velocity (ASV)](https://asv.readthedocs.io/en/stable/) to measure Lyra’s execution time, peak memory, and output sizes. This guide helps you run benchmarks locally, compare commits, and inspect continuous integration (CI) reports.
+Use [Airspeed Velocity (ASV)](https://asv.readthedocs.io/en/stable/) to measure Lyra’s execution time, peak memory, and output sizes. This guide helps you run benchmarks locally, compare commits, and inspect CI reports.
 
 ## Prepare your environment
 

@@ -111,12 +111,11 @@ def test_operation_only_catalog_and_metric_boundaries(
 ) -> None:
     plugin = definition()
     binding = BoundPlugin(plugin)
-    installed = InstalledPlugin("places", plugin, {})
+    installed = InstalledPlugin("places", plugin)
     monkeypatch.setattr(
         "lyra.server.plugins.discover_installed_plugins", lambda _: [installed]
     )
     catalog = registry.Catalog.load(Mock())
-    assert catalog.metric_queues == {}
     assert catalog.discovery.search() == []
     assert (
         catalog.compiled.graph.nodes["select_places"].node.kind == "location_operation"
@@ -143,7 +142,7 @@ def test_operation_only_catalog_and_metric_boundaries(
             )
 
 
-def test_worker_and_installed_routing_exclude_operations(
+def test_installed_catalog_compiles_metrics_and_operations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     @metric(
@@ -162,13 +161,14 @@ def test_worker_and_installed_routing_exclude_operations(
     )
     config = Mock()
     config.installed = [
-        Mock(distribution="places", enabled=True, routing={}, manifest_path=None)
+        Mock(
+            distribution="places",
+            enabled=True,
+        )
     ]
-    config.default_queue = "default"
-    config.allowed_queues = ["default"]
     monkeypatch.setattr(
         plugins, "load_installed_plugin_definition", lambda *_args, **_kwargs: plugin
     )
-    compiled, queues = plugins.load_installed_plugins(config)
-    assert queues == {"counts": "default"}
+    compiled = plugins.load_installed_plugins(config)
+    assert compiled.graph.nodes["counts"].node.kind == "metric"
     assert compiled.graph.nodes["select_places"].node.kind == "location_operation"

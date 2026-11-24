@@ -176,7 +176,6 @@ def test_worker_graph_to_public_consumers(
             )
         )
         (envelope,) = enqueue.call_args.args
-        assert enqueue.call_args.kwargs["queue"] == "heavy"
         native.args = (envelope.model_dump(mode="json"),)
         payload = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         payload["provenance"] = JobRunProvenance(

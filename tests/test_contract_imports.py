@@ -204,7 +204,7 @@ from lyra.contracts.accepted import PreparedExecution, WorkerRequest
 from lyra.contracts.jobs import AcceptedJob, JobCreateRequest, JobEnvelope, JobProgress
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations, InvocationObservation
-from lyra.contracts.admin import PluginRoutingResponse
+from lyra.contracts.admin import InstalledPluginResponse
 from lyra.contracts.data_types import DataTypesResponse
 from lyra.contracts.inspection import json_size, trim_inspection
 from lyra.contracts.metrics import normalize_metric_search_tokens
@@ -237,8 +237,7 @@ for mutate in ("revision", "parameters"):
         raise AssertionError(mutate)
 values = [
     JobCreateRequest(metric="score", inputs={}),
-    PluginRoutingResponse(metric_queues={}, allowed_queues=["default"],
-                          default_queue="default"),
+    InstalledPluginResponse(distribution="plugin", enabled=True),
     DataTypesResponse(location_selection_schema={"type": "object"}),
     LivenessResponse(status="ok", api_version="1"),
 ]

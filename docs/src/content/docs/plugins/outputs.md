@@ -184,7 +184,7 @@ Use the same Pandera declaration for validation and SQLite storage; you don’t 
 | Signed 64-bit integer | `INTEGER`, from `-2**63` to `2**63 - 1`; pandas nullable `Int64` |
 | Finite 64-bit float | `REAL`; pandas nullable `Float64` |
 | Boolean | SQLite stores `0` or `1` as `INTEGER`. Lyra reads the column with pandas’ nullable `boolean` dtype. |
-| Geometry | Well-known binary (WKB) in a `BLOB`; Shapely/GeoPandas with the declared CRS |
+| Geometry | WKB in a `BLOB`; Shapely/GeoPandas with the declared CRS |
 
 Lyra stores outputs in [SQLite strict tables](https://www.sqlite.org/stricttables.html), which require SQLite 3.37 or newer. If your declaration allows missing values, SQLite stores them as `NULL`.
 

@@ -1,12 +1,10 @@
-"""Captured application catalog and queue routing."""
+"""Captured application catalog."""
 
 import hashlib
 import json
-from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from operator import itemgetter
-from types import MappingProxyType
 
 from lyra.contracts.config import PluginsConfig
 from lyra.runtime.planning.catalog import CompiledCatalog
@@ -16,28 +14,9 @@ from lyra.server.plugins import load_installed_plugins
 
 @dataclass(frozen=True)
 class Catalog:
-    """Authoritative compiled contracts with application-owned queue routing."""
+    """Authoritative compiled contracts."""
 
     compiled: CompiledCatalog
-    metric_queues: Mapping[str, str]
-
-    def __post_init__(self) -> None:
-        """Capture routing for exactly the compiled metric nodes.
-
-        Raises:
-            ValueError: If routing does not match the compiled metric nodes.
-        """
-        expected = {
-            name
-            for name, entry in self.compiled.graph.nodes.items()
-            if entry.node.kind == "metric"
-        }
-        if set(self.metric_queues) != expected:
-            message = "Queue assignments must cover exactly the compiled metric nodes."
-            raise ValueError(message)
-        object.__setattr__(
-            self, "metric_queues", MappingProxyType(dict(self.metric_queues))
-        )
 
     @cached_property
     def discovery(self) -> Discovery:
@@ -46,14 +25,11 @@ class Catalog:
 
     @cached_property
     def operational_fingerprint(self) -> str:
-        """Identify captured manifests, distributions, and metric queue assignments."""
+        """Identify captured manifests and distributions."""
         payload = []
         for distribution, manifest in sorted(self.compiled.manifests.items()):
             data = manifest.model_dump(mode="json")
             data["distribution"] = distribution
-            for node in data["nodes"]:
-                if node["kind"] == "metric":
-                    node["queue"] = self.metric_queues[node["name"]]
             data["nodes"] = sorted(data["nodes"], key=itemgetter("name"))
             payload.append(data)
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -66,12 +42,9 @@ class Catalog:
         """Load and compile enabled live plugin definitions.
 
         Returns:
-            Captured contracts and validated routing for this application.
+            Captured contracts for this application.
         """
-        compiled, queues = load_installed_plugins(
-            plugins, build_revision=build_revision
-        )
-        return cls(compiled, queues)
+        return cls(load_installed_plugins(plugins, build_revision=build_revision))
 
     def get_loaded_metric_names(self) -> list[str]:
         """Return sorted public concrete metric names."""
@@ -80,9 +53,3 @@ class Catalog:
             for name, entry in self.compiled.graph.nodes.items()
             if entry.node.is_public_metric
         )
-
-    def get_loaded_metric_queues(self) -> dict[str, str]:
-        """Return public concrete metric queue assignments in name order."""
-        return {
-            name: self.metric_queues[name] for name in self.get_loaded_metric_names()
-        }

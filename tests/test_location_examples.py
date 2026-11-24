@@ -198,9 +198,7 @@ def test_examples_through_submission_and_fake_worker(
     example: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     plugin = example.create_plugin()
-    installed = [
-        InstalledPlugin("example", plugin, dict.fromkeys(plugin.metric_names, "heavy"))
-    ]
+    installed = [InstalledPlugin("example", plugin)]
     monkeypatch.setattr(
         "lyra.server.plugins.discover_installed_plugins", lambda _: installed
     )
@@ -208,7 +206,7 @@ def test_examples_through_submission_and_fake_worker(
     config = load_test_config(tmp_path)
     config.result_store_path = tmp_path / "cache"
     runtime = make_runtime(config)
-    worker.initialize_worker("heavy", config=config)
+    worker.initialize_worker(config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -216,7 +214,7 @@ def test_examples_through_submission_and_fake_worker(
         {"example": plugin}, result_store_path=(tmp_path / "local") / "results.sqlite3"
     )
     for sample in json.loads((EXAMPLE / "requests.json").read_text()):
-        native = native_job(monkeypatch, sample["metric"])
+        native = native_job(monkeypatch)
         asyncio.run(
             job_submission.submit_job(
                 JobCreateRequest.model_validate(sample),

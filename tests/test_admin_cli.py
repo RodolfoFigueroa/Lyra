@@ -19,16 +19,6 @@ if TYPE_CHECKING:
     from lyra.contracts.types import JsonValue
 
 
-REFRESH: dict[str, JsonValue] = {
-    "refreshed": True,
-    "error": None,
-    "catalog_changed": False,
-    "previous_catalog_fingerprint": "same",
-    "catalog_fingerprint": "same",
-    "assigned_metric_queues": [],
-    "removed_metric_queues": [],
-    "workers_restart_recommended": True,
-}
 REPO: dict[str, JsonValue] = {
     "distribution": "lyra-smoke-plugin",
     "version": "0.1.0",
@@ -37,7 +27,6 @@ REPO: dict[str, JsonValue] = {
 WORKER: dict[str, JsonValue] = {
     "name": "worker",
     "hostname": "host",
-    "queues": ["batch"],
     "state": "idle",
     "stale": True,
     "current_job": None,
@@ -73,9 +62,8 @@ CASES = (
             "api_version": "1.0.0",
             "redis": {"status": "ok"},
             "metric_count": 1,
-            "allowed_queues": ["batch"],
-            "default_queue": "batch",
-            "configured_worker_count": 1,
+            "queue": "batch",
+            "worker_concurrency": 1,
             "result_retention_seconds": 600,
             "catalog_fingerprint": "catalog",
         },
@@ -87,18 +75,17 @@ CASES = (
         {
             "api_host": "127.0.0.1",
             "api_port": 5219,
-            "allowed_queues": ["batch"],
-            "default_queue": "batch",
-            "workers": [],
+            "queue": "batch",
+            "worker": {"concurrency": 1, "temp_dir": "/lyra_data/cache/jobs"},
             "result_retention_seconds": 600,
         },
     ),
     Case(
-        "jobs list --limit 7 --status running --queue batch",
+        "jobs list --limit 7 --status running",
         "GET",
         "admin/jobs",
         {"jobs": []},
-        params={"limit": 7, "status": "running", "queue": "batch", "offset": 0},
+        params={"limit": 7, "status": "running", "offset": 0},
     ),
     Case(
         f"jobs get {TEST_JOB_ID}",
@@ -123,7 +110,7 @@ CASES = (
         "workers list",
         "GET",
         "admin/workers",
-        {"workers": [WORKER], "pools": []},
+        {"workers": [WORKER]},
     ),
     Case(
         "workers get worker",
@@ -132,24 +119,10 @@ CASES = (
         WORKER,
     ),
     Case(
-        "queues list",
+        "queue show",
         "GET",
-        "admin/queues",
-        {
-            "allowed_queues": ["batch"],
-            "default_queue": "batch",
-            "queues": [
-                {
-                    "name": "batch",
-                    "is_default": True,
-                    "assigned_metric_count": 1,
-                    "configured_workers": ["worker"],
-                    "observed_workers": [],
-                    "pending_depth": None,
-                    "pending_depth_unknown": True,
-                }
-            ],
-        },
+        "admin/queue",
+        {"name": "batch", "observed_workers": [], "pending_depth": 3},
     ),
     Case("plugins list", "GET", "admin/plugins", {"plugins": [REPO]}),
     Case(
@@ -161,17 +134,6 @@ CASES = (
             "metric_names": ["metric"],
             "catalog_fingerprint": "catalog",
             "installed_plugins": [],
-            "metric_queues": {"metric": "batch"},
-        },
-    ),
-    Case(
-        "routing list",
-        "GET",
-        "admin/plugin-routing",
-        {
-            "metric_queues": {"metric": "batch"},
-            "allowed_queues": ["batch"],
-            "default_queue": "batch",
         },
     ),
 )
@@ -252,7 +214,6 @@ def test_commands_use_real_client_and_render_response(
         ["jobs", "list", "--status", "invalid"],
         ["plugins", "update", "repo"],
         ["workers", "restart", "--restart-timeout", "-1", "--yes"],
-        ["routing", "set", "", "batch", "--yes"],
     ],
 )
 def test_invalid_arguments_make_no_request(
@@ -394,34 +355,30 @@ def test_human_output_preserves_jobs_and_order(
             },
         ]
     }
-    assert (
-        admin_cli.main(["jobs", "list", "--queue", "batch", "--status", "running"]) == 0
-    )
+    assert admin_cli.main(["jobs", "list", "--status", "running"]) == 0
     output = capsys.readouterr().out
     assert output.index(job_id) < output.index("0" * 32)
     assert "failed\\nwith details" in output
     assert http.calls[0][2]["params"] == {
         "limit": 50,
-        "queue": "batch",
         "status": "running",
         "offset": 0,
     }
 
 
-def test_human_output_shows_unknown_depth_and_stale_inspection(
+def test_human_output_shows_queue_depth_and_stale_inspection(
     http: HTTPStub,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    http.payload = next(case.payload for case in CASES if case.command == "queues list")
-    assert admin_cli.main(["queues", "list"]) == 0
+    http.payload = next(case.payload for case in CASES if case.command == "queue show")
+    assert admin_cli.main(["queue", "show"]) == 0
     output = capsys.readouterr().out
-    assert "unknown" in output
+    assert "Pending depth: 3" in output
     http.payload = next(
         case.payload for case in CASES if case.command == "workers list"
     )
     assert admin_cli.main(["workers", "list"]) == 0
     assert "stale" in capsys.readouterr().out.lower()
-    assert "PENDING DEPTH" in output
 
 
 def test_empty_collection_is_explicit(

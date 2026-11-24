@@ -121,9 +121,7 @@ async def submit_job(
     job_id = factory()
     envelope = _build_submission_record(catalog, plan, job_id=job_id)
     try:
-        await asyncio.to_thread(
-            jobs.enqueue, envelope, queue=catalog.metric_queues[plan.node]
-        )
+        await asyncio.to_thread(jobs.enqueue, envelope)
     except RedisError as exc:
         raise SubmissionUnavailableError from exc
     return JobCreateResponse(

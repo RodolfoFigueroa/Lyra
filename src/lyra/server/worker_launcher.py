@@ -67,23 +67,17 @@ class JsonWorker(Worker):
         )
 
 
-def launch_worker(
-    worker_name: str,
-    *,
-    config: LyraConfig,
-) -> None:
+def launch_worker(*, config: LyraConfig) -> None:
     """Initialize dependencies, load plugins, and enter the RQ worker process."""
-    config.get_worker(worker_name)
     ensure_runtime_directories(config)
     configure_logging(config)
     connection = create_sync_client(config.redis)
     try:
-        initialize_worker(worker_name, config=config)
-        worker = config.get_worker(worker_name)
+        initialize_worker(config=config)
         pool = WorkerPool(
-            worker.queues,
+            [config.jobs.queue],
             connection=connection,
-            num_workers=worker.concurrency,
+            num_workers=config.worker.concurrency,
             worker_class=JsonWorker,
             serializer=JSONSerializer,
         )
@@ -97,27 +91,18 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the supported worker-launcher argument parser.
 
     Returns:
-        The parser requiring a configured worker name.
+        The worker command parser.
     """
-    parser = argparse.ArgumentParser(
+    return argparse.ArgumentParser(
         prog="python -m lyra.server.worker_launcher",
         description="Launch a Lyra RQ worker from /lyra_data/config/lyra.toml.",
     )
-    parser.add_argument("worker_name", help="Name from the [workers.<name>] table.")
-    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Launch a configured worker from command-line arguments."""
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        config = load_config()
-        config.get_worker(args.worker_name)
-        launch_worker(args.worker_name, config=config)
-    except KeyError as exc:
-        message = str(exc.args[0]) if exc.args else str(exc)
-        parser.error(message)
+    build_parser().parse_args(argv)
+    launch_worker(config=load_config())
 
 
 if __name__ == "__main__":

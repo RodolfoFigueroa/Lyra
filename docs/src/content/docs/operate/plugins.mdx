@@ -1,14 +1,14 @@
 ---
-title: Enable plugins and route work
-description: Install plugin dependencies in the deployment image, enable their distributions, and assign queues.
+title: Enable plugins
+description: Install a plugin in the deployment image and make its metrics available to callers.
 contentType: How-to
 contentPlan: operate/plugins
-sidebar: { label: "Enable Plugins And Route Work" }
+sidebar: { label: "Enable Plugins" }
 ---
 
 import { Steps } from '@astrojs/starlight/components';
 
-To enable a plugin, install its distribution in the deployment image and select its entry in `lyra.toml`. Installing a package alone does not publish its metrics.
+Install your plugin in the image that the API and workers share. Then add its distribution name to `lyra.toml` so callers can request its metrics.
 
 <Steps>
 
@@ -27,45 +27,36 @@ To enable a plugin, install its distribution in the deployment image and select 
 
 1. ## Select the installed distribution <span id="2-select-the-installed-distribution"></span>
 
-   Enable the installed distribution and assign its expensive metric to the `batch` queue:
+   Add the installed package to `lyra.toml`. Use its Python distribution name.
 
    ```toml
    [[plugins.installed]]
-   distribution = "your_plugin_name_here"
-   enabled = true
-
-   [plugins.installed.routing]
-   expensive_metric = "batch"
+   distribution = "your_plugin_distribution_here"
    ```
 
    Each enabled distribution registers a factory named `plugin` in the `lyra.plugins` entry-point group. The API and workers import this factory at startup.
 
    Install the plugin’s dependencies in the API and worker containers. Lyra skips disabled plugins and stops startup if an enabled plugin fails to import.
 
-   An enabled routing override must name a registered metric in the plugin. All queues must appear in `plugins.allowed_queues`. Metrics without an override use `plugins.default_queue`.
+1. ## Configure the worker service <span id="3-configure-the-worker-service"></span>
 
-1. ## Cover every routed queue <span id="3-cover-every-routed-queue"></span>
-
-   Configure a worker pool to consume each assigned queue:
+   Set `worker.concurrency` in `lyra.toml` to choose how many graphs the worker service can run at once. This example starts six processes.
 
    ```toml
-   [workers.batch]
-   queues = ["batch"]
-   concurrency = 2
+   [worker]
+   concurrency = 6
    ```
 
-   The requested metric’s queue selects the worker for its entire graph. Dependencies execute on that worker, even when their metrics use different queues for direct requests.
+   Each process takes the next job from the shared queue and runs its [whole dependency graph](../../concepts/graphs/#run-sequentially-on-one-worker). If all six are busy, even a short job waits.
 
-   After a safe restart, check plugin and worker coverage:
+   After [restarting the deployment](../updates/#drain-and-restart), use the [administrative CLI](../admin-cli/) to verify the change.
 
    ```sh
-   uv run lyra-admin plugins list
-   uv run lyra-admin routing list
-   uv run lyra-admin workers list
-   uv run lyra-admin queues list
+   uv run lyra-admin --json plugins list
+   uv run lyra-admin --json queue show
    ```
 
-   The API and workers validate plugin definitions and dependencies at startup. Check their startup logs for validation errors.
+   Look for your distribution with `enabled` set to `true` and at least one worker ID in `observed_workers`. If either service fails to start, check its logs for plugin validation errors.
 
 </Steps>
 
@@ -79,7 +70,7 @@ Follow [add another checkout](../../plugins/development/#add-another-checkout) t
 
 ## Enable a location provider
 
-Enable the plugins that register the providers your metrics require. Each public provider ID must identify one registration. A plugin that registers only providers needs no metric queue assignments.
+Enable the plugins that register the providers your metrics require. Each public provider ID must identify one registration.
 
 If the provider declares settings or secrets, configure them under `[resources.resource_name.config]` or `[resources.resource_name.secrets]`. Replace `resource_name` with the resource name your plugin registers. The example providers `city_streets` and `city_blocks` read bundled data and need neither entry.
 

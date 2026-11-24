@@ -33,7 +33,7 @@ def _list_manifest() -> dict[str, Any]:
 
 @pytest.fixture
 def config(tmp_path: Path) -> LyraConfig:
-    return load_test_config(tmp_path, metric_queues={"light_metric": "lightweight"})
+    return load_test_config(tmp_path)
 
 
 def _use_repo(config: LyraConfig, repo: Path) -> registry.Catalog:

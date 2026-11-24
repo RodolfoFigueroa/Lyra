@@ -44,7 +44,7 @@ Group all changes for one provider into a single entry in `interventions`. Set `
 | Remove records | In `remove`, list distinct string IDs that exist in the base dataset. |
 | Replace a record | Remove the original ID and add the complete replacement under a new ID. Other records still refer to the original ID. |
 
-Prepare each addition according to the provider’s column types, units, and geometry rules. Obtain missing attributes, geocode addresses, and prepare complex geometries before submission. Reproject coordinates into the provider’s coordinate reference system (CRS) when needed. If an earlier run selected a record you need, you can [read its retained input](../results/#read-retained-location-inputs).
+Prepare each addition according to the provider’s column types, units, and geometry rules. Obtain missing attributes, geocode addresses, and prepare complex geometries before submission. Reproject coordinates into the provider’s CRS when needed. If an earlier run selected a record you need, you can [read its retained input](../results/#read-retained-location-inputs).
 
 Keep the same set ID and revision when you reorder changes. If you change an addition or removal, change the ID or revision. For a run against the base datasets, omit `interventions` or pass an empty list.
 

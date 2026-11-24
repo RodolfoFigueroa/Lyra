@@ -206,7 +206,7 @@ def test_nested_ownership_table_conversion_and_reuse(
                     ).tables,
                 )
             else:
-                worker.initialize_worker("heavy", config=runtime.config)
+                worker.initialize_worker(config=runtime.config)
                 native = native_job(monkeypatch)
                 asyncio.run(
                     job_submission.submit_job(

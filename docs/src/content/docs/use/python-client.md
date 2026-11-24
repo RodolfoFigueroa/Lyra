@@ -182,7 +182,7 @@ Both operations work after job expiry while the retained store is available. See
 
 Call `client.results.rows(job_id, output_name)` to read a page. Pass each returned `next_cursor` unchanged until it is `None`, even after a short page. With the async client, await each call.
 
-Integer cells are decimal strings. Geometry cells use well-known text (WKT) in the saved coordinate reference system (CRS). Use [native Arrow tables](#read-and-save-retained-tables) to restore nullable types and geometry objects.
+Integer cells are decimal strings. Geometry cells use WKT in the saved CRS. Use [native Arrow tables](#read-and-save-retained-tables) to restore nullable types and geometry objects.
 
 See [row iteration and oversized-row recovery](../results/#read-paginated-rows) for an executable loop. If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Use the exception’s authenticated Arrow download URL to retrieve the complete output.
 
@@ -190,7 +190,7 @@ See [row iteration and oversized-row recovery](../results/#read-paginated-rows) 
 
 Read a result’s [location inputs](../spatial-inputs/) to inspect the records used in its calculation. Each available input contains the complete selection, including reused records. Choose its name from `description.location_inputs`; inspecting the description doesn’t load input tables.
 
-For the street maintenance example, install `lyra[client,data]` to read `streets` as a GeoDataFrame. Inside your client context, read the input and save a copy as an Arrow interprocess communication (IPC) stream.
+For the street maintenance example, install `lyra[client,data]` to read `streets` as a GeoDataFrame. Inside your client context, read the input and save a copy as an Arrow IPC stream.
 
 ```python {1-2}
 streets = client.results.location_input(job_id, "streets")

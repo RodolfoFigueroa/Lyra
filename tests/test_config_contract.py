@@ -31,7 +31,7 @@ from lyra.server.config import (
 
 def _valid_config(base: Path) -> dict[str, Any]:
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "build_revision": "test-build-1",
         "api": {
             "host": DEFAULT_API_HOST,
@@ -48,22 +48,8 @@ def _valid_config(base: Path) -> dict[str, Any]:
         "jobs": {
             "result_retention_seconds": 600,
         },
-        "plugins": {
-            "default_queue": "interactive",
-            "allowed_queues": ["interactive", "batch"],
-        },
-        "workers": {
-            "interactive": {
-                "queues": ["interactive"],
-                "concurrency": 32,
-                "temp_dir": str(base / "cache" / "jobs" / "interactive"),
-            },
-            "batch": {
-                "queues": ["batch"],
-                "concurrency": 8,
-                "temp_dir": str(base / "cache" / "jobs" / "batch"),
-            },
-        },
+        "plugins": {},
+        "worker": {"concurrency": 32, "temp_dir": str(base / "cache" / "jobs")},
     }
 
 
@@ -86,7 +72,7 @@ def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     config = LyraConfig.model_validate(_valid_config(tmp_path))
 
-    assert config.schema_version == 5
+    assert config.schema_version == 6
     assert config.api.host == DEFAULT_API_HOST
     assert config.api.port == 5219
     assert config.api.public_base_url == "https://lyra.example.test"
@@ -97,8 +83,8 @@ def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     assert config.logging.level == "INFO"
     assert config.logging.file == tmp_path / "logs" / "lyra.log"
     assert config.jobs.result_retention_seconds == 600
-    assert config.plugins.allowed_queues == ["interactive", "batch"]
-    assert config.get_worker("interactive").concurrency == 32
+    assert config.jobs.queue == "lyra"
+    assert config.worker.concurrency == 32
 
 
 def test_config_contract_applies_documented_field_defaults(tmp_path: Path) -> None:
@@ -106,7 +92,7 @@ def test_config_contract_applies_documented_field_defaults(tmp_path: Path) -> No
     raw["api"] = {"public_base_url": "http://localhost:5219"}
     raw["logging"] = {}
     raw["jobs"] = {}
-    raw["workers"]["interactive"] = {"queues": ["interactive"]}
+    del raw["worker"]
 
     config = LyraConfig.model_validate(raw)
 
@@ -119,10 +105,8 @@ def test_config_contract_applies_documented_field_defaults(tmp_path: Path) -> No
     assert config.logging.level == DEFAULT_LOG_LEVEL
     assert config.logging.file is None
     assert config.jobs.result_retention_seconds == DEFAULT_RESULT_RETENTION_SECONDS
-    assert config.get_worker("interactive").concurrency == 1
-    assert config.worker_temp_dir("interactive") == (
-        LYRA_DATA_DIR / "cache" / "jobs" / "interactive"
-    )
+    assert config.worker.concurrency == 1
+    assert config.worker_temp_dir() == LYRA_DATA_DIR / "cache" / "jobs"
 
 
 def test_config_contract_rejects_unknown_fields(tmp_path: Path) -> None:
@@ -196,7 +180,7 @@ def test_config_contract_requires_known_schema_version(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
     raw["schema_version"] = 1
 
-    _assert_invalid(raw, "Input should be 5")
+    _assert_invalid(raw, "Input should be 6")
 
 
 @pytest.mark.parametrize(
@@ -207,6 +191,8 @@ def test_config_contract_requires_known_schema_version(tmp_path: Path) -> None:
         ("logging", "level", "NOPE", "logging.level"),
         ("jobs", "result_retention_seconds", 0, "greater than 0"),
         ("jobs", "execution_timeout_seconds", 0, "greater than 0"),
+        ("jobs", "queue", " ", "non-empty"),
+        ("worker", "concurrency", 0, "greater than 0"),
         ("jobs", "progress_min_interval_ms", -1, "greater than or equal to 0"),
     ],
 )
@@ -300,15 +286,8 @@ def test_config_contract_requires_absolute_paths(
 
 def test_config_contract_trims_queues(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
-    raw["plugins"]["allowed_queues"] = [" interactive ", " batch "]
-    raw["plugins"]["default_queue"] = " interactive "
-    raw["workers"] = {"interactive": {"queues": [" interactive "]}}
-
-    config = parse_config_toml(raw)
-
-    assert config.plugins.allowed_queues == ["interactive", "batch"]
-    assert config.plugins.default_queue == "interactive"
-    assert sorted(config.workers) == ["interactive"]
+    raw["jobs"]["queue"] = " priority "
+    assert parse_config_toml(raw).jobs.queue == "priority"
 
 
 def test_config_contract_rejects_plugins_field(tmp_path: Path) -> None:
@@ -329,29 +308,11 @@ def test_config_contract_rejects_env_backed_toml_sections(
     _assert_invalid_toml(raw, "Extra inputs are not permitted")
 
 
-def test_config_contract_rejects_default_queue_outside_allowed_queues(
-    tmp_path: Path,
-) -> None:
-    raw = _valid_config(tmp_path)
-    raw["plugins"]["default_queue"] = "priority"
-
-    _assert_invalid(raw, "plugins.default_queue")
-
-
 def test_config_contract_rejects_unknown_plugin_field(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
     raw["plugins"]["unrecognized"] = {"walkability_score": "interactive"}
 
     _assert_invalid(raw, "Extra inputs are not permitted")
-
-
-def test_config_contract_rejects_worker_queue_outside_allowed_queues(
-    tmp_path: Path,
-) -> None:
-    raw = _valid_config(tmp_path)
-    raw["workers"]["interactive"]["queues"] = ["priority"]
-
-    _assert_invalid(raw, "workers.<name>.queues values")
 
 
 def test_config_contract_contains_no_credentials(tmp_path: Path) -> None:
@@ -424,7 +385,7 @@ def test_contract_validation_has_no_environment_or_filesystem_effects(
         assert LyraConfig.model_validate_json(config.model_dump_json()) == config
         assert isinstance(config.resources["source"], ResourceConfig)
         assert isinstance(config.resources["source"].secrets["token"], SecretReference)
-        config.worker_temp_dir(next(iter(config.workers)))
+        config.worker_temp_dir()
     forbidden.assert_not_called()
 
 

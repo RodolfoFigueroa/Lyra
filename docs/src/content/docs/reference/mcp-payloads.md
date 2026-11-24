@@ -63,7 +63,7 @@ Include every declared column in each addition. Use the provider’s schema to c
 | Signed 64-bit integer | Decimal string, such as `"42"` |
 | Finite float | JSON number |
 | Boolean | `true` or `false` |
-| Geometry | Full-precision well-known text (WKT) in the provider’s CRS |
+| Geometry | Full-precision WKT in the provider’s CRS |
 | Missing value in a nullable column | `null` |
 
 For additions alone, omit `remove` or send `[]`. For removals alone, omit `add` or send `[]`. Lyra rejects unknown request or intervention fields and explicit `null` for sections or actions. See [intervention validation rules](../../use/spatial-inputs/#prepare-changes-for-a-catalog).
@@ -375,7 +375,7 @@ The last page sets `next_cursor` to `null`:
 }
 ```
 
-For a continuing page, pass its opaque `next_cursor` unchanged with the same result and output. Every declared column is present, including null cells. Integers are decimal strings even when small; geometry uses well-known text (WKT) in the saved coordinate reference system (CRS).
+For a continuing page, pass its opaque `next_cursor` unchanged with the same result and output. Every declared column is present, including null cells. Integers are decimal strings even when small; geometry uses WKT in the saved CRS.
 
 An oversized row produces `isError: true` with this structured error. The request cursor remains at that row:
 

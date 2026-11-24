@@ -67,16 +67,17 @@ class JobStore:
         self.connection = connection
         self.settings = settings
 
-    def enqueue(
-        self,
-        envelope: JobEnvelope,
-        *,
-        queue: str,
-    ) -> None:
+    @property
+    def queue(self) -> Queue:
+        """The native JSON queue configured for this deployment."""
+        return Queue(
+            self.settings.queue, connection=self.connection, serializer=JSONSerializer
+        )
+
+    def enqueue(self, envelope: JobEnvelope) -> None:
         """Enqueue once, without retry, queue-age expiry, or deduplication."""
         settings = self.settings
-        rq_queue = Queue(queue, connection=self.connection, serializer=JSONSerializer)
-        rq_queue.enqueue_call(
+        self.queue.enqueue_call(
             "lyra.server.worker.run_metric_task",
             args=(envelope.model_dump(mode="json"),),
             job_id=envelope.job_id,
@@ -209,7 +210,6 @@ class JobStore:
     def list_job_statuses(
         self,
         *,
-        queue: str,
         status: JobLifecycleStatus,
         offset: int = 0,
         limit: int = 50,
@@ -219,20 +219,16 @@ class JobStore:
         Returns:
             Still-retained matching jobs; transitions may shorten a page.
         """
-        connection = self.connection
+        queue = self.queue
         if status == "queued":
-            ids = Queue(
-                queue, connection=connection, serializer=JSONSerializer
-            ).get_job_ids(offset=offset, length=limit)
+            ids = queue.get_job_ids(offset=offset, length=limit)
         else:
             registry_class = {
                 "running": StartedJobRegistry,
                 "succeeded": FinishedJobRegistry,
                 "failed": FailedJobRegistry,
             }[status]
-            registry = registry_class(
-                queue, connection=connection, serializer=JSONSerializer
-            )
+            registry = registry_class(queue=queue)
             ids = registry.get_job_ids(
                 start=offset,
                 end=offset + limit - 1,

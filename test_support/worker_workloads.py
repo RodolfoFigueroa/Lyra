@@ -36,14 +36,9 @@ from test_support.workloads import Workload, frame, installed, workload
 
 
 def canonical_worker_catalog(work: CanonicalWorkload) -> Catalog:
-    """Assign all metric roots in this benchmark to the heavy queue."""
+    """Capture the benchmark catalog at its deployment revision."""
     compiled = replace(work.executor.catalog, build_revision="benchmark-build")
-    queues = {
-        name: "heavy"
-        for name, entry in compiled.graph.nodes.items()
-        if entry.node.kind == "metric"
-    }
-    return Catalog(compiled, queues)
+    return Catalog(compiled)
 
 
 @dataclass
@@ -63,15 +58,14 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     catalog = Catalog(
         compile_live_catalog(
             {plugin.distribution: work.plugin}, build_revision="benchmark-build"
-        ),
-        plugin.metric_queues,
+        )
     )
     contract = catalog.compiled.graph.nodes["root"].node
     if contract.kind != "metric":
         message = "Benchmark requires a metric"
         raise ValueError(message)
     job_id = publish_fixture(work, rows, store_path, contract.outputs["root"])
-    native = Mock(id=job_id, origin="default")
+    native = Mock(id=job_id)
     plan = prepare_execution(catalog.compiled, {"metric": "root"})
     provenance = JobRunProvenance(
         accepted=AcceptedJob(

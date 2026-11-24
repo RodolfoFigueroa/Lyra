@@ -33,7 +33,7 @@ class ResultSuite:
         self.registry_patch = patch.object(
             worker,
             "_WORKER_RUNTIME",
-            worker.WorkerRuntime(self.fixture.catalog, frozenset({"default"}), config),
+            worker.WorkerRuntime(self.fixture.catalog, config),
         )
         self.registry_patch.start()
 

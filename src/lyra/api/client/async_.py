@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from lyra.api.options import RunRequestOptions
-    from lyra.contracts.admin import InstalledPluginListResponse, PluginRoutingResponse
+    from lyra.contracts.admin import InstalledPluginListResponse
     from lyra.contracts.data_types import DataTypesResponse
     from lyra.contracts.discovery import MetricInspection, MetricSummary
     from lyra.contracts.inspection import ResultInspection
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
         CatalogSummaryResponse,
         ConfigSummaryResponse,
         LivenessResponse,
-        QueuesResponse,
+        QueueSummary,
         ReadinessResponse,
         WorkerDetail,
         WorkersResponse,
@@ -537,13 +537,10 @@ class _AdminJobsResource:
         *,
         limit: int = 50,
         status: JobLifecycleStatus,
-        queue: str,
         offset: int = 0,
     ) -> JobListResponse:
         return await self._transport.request(
-            endpoints.list_admin_jobs(
-                limit=limit, status=status, queue=queue, offset=offset
-            )
+            endpoints.list_admin_jobs(limit=limit, status=status, offset=offset)
         )
 
     async def get(self, job_id: str) -> AdminJobDetail:
@@ -577,20 +574,12 @@ class _AdminWorkersResource:
         return await self._transport.request(endpoints.get_admin_worker(name))
 
 
-class _AdminQueuesResource:
+class _AdminQueueResource:
     def __init__(self, transport: AsyncHTTPTransport) -> None:
         self._transport = transport
 
-    async def list(self) -> QueuesResponse:
-        return await self._transport.request(endpoints.get_admin_queues())
-
-
-class _AdminRoutingResource:
-    def __init__(self, transport: AsyncHTTPTransport) -> None:
-        self._transport = transport
-
-    async def list(self) -> PluginRoutingResponse:
-        return await self._transport.request(endpoints.list_plugin_routing())
+    async def get(self) -> QueueSummary:
+        return await self._transport.request(endpoints.get_admin_queue())
 
 
 class AsyncLyraClient(_ClientLifetime):
@@ -699,8 +688,7 @@ class AsyncLyraAdminClient(_ClientLifetime):
         plugins: Asynchronous installed plugin inspection endpoints.
         catalog: Asynchronous administrative catalog summary endpoints.
         workers: Asynchronous worker inspection endpoints.
-        queues: Asynchronous queue inspection endpoints.
-        routing: Asynchronous metric-to-queue routing endpoints.
+        queue: Asynchronous queue inspection endpoints.
 
     Example:
         >>> async with AsyncLyraAdminClient(
@@ -738,10 +726,8 @@ class AsyncLyraAdminClient(_ClientLifetime):
         """Asynchronous administrative catalog summary endpoints."""
         self.workers = _AdminWorkersResource(transport)
         """Asynchronous worker inspection endpoints."""
-        self.queues = _AdminQueuesResource(transport)
+        self.queue = _AdminQueueResource(transport)
         """Asynchronous queue inspection endpoints."""
-        self.routing = _AdminRoutingResource(transport)
-        """Asynchronous metric-to-queue routing endpoints."""
 
     async def status(self) -> AdminStatusResponse:
         """Fetch a summary of the running Lyra service.
@@ -756,7 +742,7 @@ class AsyncLyraAdminClient(_ClientLifetime):
         """Fetch the effective non-secret service configuration.
 
         Returns:
-            The API, queue, worker, job-store, and plugin path configuration.
+            API host and port, queue name, worker settings, and job retention period.
 
         """
         return await self._transport.request(endpoints.get_admin_config_summary())

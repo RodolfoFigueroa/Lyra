@@ -379,7 +379,7 @@ def test_every_leaf_config_field_is_documentable() -> None:
     assert {
         "plugins.installed[].distribution",
         "plugins.installed[].enabled",
-        "plugins.installed[].routing",
+        "jobs.queue",
     } <= paths
 
 
@@ -1006,10 +1006,7 @@ def test_config_defaults_match_actual_models() -> None:
     rows = {row.path: row for row in config_rows(schema, root=schema)}
     assert rows["plugins.installed"].default == "[]"
     assert rows["api.forwarded_allow_ips"].default == '["127.0.0.1"]'
-    assert (
-        json.loads(rows["workers.<name>.concurrency"].default)
-        == WorkerConfig(queues=["q"]).concurrency
-    )
+    assert json.loads(rows["worker.concurrency"].default) == WorkerConfig().concurrency
 
 
 def test_release_build_cleans_worktree_after_failure(

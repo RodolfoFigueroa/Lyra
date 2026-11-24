@@ -200,9 +200,8 @@ def _admin_status_response() -> dict[str, Any]:
         "api_version": "0.1.0",
         "redis": {"status": "ok"},
         "metric_count": 1,
-        "allowed_queues": ["interactive"],
-        "default_queue": "interactive",
-        "configured_worker_count": 1,
+        "queue": "lyra",
+        "worker_concurrency": 1,
         "result_retention_seconds": 86400,
         "catalog_fingerprint": "abc",
     }
@@ -212,16 +211,8 @@ def _config_summary_response() -> dict[str, Any]:
     return {
         "api_host": DEFAULT_API_HOST,
         "api_port": 5219,
-        "allowed_queues": ["interactive"],
-        "default_queue": "interactive",
-        "workers": [
-            {
-                "name": "interactive",
-                "queues": ["interactive"],
-                "concurrency": 1,
-                "temp_dir": "/lyra_data/cache/jobs/interactive",
-            }
-        ],
+        "queue": "lyra",
+        "worker": {"concurrency": 1, "temp_dir": "/lyra_data/cache/jobs"},
         "result_retention_seconds": 86400,
     }
 
@@ -238,18 +229,15 @@ def _catalog_summary_response() -> dict[str, Any]:
                 "enabled": True,
             }
         ],
-        "metric_queues": {"smoke_table_metric": "interactive"},
     }
 
 
 def _workers_response() -> dict[str, Any]:
     return {
-        "pools": [],
         "workers": [
             {
                 "name": "interactive",
                 "hostname": "host",
-                "queues": ["interactive"],
                 "state": "busy",
                 "stale": False,
                 "current_job": CLIENT_JOB_ID,
@@ -263,22 +251,8 @@ def _worker_detail_response() -> dict[str, Any]:
     return _workers_response()["workers"][0]
 
 
-def _queues_response() -> dict[str, Any]:
-    return {
-        "allowed_queues": ["interactive"],
-        "default_queue": "interactive",
-        "queues": [
-            {
-                "name": "interactive",
-                "is_default": True,
-                "assigned_metric_count": 1,
-                "configured_workers": ["interactive"],
-                "observed_workers": ["interactive"],
-                "pending_depth": None,
-                "pending_depth_unknown": True,
-            }
-        ],
-    }
+def _queue_response() -> dict[str, Any]:
+    return {"name": "lyra", "observed_workers": ["interactive"], "pending_depth": 3}
 
 
 def _plugin_repo_response() -> dict[str, Any]:
@@ -291,14 +265,6 @@ def _plugin_repo_response() -> dict[str, Any]:
 
 def _plugin_repo_list_response() -> dict[str, Any]:
     return {"plugins": [_plugin_repo_response()]}
-
-
-def _plugin_routing_response() -> dict[str, Any]:
-    return {
-        "metric_queues": {"smoke_table_metric": "interactive"},
-        "allowed_queues": ["interactive", "batch"],
-        "default_queue": "interactive",
-    }
 
 
 def _result_response() -> dict[str, Any]:

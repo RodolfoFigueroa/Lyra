@@ -43,7 +43,7 @@ def test_submission_native_round_trip(
     events = []
     plugins = definitions(events)
     _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
-    worker.initialize_worker("lightweight", config=runtime.config)
+    worker.initialize_worker(config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     inputs = {
         "source" if name in {"derived", "receiving_primary"} else "places": {
@@ -89,7 +89,7 @@ def test_submission_native_round_trip(
             asyncio.run(submit(runtime, transport, {"metric": name, "inputs": inputs}))
             envelope = runtime.jobs.enqueue.call_args.args[0]
             original = envelope.model_dump(mode="json")
-        native = native_job(monkeypatch, name)
+        native = native_job(monkeypatch)
         native.id = envelope.job_id
         key = str(worker.run_metric_task(original)["job_id"])
         tables = read_retained(key).tables
@@ -217,7 +217,7 @@ def test_worker_failure_lifecycle(
     _, runtime = install_definitions(
         tmp_path, monkeypatch, definitions(events, fail=True)
     )
-    worker.initialize_worker("lightweight", config=runtime.config)
+    worker.initialize_worker(config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     runtime.jobs.enqueue = Mock()
     assert asyncio.run(
@@ -232,7 +232,7 @@ def test_worker_failure_lifecycle(
     )
     envelope = runtime.jobs.enqueue.call_args.args[0]
     payload = envelope.model_dump(mode="json")
-    native = native_job(monkeypatch, "hybrid")
+    native = native_job(monkeypatch)
     native.id = envelope.job_id
     if mismatch:
         payload["accepted"]["plan"]["build_revision"] = "changed"

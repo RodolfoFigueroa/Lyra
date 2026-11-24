@@ -754,7 +754,7 @@ Readers reconstruct declared logical types:
 | Signed 64-bit integer | Nullable `Int64` |
 | Finite 64-bit float | Nullable `Float64` |
 | Boolean | Nullable boolean |
-| Geometry | Shapely/GeoPandas with the declared CRS, decoded from well-known binary (WKB) |
+| Geometry | Shapely/GeoPandas with the declared CRS, decoded from WKB |
 
 SQLite stores missing values as nulls where declarations allow them. Readers use declared types for empty and all-null columns without inferring types from rows. Storage preserves logical values without retaining arbitrary dtype widths or backing encodings.
 
@@ -861,10 +861,10 @@ Both Python clients automatically download descriptions that exceed inspection l
 Use `results.rows(job_id, output_name)` for bounded JSON pages. Pass each `next_cursor` unchanged until it is `None`, including after short pages. Interpret cells using these encodings:
 
 - **Integers**: decimal strings
-- **Geometry**: full-precision well-known text (WKT) in the declared CRS
+- **Geometry**: full-precision WKT in the declared CRS
 - **Missing cells**: `null`
 
-If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Download the complete table with `results.download_table(job_id, output_name, path)`. The file contains an Arrow interprocess communication (IPC) stream, regardless of its filename extension.
+If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Download the complete table with `results.download_table(job_id, output_name, path)`. The file contains an Arrow IPC stream, regardless of its filename extension.
 
 Read saved streams with PyArrow or `GeoDataFrame.from_arrow()` to restore declared scalar types and GeoArrow WKB/CRS metadata. Both file-download methods replace destinations only after success. On failure or cancellation, they preserve the destination and remove temporary files.
 

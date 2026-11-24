@@ -10,7 +10,5 @@ x-development: &development
 services:
   api:
     <<: *development
-  interactive:
-    <<: *development
-  batch:
+  worker:
     <<: *development

@@ -123,21 +123,13 @@ def workload(
 
 def installed(plugin: PluginDefinition) -> list[InstalledPlugin]:
     """Return installed metadata without accessing a distribution or service."""
-    return [
-        InstalledPlugin(
-            "benchmark-fixture",
-            plugin,
-            dict.fromkeys(plugin.metric_names, "default"),
-        )
-    ]
+    return [InstalledPlugin("benchmark-fixture", plugin)]
 
 
 def catalog(plugins: list[InstalledPlugin]) -> Catalog:
     """Return a compiled catalog with installation lookup substituted."""
     with patch("lyra.server.plugins.discover_installed_plugins", return_value=plugins):
-        return Catalog.load(
-            PluginsConfig(default_queue="default", allowed_queues=["default"])
-        )
+        return Catalog.load(PluginsConfig())
 
 
 def _combine(

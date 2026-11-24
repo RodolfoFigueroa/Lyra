@@ -6,7 +6,7 @@ contentPlan: operate/updates
 sidebar: { label: "Update A Deployment Safely" }
 ---
 
-Drain active work before updating packages or configuration, then restart the API and workers together. Use one immutable build and the same `build_revision` for both. Check that workers serve every configured queue before reopening submissions.
+Pause submissions before updating packages or configuration. Restart the API and workers with the same build and configuration. Before accepting new jobs, check API readiness and look for a worker heartbeat on the queue.
 
 ## Choose the required update
 
@@ -17,7 +17,7 @@ Match the changed files or settings to the processes and deployment files that n
 | Editable plugin implementation | Update affected code revisions; restart API and workers |
 | Metric inputs, outputs, or dependencies | Update affected revisions when outputs change; restart API and workers |
 | Package dependency or version | Update deployment locks, rebuild, and recreate containers |
-| Plugin selection or queue routing | Validate configuration; restart API and workers |
+| Plugin selection or queue name | Validate `lyra.toml`, then restart the API and worker service |
 | Application source | Update code revisions if execution behavior changes; restart affected processes and coordinate API and workers for contract changes |
 
 For editable development, the implementation row assumes mounted source files. For production, rebuild images whenever their packaged contents change.
@@ -32,19 +32,18 @@ Preserve the SQLite file configured by `result_store_path` and the rest of the d
 
 ## Drain and restart
 
-Drain work before changing contracts, routing, configuration, or packages. Follow this sequence:
+Keep submissions paused until the updated API and workers can accept jobs.
 
 1. Stop new submissions at the proxy or deployment boundary.
-2. Drain queued, reserved, and running work.
-3. Stop the API and all worker pools with your process supervisor or Compose.
+2. Drain the queue and let running jobs finish. If you’re switching queues, you can discard waiting jobs before the switch.
+3. Stop the API and the worker service with your process supervisor or Compose.
 4. Apply the changes from [Choose the required update](#choose-the-required-update).
-5. Assign a new immutable `build_revision` when executable code, declarations, or routing change. Recreate API and workers with the same image and configuration.
-6. Wait for readiness and inspect worker coverage for every routed queue.
-7. Reopen submissions.
+5. Assign a new [build revision](../configuration/#assign-a-deployment-build-revision) if you changed executable code, declarations, or provider routing rules. Recreate the API and worker service with the same image and configuration.
+6. [Verify the deployment](#verify-before-reopening-traffic), then reopen submissions.
 
-Pending jobs from another build fail with `deployment_changed` before acquiring resources. Resubmit those requests against the current deployment.
+If a worker receives a job from another build, it returns `deployment_changed` before acquiring resources. Resubmit that request against the updated deployment.
 
-Allow running work to finish. The example’s worker stop grace period exceeds the default five-hour execution timeout. Check queues and active jobs rather than relying on elapsed time alone.
+In the example, Compose gives workers more than the default five-hour job timeout to shut down. Use `lyra-admin queue show` and `lyra-admin workers list` to check for waiting and running jobs before stopping the services.
 
 ## Recreate the example
 
@@ -61,23 +60,20 @@ docker compose -f compose.yml -f compose.dev.yml \
   up -d --build --force-recreate
 ```
 
-For implementation-only development edits, drain affected work and update code revisions as needed. Then restart the API and workers:
+If you edited only mounted development code, update the affected revisions and drain the queue. Restart both services to load your changes.
 
 ```sh
-docker compose -f compose.yml -f compose.dev.yml restart api interactive batch
+docker compose -f compose.yml -f compose.dev.yml restart api worker
 ```
 
 ## Verify before reopening traffic
 
-Before reopening traffic, check these signals:
+Reopen submissions once these checks pass.
 
-- `/ready` returns `200`
+- `GET /ready` returns HTTP 200
 - API and worker processes use the intended plugin versions
-- Routing assigns each metric to the intended queue
 - Worker startup logs report no errors
-- An observed worker serves every routed queue
-
-A healthy API can still have no worker consuming a metric’s queue.
+- `lyra-admin queue show` lists an active worker on the configured queue
 
 Lyra loads configuration once at startup. After correcting a catalog failure, restart the API and workers; request traffic does not trigger a catalog reload.
 

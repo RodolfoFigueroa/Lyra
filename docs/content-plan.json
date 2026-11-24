@@ -131,27 +131,27 @@
     "operate/deployment": {
       "contentType": "How-to",
       "overview": "Start the city example deployment with a shared image, configuration, and Redis.",
-      "goal": "Deploy the finished city plugin and verify its worker coverage",
+      "goal": "Deploy the finished city plugin and verify that a worker can take jobs",
       "audience": "Deployment operators",
       "contentPlan": [
         "Prepare the example configuration",
         "Supply credentials",
         "Validate the TOML",
         "Build and start",
-        "Check readiness and worker coverage",
+        "Check API readiness and worker heartbeats",
         "Know where files live"
       ],
       "openQuestions": []
     },
     "operate/plugins": {
       "contentType": "How-to",
-      "overview": "Install plugin dependencies in the deployment image, enable their distributions, and assign queues.",
-      "goal": "Install plugin dependencies in the deployment image, enable their distributions, and assign queues",
+      "overview": "Install a plugin in the deployment image and make its metrics available to callers.",
+      "goal": "Verify that the deployment enables the plugin and a worker serves the queue",
       "audience": "Deployment operators",
       "contentPlan": [
         "Add the dependency to the deployment",
         "Select the installed distribution",
-        "Cover every routed queue",
+        "Configure the worker service",
         "Develop with editable sources",
         "Add another checkout",
         "Enable a location provider"
@@ -173,12 +173,12 @@
     },
     "operate/runbook": {
       "contentType": "How-to",
-      "overview": "Check service health, worker coverage, retained jobs, and operational diagnostics.",
-      "goal": "Check service health, worker coverage, retained jobs, and operational diagnostics",
+      "overview": "Check whether workers can take jobs and use job details and logs to investigate failures.",
+      "goal": "Use queue depth, worker heartbeats, and job details to investigate waiting and failed jobs",
       "audience": "Deployment operators",
       "contentPlan": [
         "Check liveness and readiness",
-        "Inspect workers and queues",
+        "Inspect workers and the queue",
         "Inspect retained jobs",
         "Read structured logs",
         "Understand retention and cleanup",

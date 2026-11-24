@@ -26,14 +26,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-  interactive:
+  worker:
     <<: *app
     stop_grace_period: 5h5m
-    command: python -m lyra.server.worker_launcher interactive
-  batch:
-    <<: *app
-    stop_grace_period: 5h5m
-    command: python -m lyra.server.worker_launcher batch
+    command: python -m lyra.server.worker_launcher
   redis:
     image: redis:alpine
 

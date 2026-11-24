@@ -125,17 +125,9 @@ def test_catalog_graph_visibility_and_enabled_dependencies(
     info = catalog.discovery.inspect("public")
     assert info is not None
     assert set(info.outputs) == {"first", "second"}
-    assert set(catalog.get_loaded_metric_queues()) == {"public"}
-    assert set(catalog.metric_queues) == {"public", "source"}
     config.plugins.installed[0].enabled = False
     with pytest.raises(ValueError, match="source"):
         registry.Catalog.load(config.plugins)
-    config.plugins.installed[0].enabled = True
-    config.plugins.installed[1].routing = {"public": "interactive"}
-    assert (
-        registry.Catalog.load(config.plugins).get_loaded_metric_queues()["public"]
-        == "interactive"
-    )
 
 
 @pytest.mark.parametrize("case", ["duplicate", "collision"])

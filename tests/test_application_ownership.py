@@ -51,7 +51,7 @@ def test_concurrent_applications_own_resources(
         ),
     )
     sync_factory.assert_not_called()
-    first.plugins.allowed_queues.append("changed")
+    first.jobs.queue = "changed"
 
     async def exercise() -> None:
         async with app_b.router.lifespan_context(app_b):
@@ -59,7 +59,7 @@ def test_concurrent_applications_own_resources(
             async with app_a.router.lifespan_context(app_a):
                 runtime_a = require_runtime(app_a)
                 assert runtime_a.credentials.agent_api_key == "first-key"
-                assert "changed" not in runtime_a.config.plugins.allowed_queues
+                assert runtime_a.config.jobs.queue == "lyra"
                 assert runtime_a.catalog is not runtime_b.catalog
                 assert runtime_a.jobs.connection is runtime_a.redis
                 assert runtime_a.jobs.settings is runtime_a.config.jobs
@@ -196,7 +196,6 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
         await backend.create_job(JobCreateRequest(metric=name, inputs={}))
         assert runtime.jobs.enqueue.call_count == 2
         for call in runtime.jobs.enqueue.call_args_list:
-            assert call.kwargs["queue"] == runtime.catalog.metric_queues[name]
             assert (
                 call.args[0].accepted.catalog_fingerprint
                 == runtime.catalog.discovery.fingerprint

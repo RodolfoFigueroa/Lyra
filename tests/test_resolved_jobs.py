@@ -170,7 +170,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     }
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
     runtime.config.result_store_path = tmp_path / "cache"
-    worker.initialize_worker("heavy", config=runtime.config)
+    worker.initialize_worker(config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)
     catalog = worker.require_worker_runtime().catalog.compiled
@@ -275,13 +275,9 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
     adapter.query_dataframe.assert_not_called()
 
 
-@pytest.mark.parametrize("issue", ["job_id", "queue"])
-def test_job_integrity_checks(queued: Queued, issue: str) -> None:
+def test_worker_rejects_mismatched_job_id(queued: Queued) -> None:
     _, _, envelope, native, seen, sentinel, _ = queued
-    if issue == "job_id":
-        native.id = "wrong"
-    else:
-        native.origin = "wrong"
+    native.id = "0" * 32
     with pytest.raises(worker.BoundPlanError):
         run_and_read(
             worker.execute_job, envelope.model_dump(mode="json"), cast("Job", native)

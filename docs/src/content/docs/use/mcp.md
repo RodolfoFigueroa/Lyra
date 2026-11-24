@@ -213,7 +213,7 @@ Read schemas and provider ownership from `lyra_describe_result`. Interpret row c
 
 - **Integers**: decimal strings
 - **Floating-point values**: JSON numbers
-- **Geometry**: full-precision well-known text (WKT) in the saved coordinate reference system (CRS)
+- **Geometry**: full-precision WKT in the saved CRS
 - **Missing cells**: `null`
 
 Empty geometry remains distinct from missing geometry: `POINT EMPTY` represents an empty point.

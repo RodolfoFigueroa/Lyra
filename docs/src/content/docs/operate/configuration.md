@@ -14,7 +14,7 @@ The [configuration reference](../../reference/generated/configuration/) lists ex
 
 ## Place configuration and secrets
 
-Mount the TOML at `/lyra_data/config/lyra.toml` read-only. Put ordinary settings, such as database host and worker queues, in that file.
+Mount `lyra.toml` read-only at `/lyra_data/config/lyra.toml` for the API and workers. Set `jobs.queue` to choose a queue name (default `lyra`). Set `worker.concurrency` to choose how many processes the worker service starts.
 
 Supply secrets through the environment according to each process’s role:
 
@@ -41,17 +41,13 @@ Choose a revision that meets these rules:
 - Start with a letter from `A` to `Z` or `a` to `z`, or a digit.
 - Use only those letters, digits, and `._:+-` afterward.
 
-Missing or invalid values fail configuration validation. Use the same revision for every process in a deployment, regardless of its worker queues.
-
 Assign a new revision when you change any of these deployment inputs:
 
 - Executable code, including dependencies
 - Plugin declarations or the enabled plugin set
-- Routing policy
+- The rules for [routing location selections between providers](../../concepts/selection/)
 
-Publish code and configuration together as one release. Use a source commit as the revision only if it fixes every deployment input listed above.
-
-In the [deployment examples](../deployment/), replace the example revision for each release and development restart after edits. Changing which queues a worker consumes does not require a new revision.
+Publish code and configuration together. In the [example deployment](../deployment/), replace the sample revision whenever you change one of these inputs, including during development. You can use a commit ID if it identifies every input. Keep the current revision when you change only the queue name.
 
 The discovery fingerprint identifies public catalog metadata; it does not prove deployment compatibility. Changing only `build_revision` preserves [computation cache reuse](../caching/). Local execution needs no deployment revision or queue setup.
 
@@ -77,9 +73,9 @@ uv run lyra-admin config validate ./lyra.toml
 uv run lyra-admin --json config validate ./lyra.toml
 ```
 
-Validation checks syntax, schema, installed-distribution declarations, and internal queue relationships. It reads only the specified TOML.
+The command checks the file’s syntax and configuration fields, including the plugin entries. You can run it without credentials or a running server.
 
-A successful JSON response is `{"valid": true, "schema_version": 5}`. Invalid TOML or schema exits with code 2; a file-read failure exits with code 1. Credentials and a running server are unnecessary for this check.
+On success, `--json` prints `{"valid": true, "schema_version": 6}`. The command exits with code 2 for invalid configuration or code 1 if it can’t read the file.
 
 After deployment, check `/ready` for Redis availability. Set `redis.readiness_timeout_seconds` to change the probe’s default timeout of 1s. Workers connect to plugin data sources during job execution.
 
@@ -107,11 +103,8 @@ Follow [Configure computation caching](../caching/) to enable persistent reuse a
 
 Edit the source TOML, validate it, and follow the [drain and restart procedure](../updates/). Configuration summaries describe the settings loaded by the current process.
 
-For plugin selection, editable sources, and queue routing, continue to [Enable plugins and route work](../plugins/).
+To select a plugin or use an editable checkout, follow [Enable plugins](../plugins/).
 
-Python consumers validate deployment data with `lyra.contracts.config.LyraConfig`.
-Resource settings and credential references use `IOConfig`, `ResourceConfig`, and
-`SecretReference` from `lyra.contracts.resources`. These declarations validate data
-without reading credentials or creating directories. The server loads TOML and
-captures API credentials during startup; resource acquisition resolves plugin
-credentials when a resource is first requested.
+In Python, validate deployment settings with `lyra.contracts.config.LyraConfig`. For resource settings and credential references, use `IOConfig`, `ResourceConfig`, and `SecretReference` from `lyra.contracts.resources`. These models validate settings without reading credentials or creating directories.
+
+The API reads its credentials at startup. Workers resolve a plugin’s credentials when they first acquire its resource.

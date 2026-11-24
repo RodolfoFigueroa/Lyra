@@ -106,13 +106,12 @@ def test_api_worker_and_local_keep_live_definitions(
     config = load_test_config(tmp_path)
     config.plugins.installed = [
         InstalledPluginConfig(distribution="source-plugin"),
-        InstalledPluginConfig(distribution="root-plugin", routing={"root": "heavy"}),
+        InstalledPluginConfig(distribution="root-plugin"),
         InstalledPluginConfig(distribution="disabled-plugin", enabled=False),
     ]
     api = Catalog.load(config.plugins)
-    entries = initialize_worker("heavy", config=config)
+    entries = initialize_worker(config=config)
     local = LocalRunner(["Source_Plugin", "root-plugin"])
-    assert entries.catalog.metric_queues["root"] == "heavy"
     for catalog in [api.compiled, entries.catalog.compiled, local.catalog]:
         assert catalog.graph == api.compiled.graph
         binding = catalog.implementations["source-plugin"]
@@ -149,7 +148,7 @@ def test_enabled_import_failure_aborts_startup(
     config.plugins.installed = [InstalledPluginConfig(distribution="broken")]
     start = {
         "api": lambda: Catalog.load(config.plugins),
-        "worker": lambda: initialize_worker("heavy", config=config),
+        "worker": lambda: initialize_worker(config=config),
         "local": lambda: LocalRunner(["broken"]),
     }[interface]
     with pytest.raises(PluginLoadError, match="missing import dependency"):
@@ -164,15 +163,12 @@ def test_deployment_revision_is_shared_and_separate(
     config = load_test_config(tmp_path)
     config.plugins.installed = [
         InstalledPluginConfig(distribution="source-plugin"),
-        InstalledPluginConfig(distribution="root-plugin", routing={"root": "heavy"}),
+        InstalledPluginConfig(distribution="root-plugin"),
     ]
     api = Catalog.load(config.plugins, build_revision=config.build_revision)
-    for pool in config.workers:
-        entries = initialize_worker(pool, config=config)
-        assert entries.catalog.compiled.build_revision == api.compiled.build_revision
-        assert (
-            entries.catalog.compiled.computation.nodes == api.compiled.computation.nodes
-        )
+    entries = initialize_worker(config=config)
+    assert entries.catalog.compiled.build_revision == api.compiled.build_revision
+    assert entries.catalog.compiled.computation.nodes == api.compiled.computation.nodes
     # Deployment tooling assigns a new immutable token for each kind of change.
     changed = type(config).model_validate(
         {**config.model_dump(), "build_revision": f"build-2-{change}"}
@@ -181,8 +177,8 @@ def test_deployment_revision_is_shared_and_separate(
     assert updated.compiled.build_revision != api.compiled.build_revision
     assert updated.discovery.fingerprint == api.discovery.fingerprint
     assert updated.compiled.computation.nodes == api.compiled.computation.nodes
-    config.workers["heavy"].queues = [config.plugins.default_queue]
-    worker = initialize_worker("heavy", config=config)
+    config.jobs.queue = "alternate"
+    worker = initialize_worker(config=config)
     assert worker.catalog.compiled.build_revision == api.compiled.build_revision
     assert (
         Catalog.load(config.plugins).discovery.fingerprint == api.discovery.fingerprint
@@ -212,7 +208,7 @@ def test_installed_provider_with_cross_plugin_resource(
         InstalledPluginConfig(distribution=name) for name in definitions
     ]
     local = LocalRunner(list(definitions)).catalog
-    installed = initialize_worker("heavy", config=config).catalog.compiled
+    installed = initialize_worker(config=config).catalog.compiled
     for catalog in (local, installed):
         assert set(catalog.provider_registry) == {Places.id}
         assert [p.id for p in catalog.manifests["places"].providers] == [Places.id]
@@ -242,7 +238,7 @@ def test_worker_rejects_conflicting_registrations_before_replacing_catalog(
     monkeypatch.setattr(
         "lyra.server.plugins.load_installed_plugin_definition", definitions.__getitem__
     )
-    initialize_worker("heavy", config=config)
+    initialize_worker(config=config)
     # Two separate classes can have identical serializable resource metadata.
     duplicate = type(
         FakeProvider.__name__, (FakeProvider,), {"__module__": FakeProvider.__module__}
@@ -253,7 +249,6 @@ def test_worker_rejects_conflicting_registrations_before_replacing_catalog(
     config.plugins.installed.append(InstalledPluginConfig(distribution="second"))
     error = ResourceConfigurationError if key == "places" else PluginDefinitionError
     with pytest.raises(error, match="Conflicting"):
-        initialize_worker("lightweight", config=config)
+        initialize_worker(config=config)
     runtime = require_worker_runtime()
-    assert runtime.queues == {"heavy"}
     assert set(runtime.catalog.compiled.manifests) == {"first"}

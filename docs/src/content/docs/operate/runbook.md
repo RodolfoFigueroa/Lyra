@@ -1,12 +1,12 @@
 ---
-title: Monitor workers, queues, and logs
-description: Check service health, worker coverage, retained jobs, and operational diagnostics.
+title: Monitor workers and the job queue
+description: Check whether workers can take jobs and use job details and logs to investigate failures.
 contentType: How-to
 contentPlan: operate/runbook
-sidebar: { label: "Monitor Workers, Queues, And Logs" }
+sidebar: { label: "Monitor Workers and the Job Queue" }
 ---
 
-Check service health first, then confirm that workers serve the queues receiving work. Use retained job details and logs to investigate failures. The [administrative command-line interface (CLI)](../admin-cli/) reports a snapshot each time you run a command.
+Use the [administrative command-line interface (CLI)](../admin-cli/) to check API health and see which workers can take jobs. If a job fails, use its ID to look up the failure and find the corresponding worker logs.
 
 ## Check liveness and readiness
 
@@ -19,31 +19,30 @@ Use liveness to check the API process. Use readiness to check whether it can acc
 
 Readiness returns 503 when Redis is unavailable. Check workers separately to confirm that they can execute the published metrics.
 
-## Inspect workers and queues
+## Inspect workers and the queue
 
-Configure your connection using the [CLI guide](../admin-cli/), then compare observed workers with the queues assigned to metrics:
+[Connect the CLI to your server](../admin-cli/#connect-to-the-server). Check Redis health, then list the workers and count the waiting jobs.
 
 ```sh
 uv run lyra-admin health
 uv run lyra-admin workers list
-uv run lyra-admin queues list
-uv run lyra-admin routing list
+uv run lyra-admin --json queue show
 ```
 
-Worker observations identify each process, its queues, and its current job. They also report heartbeat age: the time since its last check-in. The CLI lists configured worker pools separately from observed processes.
+In `workers list`, check each worker’s current job and heartbeat age (time since its last check-in). Compare the number of workers with the process count in `lyra-admin config-summary`.
 
-Check that each metric’s assigned queue has an observed worker. If Redis is unavailable, restore its connection before interpreting queue or worker observations.
+In `queue show`, `pending_depth` counts waiting jobs. If jobs are waiting and `observed_workers` is empty, check the worker service’s startup logs. If the health check reports Redis is unavailable, restore the connection first.
 
 ## Inspect retained jobs
 
-List one queue and status at a time:
+List up to 20 running jobs. To inspect one, replace `your_job_id_here` with an ID from the list.
 
 ```sh
-uv run lyra-admin jobs list --queue interactive --status running --limit 20
+uv run lyra-admin jobs list --status running --limit 20
 uv run lyra-admin jobs get your_job_id_here
 ```
 
-Use `offset` and `limit` to page through jobs. The default limit is 50; the maximum is 200. Each view covers one queue and status, with this ordering:
+Use `--offset` and `--limit` to page through jobs with the same status. The default page size is 50 jobs and the maximum is 200. The order depends on the status.
 
 - Queued jobs: first-in, first-out (FIFO)
 - Running jobs: registry order
@@ -55,7 +54,7 @@ Administrator job details include queue, worker identity, and fuller failure dia
 
 ## Read structured logs
 
-Lyra writes one JSON object per line to standard output or `logging.file`. Each record identifies its logger and includes a message, severity level, and Coordinated Universal Time (UTC) timestamp. Plugin logs also identify the job and node.
+Lyra writes one JSON object per line to standard output or `logging.file`. Each record identifies its logger and includes a message, severity level, and UTC timestamp. Plugin logs also identify the job and node.
 
 Lyra logs lifecycle transitions independently of progress. Unexpected exceptions include full tracebacks in logs; public results contain concise errors. Inspect the failing node and dependency path for a graph failure.
 

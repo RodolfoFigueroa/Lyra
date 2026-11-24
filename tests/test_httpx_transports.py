@@ -132,11 +132,7 @@ def test_requests_and_credentials(transport: TransportHarness) -> None:
     assert isinstance(result, JobCreateResponse)
     assert result.job_id == CLIENT_JOB_ID
     jobs = transport.resolve(
-        admin.request(
-            endpoints.list_admin_jobs(
-                status="running", queue="heavy", offset=2, limit=3
-            )
-        )
+        admin.request(endpoints.list_admin_jobs(status="running", offset=2, limit=3))
     )
     assert jobs.jobs[0].job_id == CLIENT_JOB_ID
     table = transport.resolve(consumer.request(endpoints.get_job_result(CLIENT_JOB_ID)))
@@ -161,7 +157,6 @@ def test_requests_and_credentials(transport: TransportHarness) -> None:
     assert listing.url.path == "/base/admin/jobs"
     assert dict(listing.url.params) == {
         "status": "running",
-        "queue": "heavy",
         "offset": "2",
         "limit": "3",
     }

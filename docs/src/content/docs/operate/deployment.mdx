@@ -8,7 +8,7 @@ sidebar: { label: "Deploy Lyra" }
 
 import { Steps } from '@astrojs/starlight/components';
 
-Start the repository’s example deployment with Docker Compose. Build one image for the API and both worker pools, then check readiness and worker coverage.
+Use Docker Compose to run the city plugin on your server. Build one image for the API and workers, then check API readiness and worker heartbeats.
 
 Complete [deployment preparation](../requirements/) first. Compose starts Redis. The city plugin includes all its data and needs no additional data service.
 
@@ -44,13 +44,13 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
 
 1. ## Validate the TOML <span id="3-validate-the-toml"></span>
 
-   From the repository root, using its Python environment:
+   From `examples/lyra-deployment`, validate the configuration using the repository’s Python environment.
 
    ```sh
-   uv run lyra-admin config validate examples/lyra-deployment/lyra.toml
+   uv run --project ../.. lyra-admin config validate lyra.toml
    ```
 
-   A successful check confirms syntax, field constraints, and queue relationships. It is offline: it does not check credentials, plugin imports, or service availability.
+   This offline check validates the file’s syntax and field values. Check service health after startup.
 
 1. ## Build and start <span id="4-build-and-start"></span>
 
@@ -64,21 +64,27 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
 
    Ensure both processes can import every plugin dependency. Assign them the same immutable `build_revision`; see [build configuration](../configuration/#assign-a-deployment-build-revision).
 
-   Each worker pool reads its queues and concurrency from `[workers.<name>]`. The API and workers can initialize independently once their required services are reachable.
+   The example starts six worker processes that read from the same queue, `lyra`. Each process can run one graph at a time. To change the queue or process count, set `jobs.queue` or `worker.concurrency` in the [shared configuration](../configuration/#place-configuration-and-secrets).
 
-1. ## Check readiness and worker coverage <span id="5-check-readiness-and-worker-coverage"></span>
+1. ## Check API readiness and worker heartbeats <span id="5-check-api-readiness-and-worker-heartbeats"></span>
 
-   Check both API health endpoints, then inspect startup logs for the API and worker pools:
+   Check the API health endpoints and read the most recent startup logs for both services.
 
    ```sh
-   curl http://localhost:5219/live
-   curl http://localhost:5219/ready
-   docker compose logs --tail=100 api interactive batch
+   curl -i http://localhost:5219/live
+   curl -i http://localhost:5219/ready
+   docker compose logs --tail=100 api worker
    ```
 
-   Liveness confirms that the API process is running. The API loads its plugin catalog at startup; readiness then returns 200 when Redis is available.
+   Expect HTTP 200 from both endpoints. A successful `/live` check means the API is running. A successful `/ready` check means it can reach Redis.
 
-   Worker logs should show successful startup. Also inspect workers and queues with the [administrative CLI](../admin-cli/) using your administrator key. Readiness alone does not prove that a worker consumes every routed queue.
+   Check for active workers from the API container, where Compose sets the administrator key.
+
+   ```sh
+   docker compose exec api lyra-admin --json queue show
+   ```
+
+   Look for the queue name `lyra` and at least one worker ID in `observed_workers`. An empty list means no worker has reported a fresh heartbeat on that queue.
 
    To verify a complete calculation, follow [Run your first server job](../../quickstart/).
 

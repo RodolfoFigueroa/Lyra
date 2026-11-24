@@ -37,11 +37,16 @@ Install the selected plugins and configure each process before starting it:
 - Supply both API keys to the API
 - Supply resource credentials through files or environment variables on workers that need them
 
-Start the API and workers independently:
+Start the API in one terminal.
 
 ```bash
 uv run python -m lyra.server.main
-uv run python -m lyra.server.worker_launcher interactive
+```
+
+Start the worker service in a second terminal. It reads the queue name and concurrency from the same configuration file.
+
+```bash
+uv run python -m lyra.server.worker_launcher
 ```
 
 The development Compose stack is the preferred integration environment:
@@ -97,13 +102,13 @@ Each guide declares its `contentType` and `contentPlan` in frontmatter. Keep its
 
 ## Publish a Lyra release
 
-Release Please opens a release pull request (PR) for changes on `main`. Review the proposed version and its entry in the root `CHANGELOG.md`. The release-lock workflow updates the root and example lockfiles. Check that they resolve Lyra at the proposed version.
+Release Please opens a release pull request for changes on `main`. Review the proposed version and its entry in the root `CHANGELOG.md`. The release-lock workflow updates the root and example lockfiles. Check that they resolve Lyra at the proposed version.
 
 Example plugins have their own distribution names and release versions.
 
 Leave the PR open to include more changes. When the required checks pass and you’re ready to publish, merge the PR. Wait for publication to finish before merging another release PR.
 
-Continuous integration (CI) builds and smoke-tests the Python distribution at the merge commit. After the Python and documentation checks pass, the publisher pushes the container image with the version and `latest` tags. It then tags the same commit as `vX.Y.Z` and publishes the GitHub Release using the root changelog entry. The attached `release-manifest.json` records the version, tag, and merge commit.
+CI builds and smoke-tests the Python distribution at the merge commit. After the Python and documentation checks pass, the publisher pushes the container image with the version and `latest` tags. It then tags the same commit as `vX.Y.Z` and publishes the GitHub Release using the root changelog entry. The attached `release-manifest.json` records the version, tag, and merge commit.
 
 The repository secret `RELEASE_PLEASE_TOKEN` must be able to update release PRs, push tags, create releases, and edit PR labels. GitHub’s package token publishes the container image. To install the Python distribution from a release, follow [Install Lyra for Python](docs/src/content/docs/start/installation.md).
 

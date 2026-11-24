@@ -36,28 +36,16 @@ services:
     networks:
       - lyra_net
 
-  celery_worker_interactive:
+  worker:
     image: ghcr.io/rodolfofigueroa/lyra:latest
     restart: unless-stopped
-    command: python -m lyra.server.worker_launcher interactive
+    command: python -m lyra.server.worker_launcher
     volumes: *lyra-app-volumes
     networks:
       - lyra_net
     depends_on:
       lyra-redis:
         condition: service_started
-
-  celery_worker_batch:
-    image: ghcr.io/rodolfofigueroa/lyra:latest
-    restart: unless-stopped
-    command: python -m lyra.server.worker_launcher batch
-    volumes: *lyra-app-volumes
-    networks:
-      - lyra_net
-    depends_on:
-      lyra-redis:
-        condition: service_started
-
 
 networks:
   lyra_net:

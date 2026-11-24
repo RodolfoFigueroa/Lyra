@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 
@@ -19,15 +18,9 @@ from lyra.contracts.config import (
     WorkerConfig,
 )
 
-_BARE_TOML_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
-
 
 def _toml_string(value: str | Path) -> str:
     return json.dumps(str(value))
-
-
-def _toml_key(value: str) -> str:
-    return value if _BARE_TOML_KEY_PATTERN.fullmatch(value) else _toml_string(value)
 
 
 def _toml_string_array(values: list[str]) -> str:
@@ -90,10 +83,7 @@ def _append_jobs_section(lines: list[str], jobs: JobsConfig) -> None:
 
 
 def _append_plugins_section(lines: list[str], plugins: PluginsConfig) -> None:
-    lines.append("[plugins]")
-    _append_key(lines, "default_queue", plugins.default_queue)
-    _append_key(lines, "allowed_queues", plugins.allowed_queues)
-    lines.append("")
+    lines.extend(("[plugins]", ""))
     for plugin in plugins.installed:
         lines.extend(
             [
@@ -102,24 +92,15 @@ def _append_plugins_section(lines: list[str], plugins: PluginsConfig) -> None:
                 f"enabled = {str(plugin.enabled).lower()}",
             ]
         )
-        if plugin.routing:
-            lines.append("[plugins.installed.routing]")
-            for metric, queue in plugin.routing.items():
-                lines.append(f"{_toml_key(metric)} = {_toml_string(queue)}")
         lines.append("")
 
 
-def _append_workers_section(
-    lines: list[str],
-    workers: dict[str, WorkerConfig],
-) -> None:
-    for worker_name, worker in sorted(workers.items()):
-        lines.append(f"[workers.{_toml_key(worker_name)}]")
-        _append_key(lines, "queues", worker.queues)
-        _append_key(lines, "concurrency", worker.concurrency)
-        if worker.temp_dir is not None:
-            _append_key(lines, "temp_dir", worker.temp_dir)
-        lines.append("")
+def _append_worker_section(lines: list[str], worker: WorkerConfig) -> None:
+    lines.append("[worker]")
+    _append_key(lines, "concurrency", worker.concurrency)
+    if worker.temp_dir is not None:
+        _append_key(lines, "temp_dir", worker.temp_dir)
+    lines.append("")
 
 
 def render_config_toml(config: LyraConfig) -> str:
@@ -129,7 +110,7 @@ def render_config_toml(config: LyraConfig) -> str:
         A deterministic TOML document ending in a newline.
     """
     lines: list[str] = [
-        "schema_version = 5",
+        f"schema_version = {config.schema_version}",
         f'build_revision = "{config.build_revision}"',
         "",
     ]
@@ -142,7 +123,7 @@ def render_config_toml(config: LyraConfig) -> str:
     _append_logging_section(lines, config.logging)
     _append_jobs_section(lines, config.jobs)
     _append_plugins_section(lines, config.plugins)
-    _append_workers_section(lines, config.workers)
+    _append_worker_section(lines, config.worker)
     return "\n".join(lines).rstrip() + "\n"
 
 

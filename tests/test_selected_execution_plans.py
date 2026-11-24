@@ -107,14 +107,7 @@ def test_submission_rejects_cycle_without_enqueueing() -> None:
         asyncio.run(
             create_job(
                 JobCreateRequest.model_validate(request(left="a", right="c")),
-                catalog=Catalog(
-                    catalog,
-                    {
-                        name: "default"
-                        for name, entry in catalog.graph.nodes.items()
-                        if entry.node.kind == "metric"
-                    },
-                ),
+                catalog=Catalog(catalog),
                 jobs=jobs,
             )
         )

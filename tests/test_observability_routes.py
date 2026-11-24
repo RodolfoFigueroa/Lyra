@@ -11,7 +11,6 @@ from lyra.server.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import (
-    SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
 )
 
@@ -41,10 +40,9 @@ class FakeRedisSync:
 def _configure_admin(
     tmp_path: Path,
     *,
-    metric_queues: dict[str, str] | None = None,
     plugins: list[Path] | None = None,
 ) -> ApplicationRuntime:
-    config = load_test_config(tmp_path, metric_queues=metric_queues, plugins=plugins)
+    config = load_test_config(tmp_path, plugins=plugins)
     return make_runtime(config)
 
 
@@ -124,7 +122,7 @@ def test_config_summary_excludes_secrets(tmp_path: Path) -> None:
     response = admin.get_config_summary(runtime)
     payload = response.model_dump_json()
 
-    assert response.default_queue == "interactive"
+    assert response.queue == "lyra"
     assert "admin-secret" not in payload
     assert "postgres-secret" not in payload
     assert "service-account" not in payload
@@ -139,13 +137,11 @@ def test_catalog_metadata_reports_empty_catalog(tmp_path: Path) -> None:
     assert response.metric_count == 0
     assert response.metric_names == []
     assert response.installed_plugins == []
-    assert response.metric_queues == {}
 
 
 def test_catalog_metadata_reports_smoke_directory_plugin(tmp_path: Path) -> None:
     runtime = _configure_admin(
         tmp_path,
-        metric_queues=SMOKE_METRIC_QUEUES,
         plugins=[SMOKE_PLUGIN_DIR],
     )
 
@@ -163,10 +159,5 @@ def test_catalog_metadata_reports_smoke_directory_plugin(tmp_path: Path) -> None
     ]
     assert response.installed_plugins[0].distribution == "lyra-smoke-plugin"
     assert response.installed_plugins[0].version == "0.1.0"
-    assert response.metric_queues == {
-        **SMOKE_METRIC_QUEUES,
-        "example_city_source": "interactive",
-        "example_selected_source": "interactive",
-    }
     assert response.catalog_fingerprint
     assert SMOKE_PLUGIN_DIR.exists()

@@ -10,13 +10,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis import Redis
 from redis.exceptions import RedisError
 from rq import Queue, Worker
-from rq.serializers import JSONSerializer
 from rq.utils import as_text
 
 from lyra.contracts.admin import (
     InstalledPluginListResponse,
     InstalledPluginResponse,
-    PluginRoutingResponse,
 )
 from lyra.contracts.config import InstalledPluginConfig, LyraConfig
 from lyra.contracts.jobs import (
@@ -30,7 +28,6 @@ from lyra.contracts.observability import (
     CatalogSummaryResponse,
     ConfigSummaryResponse,
     InstalledPluginSummary,
-    QueuesResponse,
     QueueSummary,
     RedisHealth,
     WorkerConfigSummary,
@@ -95,13 +92,9 @@ def _redis_health(connection: Redis) -> RedisHealth:
     return RedisHealth(status="ok" if pong else "unavailable")
 
 
-def _worker_config_summary(config: LyraConfig, worker_name: str) -> WorkerConfigSummary:
-    worker = config.get_worker(worker_name)
+def _worker_config_summary(config: LyraConfig) -> WorkerConfigSummary:
     return WorkerConfigSummary(
-        name=worker_name,
-        queues=worker.queues,
-        concurrency=worker.concurrency,
-        temp_dir=str(config.worker_temp_dir(worker_name)),
+        concurrency=config.worker.concurrency, temp_dir=str(config.worker_temp_dir())
     )
 
 
@@ -113,14 +106,14 @@ def _installed_plugin_summary(plugin: InstalledPluginConfig) -> InstalledPluginS
     )
 
 
-def _observed_workers(connection: Redis) -> list[WorkerDetail]:
+def _observed_workers(queue: Queue) -> list[WorkerDetail]:
     # Worker.all() removes stale registry entries and constructs worker connections.
     # Read hashes directly so observation neither maintains registries nor changes
     # the API connection's timeout to a worker's blocking-dequeue timeout.
     now = datetime.now(UTC)
     workers = []
-    for key in Worker.all_keys(connection=connection):
-        raw = connection.hgetall(key)
+    for key in Worker.all_keys(queue=queue):
+        raw = queue.connection.hgetall(key)
         if not raw:
             continue
         data = {as_text(field): as_text(value) for field, value in raw.items()}
@@ -133,7 +126,6 @@ def _observed_workers(connection: Redis) -> list[WorkerDetail]:
             WorkerDetail(
                 name=key.removeprefix(Worker.redis_worker_namespace_prefix),
                 hostname=data.get("hostname", ""),
-                queues=data["queues"].split(",") if data.get("queues") else [],
                 last_heartbeat=heartbeat,
                 heartbeat_age_seconds=max(0, (now - heartbeat).total_seconds())
                 if heartbeat
@@ -172,9 +164,8 @@ def get_status(runtime: RuntimeDependency) -> AdminStatusResponse:
         api_version=APP_VERSION,
         redis=_redis_health(runtime.redis),
         metric_count=len(runtime.catalog.get_loaded_metric_names()),
-        allowed_queues=config.plugins.allowed_queues,
-        default_queue=config.plugins.default_queue,
-        configured_worker_count=len(config.workers),
+        queue=config.jobs.queue,
+        worker_concurrency=config.worker.concurrency,
         result_retention_seconds=config.jobs.result_retention_seconds,
         catalog_fingerprint=runtime.catalog.operational_fingerprint,
     )
@@ -185,28 +176,24 @@ def get_config_summary(runtime: RuntimeDependency) -> ConfigSummaryResponse:
     """Expose a non-secret summary of the validated runtime configuration.
 
     Returns:
-        Listener, queue, worker, retention, and plugin-path settings.
+        API host and port, queue name, worker settings, and job retention period.
     """
     config = runtime.config
     return ConfigSummaryResponse(
         api_host=config.api.host,
         api_port=config.api.port,
-        allowed_queues=config.plugins.allowed_queues,
-        default_queue=config.plugins.default_queue,
-        workers=[
-            _worker_config_summary(config, worker_name)
-            for worker_name in sorted(config.workers)
-        ],
+        queue=config.jobs.queue,
+        worker=_worker_config_summary(config),
         result_retention_seconds=config.jobs.result_retention_seconds,
     )
 
 
 @router.get("/catalog")
 def get_catalog(runtime: RuntimeDependency) -> CatalogSummaryResponse:
-    """Summarize the loaded catalog, installed plugins, and metric routing.
+    """Summarize the loaded catalog and installed plugins.
 
     Returns:
-        Catalog identity, metric names, distributions, and effective queues.
+        Catalog identity, metric names, and distributions.
     """
     config = runtime.config
     metric_names = runtime.catalog.get_loaded_metric_names()
@@ -217,18 +204,13 @@ def get_catalog(runtime: RuntimeDependency) -> CatalogSummaryResponse:
         installed_plugins=[
             _installed_plugin_summary(plugin) for plugin in config.plugins.installed
         ],
-        metric_queues=runtime.catalog.get_loaded_metric_queues(),
     )
 
 
 @router.get("/workers")
 def list_workers(runtime: RuntimeDependency) -> WorkersResponse:
-    """Return configured pools and native worker processes separately."""
-    config = runtime.config
-    return WorkersResponse(
-        pools=[_worker_config_summary(config, name) for name in sorted(config.workers)],
-        workers=_observed_workers(runtime.redis),
-    )
+    """Return native processes registered on the deployment queue."""
+    return WorkersResponse(workers=_observed_workers(runtime.jobs.queue))
 
 
 @router.get("/workers/{worker_name}")
@@ -238,42 +220,21 @@ def get_worker(worker_name: str, runtime: RuntimeDependency) -> WorkerDetail:
     Raises:
         HTTPException: If the worker is no longer registered.
     """
-    for worker in _observed_workers(runtime.redis):
+    for worker in _observed_workers(runtime.jobs.queue):
         if worker.name == worker_name:
             return worker
     raise HTTPException(status_code=404, detail="Worker not found")
 
 
-@router.get("/queues")
-def list_queues(runtime: RuntimeDependency) -> QueuesResponse:
-    """Return configured routing and native queue depth."""
-    config = runtime.config
-    workers = _observed_workers(runtime.redis)
-    metric_queues = runtime.catalog.get_loaded_metric_queues()
-    return QueuesResponse(
-        allowed_queues=config.plugins.allowed_queues,
-        default_queue=config.plugins.default_queue,
-        queues=[
-            QueueSummary(
-                name=queue,
-                is_default=queue == config.plugins.default_queue,
-                assigned_metric_count=list(metric_queues.values()).count(queue),
-                configured_workers=[
-                    name
-                    for name, pool in config.workers.items()
-                    if queue in pool.queues
-                ],
-                observed_workers=[
-                    worker.name
-                    for worker in workers
-                    if queue in worker.queues and not worker.stale
-                ],
-                pending_depth=Queue(
-                    queue, connection=runtime.redis, serializer=JSONSerializer
-                ).count,
-                pending_depth_unknown=False,
-            )
-            for queue in config.plugins.allowed_queues
+@router.get("/queue")
+def get_queue(runtime: RuntimeDependency) -> QueueSummary:
+    """Return the deployment queue depth and its active worker IDs."""
+    queue = runtime.jobs.queue
+    return QueueSummary(
+        name=queue.name,
+        pending_depth=queue.count,
+        observed_workers=[
+            worker.name for worker in _observed_workers(queue) if not worker.stale
         ],
     )
 
@@ -281,7 +242,6 @@ def list_queues(runtime: RuntimeDependency) -> QueuesResponse:
 @router.get("/jobs")
 def list_jobs(
     runtime: RuntimeDependency,
-    queue: str,
     status: JobLifecycleStatus,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -290,15 +250,9 @@ def list_jobs(
 
     Returns:
         Retained jobs from the requested native page.
-
-    Raises:
-        HTTPException: If the queue is not configured.
     """
-    if queue not in runtime.config.plugins.allowed_queues:
-        raise HTTPException(status_code=422, detail="Queue is not configured")
     return JobListResponse(
         jobs=runtime.jobs.list_job_statuses(
-            queue=queue,
             status=status,
             offset=offset,
             limit=limit,
@@ -321,26 +275,3 @@ def get_job(job_id: JobId, runtime: RuntimeDependency) -> AdminJobDetail:
     if detail is None:
         raise HTTPException(status_code=404, detail="Job expired or not found")
     return detail
-
-
-@router.get("/plugin-routing")
-def list_plugin_routing(runtime: RuntimeDependency) -> PluginRoutingResponse:
-    """Return persisted metric queue assignments and queue defaults.
-
-    Returns:
-        Explicit metric routes, allowed queues, and the default queue.
-    """
-    config = runtime.config
-    return PluginRoutingResponse(
-        metric_queues=runtime.catalog.get_loaded_metric_queues(),
-        overrides={
-            plugin.distribution: plugin.routing for plugin in config.plugins.installed
-        },
-        disabled_plugins=[
-            plugin.distribution
-            for plugin in config.plugins.installed
-            if not plugin.enabled
-        ],
-        allowed_queues=config.plugins.allowed_queues,
-        default_queue=config.plugins.default_queue,
-    )

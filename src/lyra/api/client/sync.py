@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from lyra.api.options import RunRequestOptions
-    from lyra.contracts.admin import InstalledPluginListResponse, PluginRoutingResponse
+    from lyra.contracts.admin import InstalledPluginListResponse
     from lyra.contracts.data_types import DataTypesResponse
     from lyra.contracts.discovery import MetricInspection, MetricSummary
     from lyra.contracts.inspection import ResultInspection
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
         CatalogSummaryResponse,
         ConfigSummaryResponse,
         LivenessResponse,
-        QueuesResponse,
+        QueueSummary,
         ReadinessResponse,
         WorkerDetail,
         WorkersResponse,
@@ -528,13 +528,10 @@ class _AdminJobsResource:
         *,
         limit: int = 50,
         status: JobLifecycleStatus,
-        queue: str,
         offset: int = 0,
     ) -> JobListResponse:
         return self._transport.request(
-            endpoints.list_admin_jobs(
-                limit=limit, status=status, queue=queue, offset=offset
-            )
+            endpoints.list_admin_jobs(limit=limit, status=status, offset=offset)
         )
 
     def get(self, job_id: str) -> AdminJobDetail:
@@ -568,20 +565,12 @@ class _AdminWorkersResource:
         return self._transport.request(endpoints.get_admin_worker(name))
 
 
-class _AdminQueuesResource:
+class _AdminQueueResource:
     def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
-    def list(self) -> QueuesResponse:
-        return self._transport.request(endpoints.get_admin_queues())
-
-
-class _AdminRoutingResource:
-    def __init__(self, transport: SyncHTTPTransport) -> None:
-        self._transport = transport
-
-    def list(self) -> PluginRoutingResponse:
-        return self._transport.request(endpoints.list_plugin_routing())
+    def get(self) -> QueueSummary:
+        return self._transport.request(endpoints.get_admin_queue())
 
 
 class LyraClient(_ClientLifetime):
@@ -683,8 +672,7 @@ class LyraAdminClient(_ClientLifetime):
         plugins: Installed plugin inspection endpoints.
         catalog: Administrative catalog summary endpoints.
         workers: Worker inspection endpoints.
-        queues: Queue inspection endpoints.
-        routing: Metric-to-queue routing endpoints.
+        queue: Queue inspection endpoints.
 
     Example:
         >>> with LyraAdminClient("lyra.example.com", admin_api_key="...") as admin:
@@ -720,10 +708,8 @@ class LyraAdminClient(_ClientLifetime):
         """Administrative catalog summary endpoints."""
         self.workers = _AdminWorkersResource(transport)
         """Worker inspection endpoints."""
-        self.queues = _AdminQueuesResource(transport)
+        self.queue = _AdminQueueResource(transport)
         """Queue inspection endpoints."""
-        self.routing = _AdminRoutingResource(transport)
-        """Metric-to-queue routing endpoints."""
 
     def status(self) -> AdminStatusResponse:
         """Fetch a summary of the running Lyra service.
@@ -738,7 +724,7 @@ class LyraAdminClient(_ClientLifetime):
         """Fetch the effective non-secret service configuration.
 
         Returns:
-            The API, queue, worker, job-store, and plugin path configuration.
+            API host and port, queue name, worker settings, and job retention period.
 
         """
         return self._transport.request(endpoints.get_admin_config_summary())

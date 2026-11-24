@@ -52,15 +52,10 @@ def test_catalog_loads_without_installing(
 
 def test_disabled_plugins_need_not_be_installed(config: LyraConfig) -> None:
     config.plugins.installed.append(
-        InstalledPluginConfig(
-            distribution="missing-disabled", enabled=False, routing={"absent": "batch"}
-        )
+        InstalledPluginConfig(distribution="missing-disabled", enabled=False)
     )
-    catalog, _ = plugins.load_installed_plugins(config.plugins)
+    catalog = plugins.load_installed_plugins(config.plugins)
     assert list(catalog.manifests) == ["lyra-smoke-plugin"]
-    assert admin.list_plugin_routing(make_runtime(config)).disabled_plugins == [
-        "missing-disabled"
-    ]
     assert admin.list_plugins(make_runtime(config)).plugins[-1].version is None
 
 
@@ -76,23 +71,13 @@ def test_configuration_rejects_duplicate_normalized_distributions(
         type(config).model_validate(raw)
 
 
-def test_unknown_routes_invalidate_catalog_without_retry(
+def test_catalog_reads_use_captured_plugins(
     config: LyraConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     catalog = registry.Catalog.load(config.plugins)
-    config.plugins.installed[0].routing = {"absent": "batch"}
-    with pytest.raises(ValueError, match="absent"):
-        registry.Catalog.load(config.plugins)
 
     def forbidden(_: object) -> None:
         pytest.fail("Catalog reads must not retry initialization")
 
     monkeypatch.setattr(registry, "load_installed_plugins", forbidden)
     assert catalog.discovery.search()
-
-
-def test_unknown_queue_rejected(config: LyraConfig) -> None:
-    raw = config.model_dump()
-    raw["plugins"]["installed"][0]["routing"] = {"smoke_table_metric": "unknown"}
-    with pytest.raises(ValidationError, match="allowed_queues"):
-        type(config).model_validate(raw)

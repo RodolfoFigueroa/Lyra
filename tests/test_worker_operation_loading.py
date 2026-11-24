@@ -209,7 +209,7 @@ def test_split_route_loading_and_execution(
         )
     calls.clear()
     acquisition.reset_mock()
-    worker.initialize_worker("heavy", config=runtime.config)
+    worker.initialize_worker(config=runtime.config)
     assert calls == []
     acquisition.assert_not_called()
     job = native_job(monkeypatch, job_id=envelope.job_id)
@@ -279,7 +279,6 @@ def test_accepted_route_identity_across_worker_reload(
         else:
             current = worker.require_worker_config()
             worker.initialize_worker(
-                "heavy",
                 config=current.model_copy(update={"build_revision": "replacement"}),
             )
             expected = worker.DeploymentChangedError

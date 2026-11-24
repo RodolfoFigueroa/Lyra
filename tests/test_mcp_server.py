@@ -2134,7 +2134,7 @@ def _submission_fixture(
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
         payload["location"]["ids"] = [""]
-    installed = InstalledPlugin("test-plugin", plugin, {"report": "interactive"})
+    installed = InstalledPlugin("test-plugin", plugin)
     monkeypatch.setattr(
         "lyra.server.plugins.discover_installed_plugins", lambda _: [installed]
     )

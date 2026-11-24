@@ -43,9 +43,7 @@ These stages answer different questions. A valid local declaration does not prov
 
 ## Run sequentially on one worker
 
-For server jobs, the requested metric’s queue selects the worker that executes the whole dependency graph. Dependencies execute sequentially on that worker, even when their metrics use different queues for direct requests.
-
-That worker needs every plugin and source client required by the graph.
+The API queues the requested metric and its dependencies as one job. The next available worker runs the whole graph, executing each dependency before the metric that uses its output. Every worker therefore needs the plugins and source clients for every graph the deployment accepts.
 
 Local execution follows the same dependency structure in the caller’s process.
 

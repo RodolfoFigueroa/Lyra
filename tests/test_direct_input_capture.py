@@ -180,8 +180,8 @@ def test_worker_input_publication_failure(
     _, runtime = install_definitions(
         tmp_path, monkeypatch, definitions([], cache=False)
     )
-    worker.initialize_worker("lightweight", config=runtime.config)
-    native = native_job(monkeypatch, "count")
+    worker.initialize_worker(config=runtime.config)
+    native = native_job(monkeypatch)
     envelope = accepted_envelope(
         job_id=native.id,
         metric="count",

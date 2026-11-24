@@ -14,8 +14,8 @@ Collect these observations before restarting a process, so you can identify wher
 
 1. Check `/live` and `/ready`.
 2. Inspect administrator status and its observation metadata.
-3. Confirm the metric is in the catalog and has the expected route.
-4. Confirm an observed worker consumes that queue.
+3. Run `lyra-admin catalog show` and look for the requested metric.
+4. Run `lyra-admin queue show` and check for an active worker.
 5. Read worker startup logs and the job’s administrator diagnostics.
 
 Use the [command-line interface (CLI) guide](../admin-cli/) to find the inspection commands. Correct invalid plugin definitions or install missing packages before restarting.
@@ -49,12 +49,12 @@ Once startup succeeds, use the observed job behavior or error code to narrow the
 
 | Symptom | Check |
 | --- | --- |
-| Job stays queued | A live worker consumes its assigned queue |
+| Job stays queued | Run `lyra-admin workers list`. If no worker has a fresh heartbeat, check the worker startup logs. If all workers are busy, the job waits for one to finish. |
 | Worker reports an unknown metric | API and worker package/configuration agreement |
 | Submission returns 422 | The live request schema, required parameters, and named ID selections |
 | Job location resolution fails | Read the failure’s node, input, and reason. Check worker logs, provider configuration, credentials, and source availability. |
 | Job fails with `invalid_input` | Python validators, defaults, and cross-field rules |
-| Job fails with `invalid_result` | Output keys, native table types, coordinate reference system (CRS), and public serialization |
+| Job fails with `invalid_result` | Output keys, native table types, CRS, and public serialization |
 | Job fails with `resource_configuration` | The named resource’s settings and credential references in `lyra.toml` |
 | Job fails while querying a source | The failing node’s logs, source availability, and the plugin’s connection settings |
 
@@ -62,9 +62,7 @@ A schema-valid request can fail Python validation before its handler runs. Fix t
 
 ## Diagnose a graph failure
 
-Read the failing node and dependency path, then inspect worker logs for the original exception. The requested metric runs its whole graph on one worker. That worker must have every required plugin, source client, and source permission.
-
-Each metric’s queue applies when you request that metric directly. Dependencies execute on the requested metric’s worker.
+Find the failing node and dependency path in the job details, then inspect the worker logs for the exception. One worker runs the whole graph. Check that it has the plugins, source clients, and permissions the failing node needs.
 
 Execution stops at the first failure and publishes no partial outputs. A new submission starts a fresh graph; it does not resume a failed node.
 

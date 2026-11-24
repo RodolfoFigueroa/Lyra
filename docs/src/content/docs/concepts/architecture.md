@@ -36,7 +36,7 @@ During catalog compilation, Lyra validates:
 
 Each public metric has its own request and output contracts. Private metrics can supply dependencies, and you can execute them through `run_development()`.
 
-A discovery fingerprint identifies public catalog metadata. Administrative discovery also describes installed plugins and queue assignments. API and workers use a separate [`build_revision`](../identity/#distinguish-discovery-from-computation-identity) to check deployment compatibility.
+A discovery fingerprint identifies the catalog metadata you can inspect through the public API. Administrators can also list installed plugins with `lyra-admin catalog show`. Workers check the [build revision](../identity/#distinguish-discovery-from-computation-identity) to decide whether they can run a submitted job.
 
 ## Execute a job
 
@@ -68,7 +68,7 @@ Use this table to identify which component handles discovery, execution, or resu
 
 | Component | Responsibility |
 | --- | --- |
-| `lyra.server` | Web endpoints, authentication, job queues, worker processes, and result access |
+| `lyra.server` | Web endpoints, authentication, the job queue, worker processes, and result access |
 | `lyra.sdk` | Live plugin definitions, registration, and inspection |
 | `lyra.contracts` | Shared declaration, request, discovery, and result models |
 | `lyra.data` | Native tables, relational conversions, serialization, and geospatial exports |
@@ -77,7 +77,7 @@ Use this table to identify which component handles discovery, execution, or resu
 | `lyra.api` | Synchronous and asynchronous HTTP clients and the administrative command-line interface |
 | `lyra.utils` | Date and geometry helpers, plus Earth Engine helpers with the `earth-engine` extra |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
-| Redis | Queues, registries, job metadata, and completion records |
+| Redis | The job queue, registries, job metadata, and completion records |
 | SQLite | Shared immutable values, completion, schemas, and final-result descriptions |
 | PostGIS | Optional plugin-owned spatial data and queries |
 | Model Context Protocol (MCP) adapter | Agent tools using the same submission and result services |
@@ -86,7 +86,7 @@ Use this table to identify which component handles discovery, execution, or resu
 
 Public routes expose health, metric schemas, and collection metadata. Job routes and MCP tools require the agent key. Administrator routes require a separate key.
 
-Catalog compilation validates live definitions; execution establishes access to data sources. Check worker coverage and startup diagnostics as part of deployment verification.
+Lyra validates plugin definitions at startup. Workers connect to data sources when they run a job. To verify a deployment, inspect the worker startup logs and [check for a worker heartbeat](../../operate/runbook/#inspect-workers-and-the-queue).
 
 Plugin imports and factories execute trusted Python in API and worker processes. Handlers run with their process’s permissions. Metric declarations describe inputs and outputs; they do not intercept filesystem or network access. Operators control installed packages, secrets, mounts, and network permissions.
 

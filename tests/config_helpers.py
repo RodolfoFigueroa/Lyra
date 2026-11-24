@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lyra.contracts.config import InstalledPluginConfig, LyraConfig
+from lyra.contracts.config import LyraConfig
 from lyra.server.config import ApiCredentials, load_config
 from tests.config_serialization import save_config
 from tests.plugin_helpers import plugin_config
@@ -18,49 +18,23 @@ def api_credentials() -> ApiCredentials:
     )
 
 
-DEFAULT_TEST_PLUGIN = "test-plugin"
-
-
 def load_test_config(
     base: Path,
     *,
-    metric_queues: dict[str, str] | None = None,
     plugins: list[Path] | None = None,
 ) -> LyraConfig:
-    assigned_queues = set((metric_queues or {}).values())
-    allowed_queues = sorted(
-        {"batch", "heavy", "interactive", "lightweight", "priority-lane"}
-        | assigned_queues
-    )
     raw_config = {
-        "schema_version": 5,
+        "schema_version": 6,
         "build_revision": "test-build-1",
         "result_store_path": base / "results.sqlite3",
         "api": {"public_base_url": "http://127.0.0.1:5219"},
         "redis": {"url": "redis://redis:6379/0"},
         "logging": {},
         "jobs": {},
-        "plugins": {
-            "default_queue": "interactive",
-            "allowed_queues": allowed_queues,
-        },
-        "workers": {
-            "batch": {"queues": ["batch"]},
-            "heavy": {"queues": ["heavy"]},
-            "interactive": {"queues": ["interactive"]},
-            "lightweight": {"queues": ["lightweight"]},
-            "priority": {"queues": ["priority-lane"]},
-        },
+        "plugins": {"installed": [plugin_config(path) for path in plugins or []]},
+        "worker": {"temp_dir": base / "cache" / "jobs"},
     }
-    records = [plugin_config(path, routing=metric_queues) for path in (plugins or [])]
-    if metric_queues and not records:
-        records = [
-            InstalledPluginConfig(
-                distribution=DEFAULT_TEST_PLUGIN, routing=metric_queues
-            )
-        ]
     config = LyraConfig.model_validate(raw_config)
-    config.plugins.installed = records
     config_path = base / "config" / "lyra.toml"
     save_config(config, config_path)
     return load_config(config_path)

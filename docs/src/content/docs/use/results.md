@@ -32,7 +32,7 @@ You can still read the description after queue expiry or plugin changes while th
 
 ### Inspect a description over HTTP
 
-Send `GET /results/{job_id}` with your agent Bearer credential to inspect the description as JavaScript Object Notation (JSON). Both response variants return HTTP `200`:
+Send `GET /results/{job_id}` with your agent Bearer credential to inspect the description as JSON. Both response variants return HTTP `200`:
 
 | `kind` | Response contents |
 | --- | --- |
@@ -221,7 +221,7 @@ Choose the read method for the data you need:
 - `read_table()`: one named output DataFrame or GeoDataFrame
 - `read_location_input()`: one named root location input as an independent GeoDataFrame
 
-The metadata describes the metric, effective parameters, output schemas and ownership, and saved addresses. Table-reading methods reconstruct declared types and the coordinate reference system (CRS), including empty and all-null columns.
+The metadata describes the metric, effective parameters, output schemas and ownership, and saved addresses. Table-reading methods reconstruct declared types and the CRS, including empty and all-null columns.
 
 Leaving the context closes the reader’s connections, but you can still use the returned values. Editing them, including nested report fields, doesn’t change saved values or later reads. Field access doesn’t copy them again.
 
@@ -268,7 +268,7 @@ print(input_description.provider_scope)
 print(streets.geometry)
 ```
 
-Inspect the description for column units and provider scopes, including revisions and origin descriptions. Read the GeoDataFrame for the saved rows, nullable types, and coordinate reference system (CRS). Both remain available after queue expiry or plugin changes. Editing either leaves the stored data intact.
+Inspect the description for column units and provider scopes, including revisions and origin descriptions. Read the GeoDataFrame for the saved rows, nullable types, and CRS. Both remain available after queue expiry or plugin changes. Editing either leaves the stored data intact.
 
 An input includes its complete selection. If the run reuses A and B and computes C, the primary input contains all three. A shared reference selection appears once.
 
@@ -301,7 +301,7 @@ client.results.download_location_input(job_id, input_name, "input.arrow")
 
 With `AsyncLyraClient`, await each call. Downloads accept a string or `Path` and return `None`. Create the parent directory first. The client replaces the destination only after a successful download.
 
-The Arrow stream preserves nullable types, CRS, and GeoArrow well-known binary (WKB) geometry. Even an empty input retains the declared schema.
+The Arrow stream preserves nullable types, CRS, and GeoArrow WKB geometry. Even an empty input retains the declared schema.
 
 Input pages use the same [JSON encodings and byte limits](#read-paginated-rows) as output pages. Pass each `next_cursor` with the same job ID and input name until it is `None`. Output cursors apply only to output tables. An oversized input row raises `RowTooLargeError` with an authenticated Arrow download URL.
 
@@ -432,7 +432,7 @@ Interpret cells using these JSON encodings:
 - **Booleans**: JSON booleans
 - **Missing cells**: `null`
 - **Strings**: unchanged text, including whitespace
-- **Geometry**: well-known text (WKT) in the saved CRS, including empty geometries
+- **Geometry**: WKT in the saved CRS, including empty geometries
 
 Read schemas and provider ownership with [`results.describe()`](#read-a-retained-description); row pages contain only declared public columns. Use [`results.table()`](#read-a-retained-table) for native nullable scalar types and geometry objects.
 

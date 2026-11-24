@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from yaml import safe_load
+
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_FILES = [
     ROOT / "docker" / "docker-compose.yml",
@@ -22,7 +24,10 @@ def test_compose_uses_single_lyra_data_volume() -> None:
         contents = _read(compose_file)
 
         assert "lyra_data:/lyra_data" in contents
-        assert contents.count("volumes: *lyra-app-volumes") == 3
+        services = safe_load(contents)["services"]
+        for service in services.values():
+            if "command" in service or "healthcheck" in service:
+                assert "lyra_data:/lyra_data" in service["volumes"]
         assert "lyra_data:" in contents
         assert "name: lyra_data" in contents
         assert "lyra_plugin_catalog" not in contents
@@ -51,12 +56,16 @@ def test_compose_passes_env_backed_runtime_settings() -> None:
             assert entry in contents
 
 
-def test_compose_passes_worker_names_instead_of_queue_env() -> None:
+def test_compose_launches_shared_worker() -> None:
     for compose_file in COMPOSE_FILES:
         contents = _read(compose_file)
 
-        assert "python -m lyra.server.worker_launcher interactive" in contents
-        assert "python -m lyra.server.worker_launcher batch" in contents
+        commands = [
+            service["command"]
+            for service in safe_load(contents)["services"].values()
+            if "command" in service
+        ]
+        assert commands == ["python -m lyra.server.worker_launcher"]
         assert "LYRA_RUNNER_QUEUES" not in contents
         assert "CELERY_BROKER_URL" not in contents
         assert "LYRA_PLUGIN_REPOS" not in contents

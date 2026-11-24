@@ -115,7 +115,7 @@ def entry_point(
         )
         return runner.run if mode == "local" else runner.run_development
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
-    worker.initialize_worker("lightweight", config=runtime.config)
+    worker.initialize_worker(config=runtime.config)
     enqueue = Mock()
     runtime.jobs.enqueue = enqueue
 
@@ -130,7 +130,7 @@ def entry_point(
         envelope = JobEnvelope.model_validate_json(
             enqueue.call_args.args[0].model_dump_json()
         )
-        native = native_job(monkeypatch, name)
+        native = native_job(monkeypatch)
         native.id = envelope.job_id
         result = worker.run_metric_task(envelope.model_dump(mode="json"))
         # Reuse must not need the previous job's execution observations.

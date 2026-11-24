@@ -36,8 +36,6 @@ class ReadinessResponse(StrictBaseModel):
 class WorkerConfigSummary(StrictBaseModel):
     """Configured worker process settings."""
 
-    name: str = Field(min_length=1)
-    queues: list[str] = Field(min_length=1)
     concurrency: int = Field(gt=0)
     temp_dir: str
 
@@ -47,9 +45,8 @@ class ConfigSummaryResponse(StrictBaseModel):
 
     api_host: str = Field(min_length=1)
     api_port: int = Field(ge=1, le=65535)
-    allowed_queues: list[str] = Field(min_length=1)
-    default_queue: str = Field(min_length=1)
-    workers: list[WorkerConfigSummary]
+    queue: str = Field(min_length=1)
+    worker: WorkerConfigSummary
     result_retention_seconds: int = Field(gt=0)
 
 
@@ -62,13 +59,12 @@ class InstalledPluginSummary(StrictBaseModel):
 
 
 class CatalogSummaryResponse(StrictBaseModel):
-    """Plugin catalog contents and routing summary."""
+    """Plugin catalog contents."""
 
     metric_count: int = Field(ge=0)
     metric_names: list[str]
     catalog_fingerprint: str
     installed_plugins: list[InstalledPluginSummary]
-    metric_queues: dict[str, str]
 
 
 class WorkerSummary(StrictBaseModel):
@@ -76,7 +72,6 @@ class WorkerSummary(StrictBaseModel):
 
     name: str
     hostname: str
-    queues: list[str]
     last_heartbeat: datetime | None = None
     heartbeat_age_seconds: float | None = None
     stale: bool
@@ -91,30 +86,17 @@ class WorkerDetail(WorkerSummary):
 
 
 class WorkersResponse(StrictBaseModel):
-    """Configured pools separately from observed native worker processes."""
+    """Native worker processes registered for the deployment queue."""
 
-    pools: list[WorkerConfigSummary]
     workers: list[WorkerDetail]
 
 
 class QueueSummary(StrictBaseModel):
-    """Configured routing and observed capacity for a queue."""
+    """Pending jobs and active workers on the deployment queue."""
 
     name: str = Field(min_length=1)
-    is_default: bool
-    assigned_metric_count: int = Field(ge=0)
-    configured_workers: list[str]
     observed_workers: list[str]
-    pending_depth: int | None = None
-    pending_depth_unknown: bool = True
-
-
-class QueuesResponse(StrictBaseModel):
-    """Queue summaries and their worker-inspection metadata."""
-
-    allowed_queues: list[str] = Field(min_length=1)
-    default_queue: str = Field(min_length=1)
-    queues: list[QueueSummary]
+    pending_depth: int = Field(ge=0)
 
 
 class AdminStatusResponse(StrictBaseModel):
@@ -123,8 +105,7 @@ class AdminStatusResponse(StrictBaseModel):
     api_version: str = Field(min_length=1)
     redis: RedisHealth
     metric_count: int = Field(ge=0)
-    allowed_queues: list[str] = Field(min_length=1)
-    default_queue: str = Field(min_length=1)
-    configured_worker_count: int = Field(ge=0)
+    queue: str = Field(min_length=1)
+    worker_concurrency: int = Field(gt=0)
     result_retention_seconds: int = Field(gt=0)
     catalog_fingerprint: str

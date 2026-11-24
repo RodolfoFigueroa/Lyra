@@ -137,7 +137,7 @@ Download one saved output using its `job_id` and `output_name`, even after the j
 
 Send `GET /results/{job_id}/tables/{output_name}/download` with your agent Bearer credential, percent-encoding each path segment. Lyra returns `200` with content type `application/vnd.apache.arrow.stream` when the lookup succeeds.
 
-Save the response bytes unchanged as `output.arrow`. The download uses Arrow’s interprocess communication (IPC) stream format regardless of the filename. Open the saved stream with PyArrow:
+Save the response bytes unchanged as `output.arrow`. The download uses Arrow’s IPC stream format regardless of the filename. Open the saved stream with PyArrow:
 
 ```python {3-4}
 import pyarrow as pa
@@ -152,7 +152,7 @@ For a nonspatial output, reconstruct the DataFrame:
 frame = table.to_pandas()
 ```
 
-For spatial outputs, GeoArrow stores geometry as well-known binary (WKB) with its declared coordinate reference system (CRS). Use GeoPandas to reconstruct the GeoDataFrame without changing coordinates:
+For spatial outputs, GeoArrow stores geometry as WKB with its declared CRS. Use GeoPandas to reconstruct the GeoDataFrame without changing coordinates:
 
 ```python
 import geopandas as gpd
@@ -199,7 +199,7 @@ Successful requests return `200`. For pages, set a positive integer `limit` to c
 Lyra returns complete rows within the response size limit. Interpret cells using these encodings:
 
 - **Integers**: decimal strings
-- **Geometry**: well-known text (WKT) in the saved CRS
+- **Geometry**: WKT in the saved CRS
 - **Missing cells**: `null`
 
 Downloads use `application/vnd.apache.arrow.stream`, preserving the declared schema and CRS even for empty selections. Open the stream with [PyArrow or GeoPandas](#download-a-retained-table). You can retrieve these inputs after job expiry or plugin registration changes while the retained store remains available.

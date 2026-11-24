@@ -61,9 +61,7 @@ _COMMANDS = (
     _Command(
         "jobs list",
         "List retained jobs.",
-        lambda c, a: c.jobs.list(
-            limit=a.limit, status=a.status, queue=a.queue, offset=a.offset
-        ),
+        lambda c, a: c.jobs.list(limit=a.limit, status=a.status, offset=a.offset),
     ),
     _Command(
         "jobs get",
@@ -81,20 +79,15 @@ _COMMANDS = (
         lambda c, a: c.workers.get(a.name),
     ),
     _Command(
-        "queues list",
-        "Inspect queues and worker coverage.",
-        lambda c, _: c.queues.list(),
+        "queue show",
+        "Inspect the queue depth and active workers.",
+        lambda c, _: c.queue.get(),
     ),
     _Command("plugins list", "List installed plugins.", lambda c, _: c.plugins.list()),
     _Command(
         "catalog show",
-        "Show catalog contents, installed plugins, and routing.",
+        "Show catalog contents and installed plugins.",
         lambda c, _: c.catalog.summary(),
-    ),
-    _Command(
-        "routing list",
-        "List routing assignments and allowed queues.",
-        lambda c, _: c.routing.list(),
     ),
 )
 
@@ -174,7 +167,6 @@ def _command_arguments(parser: argparse.ArgumentParser, command: _Command) -> No
             required=True,
             choices=("queued", "running", "succeeded", "failed"),
         )
-        parser.add_argument("--queue", type=_nonempty, required=True)
         parser.add_argument("--offset", type=int, default=0)
     elif command.name == "jobs get":
         parser.add_argument("id", type=_nonempty)

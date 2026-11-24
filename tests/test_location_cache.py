@@ -57,13 +57,7 @@ def test_worker_jobs_reuse_internal_locations(
 ) -> None:
     runner, _, _, calls, _, _ = setup_graph(tmp_path)
     definition = runner.catalog.implementations["p"].definition
-    installed = [
-        InstalledPlugin(
-            "mixed",
-            definition,
-            {"root": "heavy", "consume": "heavy", "source": "heavy"},
-        )
-    ]
+    installed = [InstalledPlugin("mixed", definition)]
     monkeypatch.setattr(
         "lyra.server.plugins.discover_installed_plugins", lambda _: installed
     )
@@ -73,7 +67,7 @@ def test_worker_jobs_reuse_internal_locations(
     worker.set_runner_temp_base(tmp_path / "scratch")
     try:
         for label in ("a", "b"):
-            worker.initialize_worker("heavy", config=config)
+            worker.initialize_worker(config=config)
             native = native_job(monkeypatch)
             native.id = label * 32
             inputs = SELECTION | {"parameters": {"label": label}}

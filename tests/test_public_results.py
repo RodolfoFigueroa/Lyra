@@ -279,10 +279,7 @@ def test_status_and_listing_do_not_load_retained_values(
     assert snapshot.job_id == job.id
     registry = Mock(get_job_ids=Mock(return_value=[TEST_JOB_ID]))
     monkeypatch.setattr(job_store, "FinishedJobRegistry", Mock(return_value=registry))
-    assert (
-        store.list_job_statuses(queue="default", status="succeeded")[0].status
-        == "succeeded"
-    )
+    assert store.list_job_statuses(status="succeeded")[0].status == "succeeded"
     assert store.get_job_detail(TEST_JOB_ID).snapshot.status == "succeeded"
     forbidden.assert_not_called()
 

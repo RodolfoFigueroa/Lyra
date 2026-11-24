@@ -109,11 +109,9 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> LyraConfig:
 
 def ensure_runtime_directories(config: LyraConfig) -> None:
     """Create non-secret runtime directories declared by the server config."""
-    paths: set[Path] = {config.result_store_path.parent}
+    paths: set[Path] = {config.result_store_path.parent, config.worker_temp_dir()}
     if config.logging.file is not None:
         paths.add(config.logging.file.parent)
-
-    paths.update(config.worker_temp_dir(worker_name) for worker_name in config.workers)
 
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)

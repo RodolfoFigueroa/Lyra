@@ -1,6 +1,7 @@
 """Reusable worker graph integration fixtures."""
 
 from collections.abc import Callable
+from itertools import starmap
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -47,17 +48,7 @@ def install_definitions(
     *,
     result_store_path: Path | None = None,
 ) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
-    plugins = [
-        InstalledPlugin(
-            name,
-            definition,
-            {
-                n: "heavy" if n == "root" else "lightweight"
-                for n in definition.metric_names
-            },
-        )
-        for name, definition in definitions.items()
-    ]
+    plugins = list(starmap(InstalledPlugin, definitions.items()))
     config = load_test_config(tmp_path)
     config.result_store_path = (
         result_store_path or tmp_path / "store" / "results.sqlite3"
@@ -71,18 +62,17 @@ def install_definitions(
         lambda ref: definitions[ref.split(":")[0]],
     )
     runtime = make_runtime(config)
-    worker.initialize_worker("heavy", config=config)
+    worker.initialize_worker(config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     return plugins, runtime
 
 
 def native_job(
-    monkeypatch: pytest.MonkeyPatch, root: str = "root", *, job_id: str | None = None
+    monkeypatch: pytest.MonkeyPatch, *, job_id: str | None = None
 ) -> SimpleNamespace:
-    catalog = worker.require_worker_runtime().catalog
     native = SimpleNamespace(
         id=job_id or new_job_id(),
-        origin=catalog.metric_queues[root],
+        origin=worker.require_worker_config().jobs.queue,
         worker_name="fake-worker",
         meta={},
         save_meta=Mock(),

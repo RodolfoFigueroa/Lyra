@@ -46,10 +46,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class WorkerRuntime:
-    """One pool's catalog, queue assignments and execution settings."""
+    """Catalog and execution settings captured at worker startup."""
 
     catalog: Catalog
-    queues: frozenset[str]
     config: LyraConfig
 
 
@@ -149,8 +148,8 @@ def set_runner_temp_base(path: Path | None) -> None:
     _RUNNER_TEMP_BASE = path
 
 
-def initialize_worker(worker_name: str, *, config: LyraConfig) -> WorkerRuntime:
-    """Load all enabled plugins and bind a worker to its configured queues.
+def initialize_worker(*, config: LyraConfig) -> WorkerRuntime:
+    """Load all enabled plugins for execution.
 
     Returns:
         The process runtime for subsequent jobs.
@@ -158,10 +157,9 @@ def initialize_worker(worker_name: str, *, config: LyraConfig) -> WorkerRuntime:
     global _WORKER_RUNTIME  # ruff:ignore[global-statement]
 
     config = config.model_copy(deep=True)
-    queues = frozenset(config.get_worker(worker_name).queues)
     catalog = Catalog.load(config.plugins, build_revision=config.build_revision)
-    runtime = WorkerRuntime(catalog, queues, config)
-    set_runner_temp_base(config.worker_temp_dir(worker_name))
+    runtime = WorkerRuntime(catalog, config)
+    set_runner_temp_base(config.worker_temp_dir())
     _WORKER_RUNTIME = runtime
     return runtime
 
@@ -357,10 +355,6 @@ def _execute_bound_job(
         BoundPlanError: If this installation cannot honor the accepted computation.
         RuntimeError: If execution did not publish a terminal result description.
     """
-    queue = runtime.catalog.metric_queues.get(plan.metric)
-    if queue not in runtime.queues or queue != native.origin:
-        message = "Accepted metric is unavailable in this worker pool"
-        raise BoundPlanError(message)
     try:
         live = prepare_execution(
             runtime.catalog.compiled,

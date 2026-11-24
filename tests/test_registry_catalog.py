@@ -33,7 +33,6 @@ from tests.contract_helpers import (
 )
 from tests.plugin_helpers import MANIFEST_FILENAME, plugin_config
 from tests.smoke_plugin_helpers import (
-    SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
 )
 
@@ -59,7 +58,6 @@ def _write_manifest(repo: Path, manifest: dict[str, Any]) -> None:
 def config(tmp_path: Path) -> LyraConfig:
     return load_test_config(
         tmp_path,
-        metric_queues={"light_metric": "lightweight", "raster_metric": "heavy"},
     )
 
 
@@ -84,7 +82,6 @@ def test_catalog_reuses_discovery_without_resource_access(
         cast("dict[str, Any]", info.parameters["properties"])["value"]["type"]
         == "integer"
     )
-    assert catalog.metric_queues["light_metric"] == "lightweight"
     assert catalog.compiled.graph.nodes["light_metric"].distribution == "fake-plugin"
     jobs = Mock()
     asyncio.run(
@@ -103,7 +100,6 @@ def test_catalog_reuses_discovery_without_resource_access(
             jobs=jobs,
         )
     )
-    assert jobs.enqueue.call_args.kwargs == {"queue": "lightweight"}
     assert (
         jobs.enqueue.call_args.args[0].accepted.catalog_fingerprint
         == discovery.fingerprint
@@ -141,14 +137,11 @@ def test_catalog_refresh_reads_registered_definitions(
     entry = catalog.compiled.graph.nodes["light_metric"]
 
     assert entry is not None
-    assert catalog.metric_queues["light_metric"] == "interactive"
     assert entry.distribution == "fake-plugin"
 
 
 def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
-    config = load_test_config(
-        tmp_path, metric_queues=SMOKE_METRIC_QUEUES, plugins=[SMOKE_PLUGIN_DIR]
-    )
+    config = load_test_config(tmp_path, plugins=[SMOKE_PLUGIN_DIR])
     catalog = registry.Catalog.load(config.plugins)
     assert catalog.get_loaded_metric_names() == [
         "example_city_population",
@@ -159,7 +152,6 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
         "smoke_summary_metric",
         "smoke_table_metric",
     ]
-    assert catalog.metric_queues["smoke_table_metric"] == "interactive"
     for name in ("smoke_table_metric", "smoke_summary_metric"):
         info = catalog.discovery.inspect(name)
         assert set(info.location_inputs) == {"location"}
@@ -170,7 +162,6 @@ def test_catalog_refresh_rejects_missing_directory_source(tmp_path: Path) -> Non
     missing_source = tmp_path / "missing-smoke-plugin"
     config = load_test_config(
         tmp_path,
-        metric_queues=SMOKE_METRIC_QUEUES,
         plugins=[missing_source],
     )
 
@@ -287,15 +278,14 @@ def test_public_catalog_fingerprint_ignores_queue_assignment_and_manifest_path(
     configure_catalog_plugins(config, [repo])
 
     original = registry.Catalog.load(config.plugins)
-    config.plugins.installed[0].routing["light_metric"] = "batch"
+    config.jobs.queue = "alternate"
     rerouted = registry.Catalog.load(config.plugins)
     assert rerouted.discovery.fingerprint == original.discovery.fingerprint
-    assert rerouted.operational_fingerprint != original.operational_fingerprint
+    assert rerouted.operational_fingerprint == original.operational_fingerprint
 
     moved = tmp_path / "moved"
     _write_manifest(moved, _manifest())
     configure_catalog_plugins(config, [moved])
-    config.plugins.installed[0].routing = dict(original.metric_queues)
     relocated = registry.Catalog.load(config.plugins)
     assert relocated.discovery.fingerprint == original.discovery.fingerprint
     assert relocated.operational_fingerprint == original.operational_fingerprint
@@ -411,29 +401,10 @@ def test_catalog_prepares_location_and_bounds(
     assert set(catalog.discovery.inspect("light_metric").location_inputs) == set(inputs)
 
 
-def test_catalog_captures_and_validates_routing(
-    config: LyraConfig, tmp_path: Path
-) -> None:
-    repo = tmp_path / "repo"
-    _write_manifest(repo, _manifest())
-    configure_catalog_plugins(config, [repo])
-    original = registry.Catalog.load(config.plugins)
-    queues = dict(original.metric_queues)
-    captured = registry.Catalog(original.compiled, queues)
-    queues["light_metric"] = "changed"
-    assert captured.metric_queues["light_metric"] == "lightweight"
-    with pytest.raises(TypeError):
-        cast("dict[str, str]", captured.metric_queues)["light_metric"] = "changed"
-    for invalid in ({}, {**queues, "unknown": "batch"}):
-        with pytest.raises(ValueError, match="Queue assignments"):
-            registry.Catalog(original.compiled, invalid)
-
-
 def test_empty_catalog() -> None:
-    catalog = registry.Catalog(compile_live_catalog({}), {})
+    catalog = registry.Catalog(compile_live_catalog({}))
     assert catalog.discovery.search() == []
     assert catalog.get_loaded_metric_names() == []
-    assert catalog.get_loaded_metric_queues() == {}
 
 
 @pytest.mark.parametrize("edition", ["one", "two"])
@@ -458,10 +429,7 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
     definitions["providers"] = PluginDefinition(
         resources={"test_units": provider("test_units")}
     )
-    catalog = registry.Catalog(
-        compile_live_catalog(definitions),
-        {"metric_one": "interactive", "metric_two": "batch"},
-    )
+    catalog = registry.Catalog(compile_live_catalog(definitions))
     jobs = Mock()
     asyncio.run(
         submit_job(
@@ -485,14 +453,11 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
     assert provenance.plan.metric == f"metric_{edition}"
     assert provenance.plugin.name == edition
     assert provenance.catalog_fingerprint == catalog.discovery.fingerprint
-    assert jobs.enqueue.call_args.kwargs == {
-        "queue": catalog.metric_queues[envelope.accepted.plan.metric]
-    }
     assert catalog.get_loaded_metric_names() == ["metric_one", "metric_two"]
     assert [item.name for item in catalog.discovery.search()] == [
         "metric_one",
         "metric_two",
     ]
     definitions[edition] = definition(edition, "Updated description")
-    updated = registry.Catalog(compile_live_catalog(definitions), catalog.metric_queues)
+    updated = registry.Catalog(compile_live_catalog(definitions))
     assert updated.discovery.fingerprint != catalog.discovery.fingerprint

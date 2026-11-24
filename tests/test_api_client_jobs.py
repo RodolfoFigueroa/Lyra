@@ -32,8 +32,7 @@ from tests.client_helpers import (
     _metric_response,
     _mock_sync_http,
     _plugin_repo_list_response,
-    _plugin_routing_response,
-    _queues_response,
+    _queue_response,
     _readiness_response,
     _redis_unavailable_response,
     _result_descriptor_response,
@@ -173,7 +172,7 @@ def test_sync_client_uses_admin_job_operations(
         admin_api_key="admin-secret",
     )
 
-    jobs = client.jobs.list(limit=10, status="running", queue="heavy", offset=3)
+    jobs = client.jobs.list(limit=10, status="running", offset=3)
     detail = client.jobs.get(CLIENT_JOB_ID)
 
     assert requests_seen == [
@@ -182,7 +181,6 @@ def test_sync_client_uses_admin_job_operations(
             "params": {
                 "limit": 10,
                 "status": "running",
-                "queue": "heavy",
                 "offset": 3,
             },
             "timeout": 12.0,
@@ -211,7 +209,7 @@ def test_sync_client_uses_observability_routes(
         "http://example.test/admin/catalog": _catalog_summary_response(),
         "http://example.test/admin/workers": _workers_response(),
         "http://example.test/admin/workers/interactive": _worker_detail_response(),
-        "http://example.test/admin/queues": _queues_response(),
+        "http://example.test/admin/queue": _queue_response(),
     }
     seen: list[str] = []
     seen_headers: list[dict[str, str]] = []
@@ -240,7 +238,7 @@ def test_sync_client_uses_observability_routes(
     catalog = client.catalog.summary()
     workers = client.workers.list()
     worker = client.workers.get("interactive")
-    queues = client.queues.list()
+    queue = client.queue.get()
 
     assert seen == list(responses)
     assert seen_headers[:2] == [{}, {}]
@@ -248,13 +246,13 @@ def test_sync_client_uses_observability_routes(
     assert liveness.status == "ok"
     assert readiness.status == "ready"
     assert status.metric_count == 1
-    assert config.workers[0].name == "interactive"
+    assert config.worker.concurrency == 1
     assert catalog.installed_plugins[0].distribution == "lyra-smoke-plugin"
     assert workers.workers[0].state == "busy"
     assert workers.workers[0].stale is False
     assert worker.current_job == CLIENT_JOB_ID
     assert worker.heartbeat_age_seconds == pytest.approx(0.25)
-    assert queues.queues[0].pending_depth_unknown is True
+    assert queue.pending_depth == 3
 
 
 def test_sync_client_exposes_structured_database_unavailability(
@@ -279,12 +277,11 @@ def test_sync_client_exposes_structured_database_unavailability(
     assert exc_info.value.retry_after_seconds == 5
 
 
-def test_sync_client_uses_plugin_and_routing_routes(
+def test_sync_client_lists_installed_plugins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     responses = [
         _plugin_repo_list_response(),
-        _plugin_routing_response(),
     ]
     requests_seen: list[dict[str, Any]] = []
 
@@ -308,7 +305,6 @@ def test_sync_client_uses_plugin_and_routing_routes(
         "example.test/", secure=False, timeout=12.0, admin_api_key="admin-secret"
     )
     repos = admin.plugins.list()
-    routing = admin.routing.list()
     assert requests_seen == [
         {
             "method": "GET",
@@ -318,17 +314,8 @@ def test_sync_client_uses_plugin_and_routing_routes(
             "timeout": 12.0,
             "headers": {"Authorization": "Bearer admin-secret"},
         },
-        {
-            "method": "GET",
-            "url": "http://example.test/admin/plugin-routing",
-            "params": None,
-            "json": None,
-            "timeout": 12.0,
-            "headers": {"Authorization": "Bearer admin-secret"},
-        },
     ]
     assert repos.plugins[0].distribution == "lyra-smoke-plugin"
-    assert routing.metric_queues == {"smoke_table_metric": "interactive"}
 
 
 def test_sync_client_reports_operator_route_errors(
@@ -665,9 +652,7 @@ def test_async_client_uses_admin_job_operations(
         admin_api_key="admin-secret",
     )
 
-    jobs = client_runtime.run(
-        client.jobs.list(limit=10, status="running", queue="heavy", offset=3)
-    )
+    jobs = client_runtime.run(client.jobs.list(limit=10, status="running", offset=3))
     detail = client_runtime.run(client.jobs.get(CLIENT_JOB_ID))
 
     assert RecordingSession.requests_seen == [
@@ -678,7 +663,6 @@ def test_async_client_uses_admin_job_operations(
                 "params": {
                     "limit": 10,
                     "status": "running",
-                    "queue": "heavy",
                     "offset": 3,
                 },
                 "headers": {"Authorization": "Bearer admin-secret"},
@@ -718,7 +702,7 @@ def test_async_client_uses_observability_routes(
         _catalog_summary_response(),
         _workers_response(),
         _worker_detail_response(),
-        _queues_response(),
+        _queue_response(),
     ]
     RecordingSession.responses = [
         FakeAsyncResponse(payload=response) for response in responses
@@ -740,7 +724,7 @@ def test_async_client_uses_observability_routes(
     catalog = client_runtime.run(client.catalog.summary())
     workers = client_runtime.run(client.workers.list())
     worker = client_runtime.run(client.workers.get("interactive"))
-    queues = client_runtime.run(client.queues.list())
+    queue = client_runtime.run(client.queue.get())
 
     assert RecordingSession.urls == [
         "http://example.test/live",
@@ -750,7 +734,7 @@ def test_async_client_uses_observability_routes(
         "http://example.test/admin/catalog",
         "http://example.test/admin/workers",
         "http://example.test/admin/workers/interactive",
-        "http://example.test/admin/queues",
+        "http://example.test/admin/queue",
     ]
     assert RecordingSession.headers[:2] == [{}, {}]
     assert (
@@ -759,13 +743,13 @@ def test_async_client_uses_observability_routes(
     assert liveness.status == "ok"
     assert readiness.status == "ready"
     assert status.metric_count == 1
-    assert config.workers[0].name == "interactive"
+    assert config.worker.concurrency == 1
     assert catalog.installed_plugins[0].distribution == "lyra-smoke-plugin"
     assert workers.workers[0].state == "busy"
     assert workers.workers[0].stale is False
     assert worker.current_job == CLIENT_JOB_ID
     assert worker.heartbeat_age_seconds == pytest.approx(0.25)
-    assert queues.queues[0].pending_depth_unknown is True
+    assert queue.pending_depth == 3
 
 
 def test_async_client_exposes_structured_database_unavailability(
@@ -793,7 +777,7 @@ def test_async_client_exposes_structured_database_unavailability(
     assert exc_info.value.retry_after_seconds == 5
 
 
-def test_async_client_uses_plugin_and_routing_routes(
+def test_async_client_lists_installed_plugins(
     client_runtime: ClientRuntime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -807,20 +791,13 @@ def test_async_client_uses_plugin_and_routing_routes(
 
     RecordingSession.responses = [
         FakeAsyncResponse(payload=_plugin_repo_list_response()),
-        FakeAsyncResponse(payload=_plugin_routing_response()),
     ]
     monkeypatch.setattr("httpx.AsyncClient", RecordingSession)
     admin = AsyncLyraAdminClient(
         "example.test/", secure=False, admin_api_key="admin-secret"
     )
 
-    async def run_requests() -> tuple[Any, ...]:
-        return (
-            await admin.plugins.list(),
-            await admin.routing.list(),
-        )
-
-    repos, routing = client_runtime.run(run_requests())
+    repos = client_runtime.run(admin.plugins.list())
     assert RecordingSession.requests_seen == [
         {
             "args": ("GET", "http://example.test/admin/plugins"),
@@ -830,17 +807,8 @@ def test_async_client_uses_plugin_and_routing_routes(
                 "headers": {"Authorization": "Bearer admin-secret"},
             },
         },
-        {
-            "args": ("GET", "http://example.test/admin/plugin-routing"),
-            "kwargs": {
-                "params": None,
-                "json": None,
-                "headers": {"Authorization": "Bearer admin-secret"},
-            },
-        },
     ]
     assert repos.plugins[0].distribution == "lyra-smoke-plugin"
-    assert routing.metric_queues == {"smoke_table_metric": "interactive"}
 
 
 def test_async_client_reports_operator_route_errors(

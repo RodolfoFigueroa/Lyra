@@ -6,7 +6,7 @@ contentPlan: operate/requirements
 sidebar: { label: "Prepare A Deployment" }
 ---
 
-Gather the services, credentials, storage, and plugins for your Lyra server before starting containers. You need an API, Redis, and worker pools. Add data services, such as PostgreSQL with PostGIS, when a plugin requires them.
+Prepare the API and worker service to share one Redis instance before you start the containers. Add a data service, such as PostgreSQL with PostGIS, if one of your plugins needs it.
 
 If you only want to try a calculation, the [local tutorial](../../start/local/) needs none of this infrastructure.
 
@@ -18,7 +18,7 @@ Prepare the services, credentials, and storage that the API and workers share:
 | --- | --- |
 | Container tools | Docker with Compose and support for named build contexts |
 | Application image | Lyra and selected plugins installed from a locked dependency set |
-| Redis | Queues, job metadata, and completion records. Both the API and workers need access. |
+| Redis | One instance that the API and workers can reach. It stores the job queue, job metadata, and completion records. |
 | PostGIS | A reachable database when a plugin-owned resource requires it |
 | API credentials | A random agent key and a different random administrator key |
 | Configuration | A `lyra.toml` shared by API and workers |

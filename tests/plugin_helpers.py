@@ -30,9 +30,7 @@ MANIFEST_FILENAME = "lyra.plugin.json"
 VERSIONS: dict[str, str] = {}
 
 
-def plugin_config(
-    path: Path, *, routing: dict[str, str] | None = None
-) -> InstalledPluginConfig:
+def plugin_config(path: Path) -> InstalledPluginConfig:
     """Register fake installed metadata for a local project or declaration fixture."""
     project = path / "pyproject.toml"
     if project.is_file():
@@ -40,14 +38,14 @@ def plugin_config(
         name = normalize_distribution_name(metadata["name"])
         VERSIONS[name] = metadata["version"]
         PATHS[name] = path
-        return InstalledPluginConfig(distribution=name, routing=routing or {})
+        return InstalledPluginConfig(distribution=name)
     manifest_path = path / "lyra.plugin.json"
     raw = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
     info = raw.get("plugin", {"name": "missing-plugin", "version": "1.0.0"})
     name = normalize_distribution_name(info["name"])
     VERSIONS[name] = info["version"]
     PATHS[name] = path
-    return InstalledPluginConfig(distribution=name, routing=routing or {})
+    return InstalledPluginConfig(distribution=name)
 
 
 PATHS: dict[str, Path] = {}

@@ -45,29 +45,11 @@ services:
     networks:
       - lyra_net
 
-  lyra-celery-worker-interactive-dev:
+  lyra-worker-dev:
     image: lyra-dev:latest
-    container_name: lyra-celery-worker-interactive-dev
+    container_name: lyra-worker-dev
     restart: unless-stopped
-    command: python -m lyra.server.worker_launcher interactive
-    volumes: *lyra-app-volumes
-    networks:
-      - lyra_net
-    depends_on:
-      lyra-redis-dev:
-        condition: service_started
-    build:
-      context: ../examples/lyra-deployment
-      target: development
-      additional_contexts:
-        lyra: ..
-        city: ../examples/city-plugin
-
-  lyra-celery-worker-batch-dev:
-    image: lyra-dev:latest
-    container_name: lyra-celery-worker-batch-dev
-    restart: unless-stopped
-    command: python -m lyra.server.worker_launcher batch
+    command: python -m lyra.server.worker_launcher
     volumes: *lyra-app-volumes
     networks:
       - lyra_net

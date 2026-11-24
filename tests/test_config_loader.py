@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from tomllib import loads as loads_normalized_toml
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,9 +13,8 @@ from lyra.server.config import (
     ensure_runtime_directories,
     load_api_credentials,
     load_config,
-    parse_config_toml,
 )
-from tests.config_serialization import render_config_toml, save_config
+from tests.config_serialization import save_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,11 +28,10 @@ def _valid_toml(
     base: Path,
     *,
     api_port: int = 5219,
-    worker_name: str = "interactive",
 ) -> str:
     return (
         f"""
-schema_version = 5
+schema_version = 6
 build_revision = "test-build-1"
 
 [api]
@@ -53,13 +50,10 @@ file = {_q(base / "logs" / "lyra.log")}
 result_retention_seconds = 86400
 
 [plugins]
-default_queue = "interactive"
-allowed_queues = ["interactive", "batch"]
 
-[workers.{_q(worker_name)}]
-queues = ["interactive"]
+[worker]
 concurrency = 32
-temp_dir = {_q(base / "cache" / "jobs" / worker_name)}
+temp_dir = {_q(base / "cache" / "jobs")}
 """.strip()
         + "\n"
     )
@@ -85,7 +79,7 @@ def test_load_config_reads_toml_without_resolving_credentials(
     config = load_config(config_path)
 
     assert config.api.port == 5219
-    assert config.plugins.allowed_queues == ["interactive", "batch"]
+    assert config.jobs.queue == "lyra"
     assert config.plugins.installed == []
 
 
@@ -191,23 +185,6 @@ def test_load_config_reads_each_document(tmp_path: Path) -> None:
     assert reloaded == load_config(config_path)
 
 
-def test_render_config_toml_preserves_dynamic_quoted_worker_keys(
-    tmp_path: Path,
-) -> None:
-    config_path = tmp_path / "config" / "lyra.toml"
-    _write_config(
-        config_path,
-        _valid_toml(tmp_path, worker_name="interactive.worker"),
-    )
-    config = load_config(config_path)
-
-    rendered = render_config_toml(config)
-    reparsed = parse_config_toml(loads_normalized_toml(rendered))
-
-    assert '[workers."interactive.worker"]' in rendered
-    assert sorted(reparsed.workers) == ["interactive.worker"]
-
-
 def test_save_config_writes_loadable_toml_without_temp_file_leaks(
     tmp_path: Path,
 ) -> None:
@@ -236,7 +213,7 @@ def test_ensure_runtime_directories_creates_non_secret_layout(
     expected_dirs = [
         config.result_store_path.parent,
         tmp_path / "config",
-        tmp_path / "cache" / "jobs" / "interactive",
+        tmp_path / "cache" / "jobs",
         tmp_path / "logs",
     ]
     assert all(path.is_dir() for path in expected_dirs)

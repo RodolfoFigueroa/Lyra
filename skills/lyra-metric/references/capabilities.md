@@ -187,7 +187,7 @@ Use the contracts above to adapt your calculation without a Lyra checkout or liv
 
 API and workers use the same live definitions to prepare requests. Both processes import enabled distributions through their entry-point factories, so every plugin dependency must work in both. Keep loading and request preparation free of external input/output (I/O).
 
-Deploy one immutable build and share its `build_revision` across API and workers. The revision covers executable code, declarations, and routing policy. Each queued request records:
+Deploy the same immutable build and `build_revision` to the API and workers. Assign a new revision when you change executable code, plugin declarations, or provider routing rules. Each queued request records:
 
 - Normalized selections and complete effective values for each node use
 - Pinned location scopes

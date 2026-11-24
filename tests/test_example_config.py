@@ -11,12 +11,12 @@ def test_example_config_matches_config_contract() -> None:
 
     config = LyraConfig.model_validate(raw_config)
 
-    assert config.plugins.default_queue in config.plugins.allowed_queues
+    assert config.jobs.queue == "lyra"
     assert "admin" not in raw_config
     assert "agent" not in raw_config
     assert config.api.forwarded_allow_ips == ["127.0.0.1"]
     assert config.logging.file is None
-    assert set(config.workers) == {"batch", "interactive"}
+    assert config.worker.concurrency == 6
 
     rendered = render_config_toml(config)
 

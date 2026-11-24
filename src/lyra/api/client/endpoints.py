@@ -10,7 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from lyra.api.client.base import parse_retry_after, service_unavailable_error
 from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
-from lyra.contracts.admin import InstalledPluginListResponse, PluginRoutingResponse
+from lyra.contracts.admin import InstalledPluginListResponse
 from lyra.contracts.data_types import DataTypesResponse
 from lyra.contracts.discovery import MetricInspection, MetricSummary
 from lyra.contracts.inspection import ResultInspection
@@ -29,7 +29,7 @@ from lyra.contracts.observability import (
     CatalogSummaryResponse,
     ConfigSummaryResponse,
     LivenessResponse,
-    QueuesResponse,
+    QueueSummary,
     ReadinessResponse,
     WorkerDetail,
     WorkersResponse,
@@ -313,12 +313,11 @@ def list_admin_jobs(
     *,
     limit: int = 50,
     status: JobLifecycleStatus,
-    queue: str,
     offset: int = 0,
 ) -> RequestSpec[JobListResponse]:
     """Return the request specification to list admin jobs."""
     params: dict[str, Any] = {"limit": limit}
-    params.update(status=status, queue=queue, offset=offset)
+    params.update(status=status, offset=offset)
     return RequestSpec(
         "GET",
         "admin/jobs",
@@ -345,16 +344,6 @@ def list_plugins() -> RequestSpec[InstalledPluginListResponse]:
         "admin/plugins",
         "list installed plugins",
         TypeAdapter(InstalledPluginListResponse),
-    )
-
-
-def list_plugin_routing() -> RequestSpec[PluginRoutingResponse]:
-    """Return the request specification to list plugin routing."""
-    return RequestSpec(
-        "GET",
-        "admin/plugin-routing",
-        "list plugin routing",
-        TypeAdapter(PluginRoutingResponse),
     )
 
 
@@ -402,10 +391,10 @@ def get_admin_worker(worker_name: str) -> RequestSpec[WorkerDetail]:
     )
 
 
-def get_admin_queues() -> RequestSpec[QueuesResponse]:
-    """Return the request specification to fetch admin queues."""
+def get_admin_queue() -> RequestSpec[QueueSummary]:
+    """Return the request specification to fetch admin queue."""
     return RequestSpec(
-        "GET", "admin/queues", "fetch admin queues", TypeAdapter(QueuesResponse)
+        "GET", "admin/queue", "fetch admin queue", TypeAdapter(QueueSummary)
     )
 
 

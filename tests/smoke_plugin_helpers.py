@@ -4,13 +4,6 @@ from pathlib import Path
 from typing import Any
 
 SMOKE_PLUGIN_DIR = Path(__file__).parents[1] / "examples" / "lyra-plugin"
-SMOKE_METRIC_QUEUES = {
-    "example_city_population": "interactive",
-    "example_population_baseline": "interactive",
-    "smoke_table_metric": "interactive",
-    "smoke_summary_metric": "interactive",
-    "smoke_progress_metric": "interactive",
-}
 
 
 def feature_collection(feature_ids: tuple[str, ...] = ("area-1",)) -> dict[str, Any]:

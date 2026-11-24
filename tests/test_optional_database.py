@@ -77,6 +77,6 @@ def test_worker_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     pool = Mock()
     monkeypatch.setattr(worker_launcher, "WorkerPool", pool)
-    worker_launcher.launch_worker("interactive", config=config)
+    worker_launcher.launch_worker(config=config)
     pool.return_value.start.assert_called_once()
     connection.close.assert_called_once()

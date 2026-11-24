@@ -31,7 +31,6 @@ class BoundWorkerSuite:
         """Bind the selected workload to temporary storage and fake job services."""
         self.native = SimpleNamespace(
             id=new_job_id(),
-            origin="heavy",
             worker_name="benchmark",
             meta={},
             save_meta=Mock(),
@@ -69,7 +68,7 @@ class BoundWorkerSuite:
             patch.object(
                 worker,
                 "_WORKER_RUNTIME",
-                worker.WorkerRuntime(self.catalog, frozenset({"heavy"}), self.config),
+                worker.WorkerRuntime(self.catalog, self.config),
             ),
             patch.object(worker, "build_run_context", return_value=Mock()),
         ):

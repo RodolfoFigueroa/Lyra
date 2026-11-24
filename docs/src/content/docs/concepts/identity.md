@@ -53,7 +53,7 @@ Lyra uses three identities for different decisions:
 | Deployment `build_revision` | Checks whether API and workers use the same immutable build |
 | [Computation identity](../caching/#keep-cached-results-current) | Determines whether a calculation can reuse cached results |
 
-The build revision covers executable code, declarations, and routing policy. Change it whenever those contents change, including edits to declaration descriptions. API and workers must share the same build and revision.
+Give the API and workers the same build and `build_revision`. Assign a new revision whenever you change executable code, plugin declarations, or [provider routing rules](../selection/). Even a change to a declaration’s description requires a new revision.
 
 A worker compares its build revision with the revision in the queued request before acquiring resources or calling handlers. A mismatch fails the job with `deployment_changed`; you can resubmit against the current catalog. A compatible worker prepares the request against its live definitions. The executor then validates the complete plan before acquiring resources.
 

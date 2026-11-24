@@ -37,22 +37,20 @@ Choose a command for the part of the deployment you need to inspect:
 | `health --live` | API process liveness |
 | `status` | Administrative service summary |
 | `config-summary` | Loaded configuration with secrets omitted |
-| `jobs list --queue your_queue_name_here --status running` | One queue/status page |
+| `jobs list --status running` | Running jobs on the deployment queue |
 | `jobs get your_job_id_here` | Job state, queue, worker identity, and failure diagnostics |
 | `workers list` / `workers get your_worker_name_here` | Worker observations and heartbeat freshness |
-| `queues list` | Queue depth and worker/routing coverage |
+| `queue show` | How many jobs are waiting and which workers have a fresh heartbeat |
 | `plugins list` | Configured distributions and installed versions |
-| `catalog show` | Catalog fingerprint, metrics, plugins, and routing |
-| `routing list` | Effective defaults and overrides |
+| `catalog show` | Catalog fingerprint, metrics, and plugins |
 
-For example:
+To list up to 20 running jobs as JSON, run this command.
 
 ```sh
-uv run lyra-admin --json jobs list \
-  --queue interactive --status running --limit 20
+uv run lyra-admin --json jobs list --status running --limit 20
 ```
 
-Job lists require both queue and status. Use `--offset 0` and `--limit 20` (1–200) for pagination. See [monitoring](../runbook/) for ordering, retention, and observation limits.
+`--status` accepts `queued`, `running`, `succeeded`, or `failed`. With the same page size, add `--offset 20` to request the next page. See [Inspect retained jobs](../runbook/#inspect-retained-jobs) for page limits and ordering.
 
 ## Validate configuration offline
 
