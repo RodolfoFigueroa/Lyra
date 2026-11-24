@@ -59,24 +59,16 @@ def _accept(
     else:
         # Revalidate mutable nested JSON and reject internal schema fields at
         # the caller boundary before any frame construction.
-        contents = value.model_dump()
-        if not value.add and "add" not in value.model_fields_set:
-            contents.pop("add")
-        value = InterventionSpec.model_validate(contents)
-        frame = (
-            decode_additions(value.add, schema.metadata)
-            if "add" in value.model_fields_set
-            else None
-        )
+        value = InterventionSpec.model_validate(value.model_dump())
+        frame = decode_additions(value.add, schema.metadata) if value.add else None
     payload = {
         "id": value.id,
         "catalog": value.catalog,
         "revision": value.revision,
         "remove": value.remove,
         "addition_schema": schema.metadata,
-        "add_omitted": frame is None,
     }
-    if frame is not None:
+    if frame is not None and len(frame):
         validated = schema.validate(frame)
         payload["add"] = encode_validated_additions(validated, schema.metadata)
     return AcceptedIntervention.model_validate(payload)

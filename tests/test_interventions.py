@@ -11,7 +11,12 @@ from shapely.geometry import Point
 from lyra.contracts.accepted import ExecutionRequest
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.interventions import AcceptedIntervention, InterventionSpec
-from lyra.data.intervention_records import accepted_additions, encode_additions
+from lyra.data.intervention_records import (
+    accepted_additions,
+    decode_additions,
+    encode_additions,
+    encode_validated_additions,
+)
 from lyra.data.interventions import Intervention
 from lyra.sdk.interventions import accept_interventions
 from lyra.sdk.provider_schema import ProviderSchema
@@ -67,8 +72,8 @@ def test_omission_and_empty_overall_collection() -> None:
     assert ExecutionRequest(metric="metric").interventions == []
     assert ExecutionRequest(metric="metric", interventions=[]).interventions == []
     assert accept(native()).add == []
-    assert accepted_additions(accept(native())) is None
-    assert accepted_additions(accept(spec())) is None
+    assert accepted_additions(accept(native())).empty
+    assert accepted_additions(accept(spec())).empty
     captured = accept(native())
     restored = AcceptedIntervention.model_validate_json(captured.model_dump_json())
     assert restored == captured
@@ -197,6 +202,12 @@ def test_declared_types_survive_all_null_and_empty_records(*, empty: bool) -> No
     assert accept(spec(add=[])).addition_schema is not None
 
 
+def test_nonempty_row_index_requires_registered_columns() -> None:
+    data = gpd.GeoDataFrame(index=[0])
+    with pytest.raises(ValueError, match="location_id"):
+        accept(native(data))
+
+
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize(
     "problem", ["missing", "extra", "crs", "active", "dtype", "no_crs"]
@@ -219,8 +230,11 @@ def test_native_metadata_is_validated_before_encoding(
         data["count"] = data["count"].astype("string")
     elif problem == "no_crs":
         data = gpd.GeoDataFrame(data.to_dict("list"), geometry="geometry")
-    with pytest.raises((ValueError, MetricResultError)):
-        accept(native(data))
+    if empty:
+        assert accept(native(data)) == accept(spec())
+    else:
+        with pytest.raises((ValueError, MetricResultError)):
+            accept(native(data))
 
 
 @pytest.mark.parametrize(
@@ -407,8 +421,11 @@ def test_native_boolean_and_alternate_string_backing(*, empty: bool) -> None:
     data = additions().iloc[: 0 if empty else 1].astype({"label": "string[python]"})
     captured = accept(native(data))
     assert [row["label"] for row in captured.add] == data.label.tolist()
-    with pytest.raises(MetricResultError):
-        accept(native(data.astype({"enabled": bool})))
+    if empty:
+        assert accept(native(data.astype({"enabled": bool}))) == captured
+    else:
+        with pytest.raises(MetricResultError):
+            accept(native(data.astype({"enabled": bool})))
 
 
 @pytest.mark.parametrize("storage", ["python", "pyarrow"])
@@ -436,3 +453,19 @@ def test_provider_and_additions_accept_either_string_storage(
     invalid = frame().assign(label=pd.Series(["bad", None], dtype=f"string[{storage}]"))
     with pytest.raises(MetricResultError):
         registered.validate(invalid)
+
+
+def test_wkt_column_preserves_empty_missing_and_three_dimensions() -> None:
+    metadata = schema().metadata
+    geometry = next(column for column in metadata.columns if column.name == "geometry")
+    geometry.nullable = True
+    data = pd.concat([additions(), additions()], ignore_index=True).iloc[:3].copy()
+    data["geometry"] = gpd.GeoSeries(
+        [Point(0.0003144543032703886, 2, 3), Point(), None], crs=data.crs
+    )
+    data.index = [7, 7, 1]
+    records = encode_validated_additions(data, metadata)
+    assert [row["geometry"] for row in records][1:] == ["POINT EMPTY", None]
+    restored = decode_additions(records, metadata)
+    assert restored.geometry.to_wkb().tolist() == data.geometry.to_wkb().tolist()
+    assert restored.crs == data.crs

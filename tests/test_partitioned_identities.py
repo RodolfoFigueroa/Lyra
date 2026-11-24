@@ -194,7 +194,7 @@ def test_correspondence_provenance_and_repeated_target_partitions() -> None:
         frame,
         primary.contract,
         source_scope=primary.contract,
-        source=primary,
+        source=primary.membership,
         computations=(("operation-A", "A"), ("operation-B", "B")),
     )
     invocation = replace(
@@ -226,7 +226,7 @@ def test_empty_correspondences_keep_completed_source_dependencies() -> None:
         frame,
         primary.contract,
         source_scope=primary.contract,
-        source=primary,
+        source=primary.membership,
         computations=(("operation-A", "A"),),
     )
     shared = replace(
@@ -260,7 +260,7 @@ def test_native_target_partition_uses_only_its_incoming_groups() -> None:
             targets,
             source.contract,
             source_scope=source.contract,
-            source=source,
+            source=source.membership,
             computations=tuple(
                 (f"operation-{group}", group) for group in (*groups, "B")
             ),

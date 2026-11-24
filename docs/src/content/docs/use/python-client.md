@@ -95,7 +95,7 @@ Omit `inputs` or `parameters`, or pass `None`, to use an empty mapping. You can 
 
 Before enqueueing, the server validates your parameters and fills in declared defaults. Omit `parameters` only when an empty object satisfies the selected metric’s parameter schema. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
 
-To submit a [street proposal](../local-execution/#run-with-a-street-proposal) with either Python client, pass `interventions=[proposal]` to any job submission method. Use `lyra[client,data]` for GeoDataFrame additions. The client checks the frame against the provider’s declared column types and CRS, then sends the records inline.
+To submit a [street proposal](../local-execution/#run-with-a-street-proposal) with either Python client, pass `interventions=[proposal]` to any job submission method. Use `lyra[client,data]` for GeoDataFrame additions. For populated additions, the client fetches metric discovery, checks the provider’s declared column types and CRS, and sends the records inline. A request containing only removals goes directly to job submission.
 
 For a run against the base datasets, omit `interventions`, pass `None`, or pass an empty list.
 

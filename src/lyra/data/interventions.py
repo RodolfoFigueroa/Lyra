@@ -50,7 +50,9 @@ class Intervention:
         if len(removals) != len(set(removals)):
             msg = "Repeated removal IDs are not allowed"
             raise ValueError(msg)
-        if (self.add is None or self.add.empty) and not removals:
+        if self.add is not None and len(self.add) == 0:
+            object.__setattr__(self, "add", None)
+        if self.add is None and not removals:
             msg = "An intervention must contain at least one addition or removal"
             raise ValueError(msg)
         for name in ("id", "catalog", "revision"):

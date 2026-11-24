@@ -111,3 +111,94 @@ def test_related_shared_target_groups(
                     selected = bindings.selected((group,))
                     pairs = retained.frame(connection, selected.selections["mapped"])
                     assert set(pairs.source_location_id) == {group}
+
+
+def test_sibling_inputs_follow_shared_owners_through_retention(
+    tmp_path: Path, database: Database
+) -> None:
+    @location_operation(
+        name="owners",
+        description="Select owners",
+        cache="per_location",
+        inputs={"source": LocationDependency(provider="source")},
+        target_provider="target",
+    )
+    def owners(source: gpd.GeoDataFrame) -> dict:
+        return {
+            key: {"a": ("X", "Y"), "b": ("Y",), "c": ()}[key]
+            for key in source.location_id
+        }
+
+    @location_operation(
+        name="siblings",
+        description="Select sibling records",
+        cache="per_location",
+        inputs={"source": LocationDependency(provider="source")},
+        target_provider="target",
+    )
+    def siblings(source: gpd.GeoDataFrame) -> dict:
+        return dict.fromkeys(source.location_id, ("shared",))
+
+    @metric(
+        name="consumer",
+        description="Related owners",
+        cache="per_location",
+        inputs={
+            "source": LocationDependency(provider="source"),
+            "owners": LocationDependency(operation="owners", primary=True).bind(
+                source=Input("source")
+            ),
+            "siblings": LocationDependency(operation="siblings").bind(
+                source=Input("source")
+            ),
+            "independent": LocationDependency(provider="source"),
+        },
+        outputs={"data": schema()},
+    )
+    def consumer(
+        source: gpd.GeoDataFrame,
+        owners: gpd.GeoDataFrame,
+        siblings: gpd.GeoDataFrame,
+        independent: gpd.GeoDataFrame,
+    ) -> pd.DataFrame:
+        assert set(source.location_id) == {"a", "b"}
+        assert set(independent.location_id) == {"a", "b", "c"}
+        assert set(
+            zip(siblings.source_location_id, siblings.location_id, strict=True)
+        ) == {("a", "shared"), ("b", "shared")}
+        return pd.DataFrame(
+            {"location_id": owners.location_id.unique(), "row_key": "one", "value": 1}
+        )
+
+    runner = LocalRunner.from_definitions(
+        {
+            "providers": provider_execution_definitions([])["providers"],
+            "consumer": PluginDefinition(
+                metrics=[consumer], location_operations=[owners, siblings]
+            ),
+        },
+        result_store_path=tmp_path / "values",
+    )
+    selection = {"provider": "source", "ids": ["a", "b", "c"]}
+    result = runner.run(
+        "consumer", inputs={"source": selection, "independent": selection}
+    )
+    assert set(result.tables["data"].location_id) == {"X", "Y"}
+    groups = {}
+    with (
+        SQLiteStore(result.metadata.store_path) as store,
+        store.engine.connect() as connection,
+    ):
+        retained = LocationInputs(store)
+        for row in database.rows["metric_inputs"]:
+            bindings = retained.bindings(connection, row["value_key"])
+            for group in bindings.groups:
+                selected = bindings.selected((group,)).selections
+                pairs = retained.frame(connection, selected["siblings"])
+                groups[group] = set(
+                    zip(pairs.source_location_id, pairs.location_id, strict=True)
+                )
+                assert set(
+                    retained.frame(connection, selected["independent"]).location_id
+                ) == {"a", "b", "c"}
+    assert groups == {"X": {("a", "shared")}, "Y": {("a", "shared"), ("b", "shared")}}

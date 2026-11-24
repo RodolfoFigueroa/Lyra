@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import traceback
 from collections import UserDict
@@ -17,7 +16,7 @@ from uuid import uuid4
 import pandas as pd
 
 from lyra.contracts.accepted import PreparedExecution
-from lyra.contracts.dependencies import Input, describe_dependency
+from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import (
     ExecutionPersistenceError,
     LocationAcquisitionError,
@@ -52,6 +51,7 @@ from lyra.runtime.operations import (
     acquire_operation_targets,
     execute_operation,
     forward_correspondences,
+    forward_pairs,
 )
 from lyra.runtime.persistence import persistence_boundary
 from lyra.runtime.planning._execution_plan import (
@@ -203,7 +203,7 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
         self.resolver: LocationResolver | None = None
         self.observations: list[InvocationObservation] = []
         self.native_inputs: list[NativeInputSummary] = []
-        self.prepared: dict[tuple[str, str, str], PreparedResolvedInvocation] = {}
+        self.prepared: dict[str, PreparedResolvedInvocation] = {}
         self.root_artifact: str | None = None
         self.root_identity: str | None = None
         self.parameter_uses: dict[str, dict] = {}
@@ -763,45 +763,44 @@ class GraphExecutor:
         """Return selected records with correspondence provenance.
 
         Raises:
-            RuntimeError: If the execution resolver is unavailable.
+            RuntimeError: If the resolver or operation membership is unavailable.
         """
         resolver = completed.resolver
         if resolver is None:
             message = "Location acquisition requires a resolver"
+            raise RuntimeError(message)
+        if location.ids is None:
+            message = "Location membership must be resolved before acquisition"
             raise RuntimeError(message)
         if location.upstream is None:
             return resolver.resolve(
                 {
                     name: LocationSelection(
                         provider=location.provider.provider_id,
-                        ids=list(location.ids or ()),
+                        ids=list(location.ids),
                     )
                 },
                 use_ids={name: completed.report.location_use_id(location)},
+                lineages={name: location.lineage},
             )[name]
         selected_sources = frozenset(source for source, _ in location.pairs)
         self._bound_correspondences(location.upstream, selected_sources, completed)
         targets = resolver.resolve(
             {
                 name: LocationSelection(
-                    provider=location.provider.provider_id, ids=list(location.ids or ())
+                    provider=location.provider.provider_id, ids=list(location.ids)
                 )
             },
             use_ids={name: completed.report.target_use_id(location.upstream)},
         )[name]
-        groups: dict[str, tuple[str, ...]] = {}
-        for source, target in location.pairs:
-            groups[source] = (*groups.get(source, ()), target)
         source = next(iter(location.upstream.locations.values()))
-        result = OperationResult(groups, source.provider, targets)
-        forwarded = forward_correspondences(
-            result,
+        return forward_pairs(
+            location.membership,
+            targets,
+            source.provider,
             self.catalog.provider_registry[
                 location.provider.provider_id
             ].schema.metadata,
-        )
-        return replace(
-            forwarded, computations=location.computations, lineage=location.lineage
         )
 
     def _run_bound_metric(
@@ -1454,10 +1453,6 @@ class GraphExecutor:
         invocation: PreparedResolvedInvocation,
         description: OutputMetadata,
     ) -> NativeLocationInput:
-        forwarded = forward_correspondences(
-            replace(outputs, source=next(iter(invocation.locations.values()))),
-            description,
-        )
         keys = invocation.computation_keys
         references = (
             tuple((key, group) for group, key in keys.items())
@@ -1465,7 +1460,11 @@ class GraphExecutor:
             else tuple((keys[None], group) for group in outputs.groups)
             or ((keys[None], None),)
         )
-        return replace(forwarded, computations=references)
+        return forward_correspondences(
+            replace(outputs, source=next(iter(invocation.locations.values()))),
+            description,
+            computations=references,
+        )
 
     def _identify(
         self,
@@ -1479,11 +1478,12 @@ class GraphExecutor:
             if len(path) == 1:
                 completed.root_identity = invocation.identity
             return invocation
+        original = invocation.original()
         dependencies = {}
         for name, edge in self.graph.dependencies[invocation.node].items():
             dependency_path = (*path, edge.output.producer.node.name)
             prepared = self._prepare(
-                invocation.original(), edge, dependency_path, completed, context_factory
+                original, edge, dependency_path, completed, context_factory
             )
             prepared = self._derived_inputs(
                 prepared, dependency_path, completed, context_factory
@@ -1491,11 +1491,18 @@ class GraphExecutor:
             dependencies[name] = self._identify(
                 prepared, dependency_path, completed, context_factory
             )
+        primary = self.graph.nodes[invocation.node].node.primary_input
+        if primary is not None:
+            original = original.select_primary(primary)
         identified = replace(
-            invocation,
+            original,
             parameters=invocation.inspect_parameters(),
             dependencies=dependencies,
         )
+        if primary is not None and invocation.original_locations is not None:
+            identified = identified.select_primary(
+                primary, frozenset(invocation.locations[primary].ids)
+            )
         if len(path) == 1:
             completed.root_identity = identified.identity
         return identified
@@ -1857,7 +1864,11 @@ class GraphExecutor:
                     if producer_primary is not None and primary is not None
                     else None
                 )
-                groups = frozenset(selected.ids or ()) if selected is not None else None
+                groups = (
+                    frozenset(selected.ids)
+                    if selected is not None and selected.ids is not None
+                    else None
+                )
                 try:
                     outputs = self._bound_metric(
                         dependency, groups, dependency_path, completed
@@ -1964,23 +1975,10 @@ class GraphExecutor:
             )
 
         try:
-            # Equivalent declarations may occur on different consumers. Nested
-            # bindings still resolve against their original owner on a miss.
-            owner_inputs = {"computation": owner.identity}
-            key = (
-                producer.node.name,
-                json.dumps(
-                    {
-                        "binding": describe_dependency(edge.dependency),
-                        "computation": bound.identity if bound is not None else None,
-                        "parameters": completed.parameter_uses[parameter_key],
-                    },
-                    sort_keys=True,
-                ),
-                json.dumps(owner_inputs, sort_keys=True),
-            )
-            if key in completed.prepared:
-                return completed.prepared[key]
+            # Each edge is prepared against its original binding. Its path is
+            # known even while an operation is still resolving the owner's primary.
+            if parameter_key in completed.prepared:
+                return completed.prepared[parameter_key]
             prepared = prepare_dependency(
                 owner,
                 edge,
@@ -2005,5 +2003,5 @@ class GraphExecutor:
                 parameter_use_key=parameter_key,
                 bound_use=bound,
             )
-            completed.prepared[key] = prepared
+            completed.prepared[parameter_key] = prepared
             return prepared

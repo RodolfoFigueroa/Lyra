@@ -72,6 +72,7 @@ def _expected_body(sections: dict[str, Any]) -> dict:
                 "id": change.id,
                 "catalog": change.catalog,
                 "revision": change.revision,
+                "add": [],
                 "remove": list(change.remove),
             }
             for change in sections["interventions"]

@@ -1042,7 +1042,7 @@ GeoParquet metadata must agree with the declared CRS. Plain Parquet with WKB geo
 
 On the first predicate query for a catalog with interventions, DuckDB and PostGIS stage its additions and removal IDs. Later queries for that catalog reuse the staged data within the same run.
 
-For PostGIS, grant read access to the base relation and the database’s `TEMPORARY` privilege for staging. Base membership checks and exact-ID reads need only read access. Lyra drops the run’s temporary tables after success, failure, or cancellation, including tables from partial setup. The shared database resource retains ownership of its connection.
+For PostGIS, grant read access to the base relation and the database’s `TEMPORARY` privilege for staging. Base membership checks and exact-ID reads need only read access. The execution’s `PostgresIO` closes its session after success, failure, or cancellation. Closing the session releases temporary tables, including tables from partial setup. A custom pooled resource must clear temporary objects before returning the session to its pool.
 
 ### Declare callback signatures
 

@@ -70,8 +70,7 @@ def with_interventions(
         json_body={
             **(request.json_body or {}),
             "interventions": [
-                value.model_dump(exclude_unset=True)
-                for value in validate_intervention_catalogs(sets)
+                value.model_dump() for value in validate_intervention_catalogs(sets)
             ],
         },
     )

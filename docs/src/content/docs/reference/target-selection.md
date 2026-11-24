@@ -165,7 +165,7 @@ The source and target catalogs can each have their own intervention set. Your op
 
 A filter can return zero matches. If an ID-only operation requests a removed target by ID, resolution fails.
 
-DuckDB and PostGIS load additions and removal IDs on the first predicate query for each affected catalog. Later selectors and batches reuse that temporary data within the run. Exact-ID reads and membership checks need no staging. Lyra removes temporary objects before the backend closes, including after failure or cancellation. See [PostGIS privileges](../../plugins/location-providers/#postgis-relation-configuration).
+DuckDB and PostGIS load additions and removal IDs on the first predicate query for each affected catalog. Later selectors and batches reuse that temporary data within the run. Exact-ID reads and membership checks need no staging. Closing the execution’s DuckDB or PostgreSQL connection releases temporary objects, including after failure or cancellation. See [PostGIS privileges](../../plugins/location-providers/#postgis-relation-configuration).
 
 ## Working copies and empty selections
 

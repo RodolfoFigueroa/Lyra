@@ -71,14 +71,10 @@ class AcceptedIntervention(InterventionSpec):
     """
 
     addition_schema: OutputMetadata
-    add_omitted: bool
 
     def submission_payload(self) -> dict:
-        """Return the public actions, preserving an omitted or explicitly empty add."""
-        return self.model_dump(
-            include=set(InterventionSpec.model_fields),
-            exclude={"add"} if self.add_omitted else None,
-        )
+        """Return the canonical public actions for worker revalidation."""
+        return self.model_dump(include=set(InterventionSpec.model_fields))
 
     @property
     def identity(self) -> InterventionIdentity:
@@ -109,9 +105,6 @@ class AcceptedIntervention(InterventionSpec):
         Raises:
             ValueError: If actions or their spatial declaration are inconsistent.
         """
-        if self.add_omitted and self.add:
-            msg = "An omitted additions action cannot contain records"
-            raise ValueError(msg)
         schema = self.addition_schema
         if schema.geometry != "geometry" or not any(
             column.name == "geometry" and column.parameters.get("crs")

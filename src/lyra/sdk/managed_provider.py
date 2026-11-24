@@ -1,18 +1,16 @@
 """Internal class boundary for Lyra's managed provider implementations."""
 
-from collections.abc import Callable
-from contextlib import suppress
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import geopandas as gpd
+import ibis.expr.operations as ops
 import ibis.expr.types as ir
 import pandas as pd
 import pyarrow as pa
 import pyproj
 import shapely
 
-from lyra.data.intervention_records import decode_cell
+from lyra.data.intervention_records import accepted_additions
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import ProviderQuery, compile_query_schema
@@ -28,13 +26,50 @@ class ManagedLocationProvider(LocationProvider[ConfigT]):
     Managed implementations own both exact-ID and query acquisition.
     """
 
-    def select(self, expression: ir.Table, schema: ProviderSchema) -> gpd.GeoDataFrame:
-        """Materialize a validated filter using the captured record schema.
+    _effective_relation: ir.Table | None = None
 
-        Raises:
-            NotImplementedError: Until the concrete managed adapter supplies execution.
-        """
+    def _base_relation(self, schema: ProviderSchema, /) -> ir.Table:
         raise NotImplementedError
+
+    def _materialize(
+        self, relation: ir.Table, schema: ProviderSchema
+    ) -> gpd.GeoDataFrame:
+        raise NotImplementedError
+
+    def _read_ids(self, selected: ir.Table) -> set[str]:
+        raise NotImplementedError
+
+    def _stage(
+        self, query: ProviderQuery, additions: pa.Table, removals: pa.Table
+    ) -> tuple[ir.Table, ir.Table]:
+        raise NotImplementedError
+
+    @staticmethod
+    def _literal_replacements(
+        expression: ir.Table, schema: ProviderSchema, /
+    ) -> dict[ops.Node, ops.Node]:
+        raise NotImplementedError
+
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return complete base records for the requested IDs."""
+        schema = ProviderSchema(self.schema)
+        if not ids:
+            return schema.empty_frame()
+        base = self._base_relation(schema)
+        return self._materialize(base.filter(base.location_id.isin(ids)), schema)
+
+    def existing_ids(self, ids: list[str]) -> set[str]:
+        """Return base membership using only the ID column."""
+        if not ids:
+            return set()
+        base = self._base_relation(ProviderSchema(self.schema))
+        return self._read_ids(
+            base.filter(base.location_id.isin(ids)).select("location_id")
+        )
+
+    def select(self, expression: ir.Table, schema: ProviderSchema) -> gpd.GeoDataFrame:
+        """Return matching base records for a validated selector."""
+        return self._select_from(self._base_relation(schema), expression, schema)
 
     def select_effective(
         self,
@@ -42,54 +77,50 @@ class ManagedLocationProvider(LocationProvider[ConfigT]):
         schema: ProviderSchema,
         intervention: "AcceptedIntervention",
     ) -> gpd.GeoDataFrame:
-        """Select using the accepted changes for this execution's catalog.
+        """Return matching effective records, staging changes on first use."""
+        if self._effective_relation is None:
+            base = self._base_relation(schema)
+            query = compile_query_schema(schema.schema)
+            frame = accepted_additions(intervention)
+            added, removed = self._stage(
+                query,
+                pa.Table.from_pandas(
+                    frame.to_wkb(), schema=query.interchange, preserve_index=False
+                ),
+                pa.Table.from_pydict(
+                    {"location_id": intervention.remove},
+                    schema=pa.schema([query.interchange.field("location_id")]),
+                ),
+            )
+            remaining = base.filter(base.location_id.notin(removed.location_id))
+            # A source may expose narrower scalars or a concrete geometry subtype.
+            remaining = remaining.mutate(
+                **{
+                    name: ops.Cast(remaining[name], to=dtype).to_expr()
+                    for name, dtype in added.schema().items()
+                    if remaining.schema()[name] != dtype
+                }
+            )
+            self._effective_relation = remaining.union(added, distinct=False)
+        return self._select_from(self._effective_relation, expression, schema)
 
-        Raises:
-            NotImplementedError: If the adapter cannot select effective records.
-        """
-        raise NotImplementedError
-
-
-@dataclass
-class StagedCatalog:
-    """An execution-owned relation and the cleanup for its temporary objects."""
-
-    relation: ir.Table | None = None
-    drops: list[Callable[[], object]] = field(default_factory=list)
+    def _select_from(
+        self, relation: ir.Table, expression: ir.Table, schema: ProviderSchema
+    ) -> gpd.GeoDataFrame:
+        root = expression.op()
+        while isinstance(root, ops.Filter):
+            root = root.parent
+        if not isinstance(root, ops.UnboundTable):
+            message = "Managed selection requires a validated symbolic filter"
+            raise TypeError(message)
+        replacements = self._literal_replacements(expression, schema)
+        replacements[root] = relation.op()
+        bound = expression.op().replace(replacements).to_expr()
+        return self._materialize(bound, schema)
 
     def close(self) -> None:
-        """Drop all reserved objects in reverse order, preserving the first failure."""
-        self.relation = None
-        drops = reversed(self.drops)
-        self.drops = []
-        try:
-            for drop in drops:
-                drop()
-        finally:
-            # If a drop failed, finish the rest without replacing its error.
-            for drop in drops:
-                with suppress(BaseException):
-                    drop()
-
-
-def staging_tables(
-    intervention: "AcceptedIntervention", schema: ProviderSchema, query: ProviderQuery
-) -> tuple[pa.Table, pa.Table]:
-    """Return typed additions (including WKB) and removal IDs for managed staging."""
-    columns = {
-        column.name: [
-            decode_cell(row[column.name], column.dtype, nullable=column.nullable)
-            for row in intervention.add
-        ]
-        for column in schema.metadata.columns
-    }
-    return (
-        pa.Table.from_pydict(columns, schema=query.interchange),
-        pa.Table.from_pydict(
-            {"location_id": intervention.remove},
-            schema=pa.schema([query.interchange.field("location_id")]),
-        ),
-    )
+        """Release the execution's reference to its effective relation."""
+        self._effective_relation = None
 
 
 def decode_records(data: pa.Table, schema: ProviderSchema) -> gpd.GeoDataFrame:

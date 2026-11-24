@@ -10,6 +10,7 @@ from lyra.contracts.locations import LocationContractReference, LocationSelectio
 from lyra.contracts.outputs import OutputMetadata, forwarding_schema
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.lineage import Membership
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.native_inputs import NativeLocationInput
 
@@ -102,23 +103,45 @@ def acquire_operation_targets(
 
 
 def forward_correspondences(
-    result: OperationResult, target_description: OutputMetadata
+    result: OperationResult,
+    target_description: OutputMetadata,
+    *,
+    computations: tuple[tuple[str, str | None], ...] = (),
 ) -> NativeLocationInput:
-    """Expand validated records by explicit pair IDs without provider revalidation.
+    """Return target records in the operation's immediate pair order."""
+    pairs = tuple(
+        (source, target) for source, ids in result.groups.items() for target in ids
+    )
+    membership = Membership(
+        object(),
+        result.targets.ids,
+        pairs,
+        computations,
+        result.source.membership if result.source is not None else None,
+    )
+    return forward_pairs(
+        membership, result.targets, result.source_scope, target_description
+    )
+
+
+def forward_pairs(
+    membership: Membership,
+    targets: NativeLocationInput,
+    source_scope: LocationContractReference,
+    description: OutputMetadata,
+) -> NativeLocationInput:
+    """Expand validated target records in the selected correspondence order.
 
     Returns:
-        Native target records retaining immediate source relationships and scopes.
+        Target records retaining their immediate source relationship and computations.
 
     Raises:
         ValueError: If structural names collide or mapping pairs are invalid.
     """
-    targets = result.targets.frame
-    if {"source_location_id", "row_key"} & set(targets.columns):
+    if {"source_location_id", "row_key"} & set(targets.frame.columns):
         message = "Target attributes collide with correspondence structural names"
         raise ValueError(message)
-    pairs = [
-        (source, target) for source, ids in result.groups.items() for target in ids
-    ]
+    pairs = membership.pairs
     if len(pairs) != len(set(pairs)) or any(
         not isinstance(source, str) or not isinstance(target, str)
         for source, target in pairs
@@ -127,7 +150,7 @@ def forward_correspondences(
         raise ValueError(message)
     # Label selection preserves extension dtypes, geometry, and CRS even when empty.
     frame = (
-        targets.set_index("location_id", drop=False)
+        targets.frame.set_index("location_id", drop=False)
         .loc[[target for _, target in pairs]]
         .reset_index(drop=True)
     )
@@ -138,9 +161,11 @@ def forward_correspondences(
     )
     return NativeLocationInput(
         frame,
-        result.targets.contract,
-        source_scope=result.source_scope,
-        added_ids=result.targets.added_ids,
-        description=forwarding_schema(target_description),
-        source=result.source,
+        targets.contract,
+        source_scope=source_scope,
+        added_ids=targets.added_ids,
+        description=forwarding_schema(description),
+        source=membership.source,
+        lineage=membership.lineage,
+        computations=membership.computations,
     )

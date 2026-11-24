@@ -276,14 +276,13 @@ def test_selection_uses_typed_staging_and_complete_predicate(
         staged = assert_staged(cursor, added, removals)
         check_selection_sql(cursor, *staged)
         connection.close.assert_not_called()
-    assert sorted(table_names(statements(cursor, "DROP"))) == sorted(staged)
     connection.close.assert_called_once()
 
 
 @pytest.mark.parametrize(
     "failure", ["privilege", "second_create", "copy", "query", "cancel", "cleanup"]
 )
-def test_failure_cleans_only_owned_tables_and_preserves_primary(
+def test_failure_closes_owning_session_and_preserves_primary(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     connection, cursor = native_postgres(monkeypatch)
@@ -297,9 +296,9 @@ def test_failure_cleans_only_owned_tables_and_preserves_primary(
             else RuntimeError("acquisition failed")
         )
     )
-    cleanup_error = RuntimeError("drop failed")
+    cleanup_error = RuntimeError("session close failed")
     owned = []
-    dropped = []
+    connection.close.side_effect = cleanup_error
 
     def execute(sql: str) -> Mock:
         connection.close.assert_not_called()
@@ -307,9 +306,6 @@ def test_failure_cleans_only_owned_tables_and_preserves_primary(
             if failure == "privilege" or (failure == "second_create" and owned):
                 raise primary
             owned.extend(table_names([sql]))
-        elif sql.startswith("DROP"):
-            dropped.extend(table_names([sql]))
-            raise cleanup_error
         elif failure in {"query", "cancel"}:
             raise primary
         return Mock(fetchmany=Mock(return_value=[]))
@@ -335,7 +331,6 @@ def test_failure_cleans_only_owned_tables_and_preserves_primary(
         or caught.value.__cause__ is primary
     )
     assert len(owned) == {"privilege": 0, "second_create": 1, "copy": 1}.get(failure, 2)
-    assert sorted(dropped) == sorted(owned)
     connection.close.assert_called_once()
 
 
@@ -354,7 +349,7 @@ def selected_change(
     }
 
 
-def test_two_catalogs_share_connection_and_drop_only_their_own_tables(
+def test_two_catalogs_reuse_independent_staging_on_one_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Other(Places):
@@ -376,8 +371,7 @@ def test_two_catalogs_share_connection_and_drop_only_their_own_tables(
             statements(cursor, "SELECT")[-1:]
         )
         provider = cast("Places", resolver.scope.get("first"))
-        provider.close()
-        assert set(table_names(statements(cursor, "DROP"))) == first
+        assert selected_change(resolver, cursor, Places.id, 42) == first
         assert selected_change(resolver, cursor, Other.id, 81) == second
         # Ordinary access continues to use the base on the still-open backend.
         set_result(cursor, [("a",)])
@@ -386,7 +380,6 @@ def test_two_catalogs_share_connection_and_drop_only_their_own_tables(
             ("city data", "places")
         ]
         connection.close.assert_not_called()
-    assert sorted(table_names(statements(cursor, "DROP"))) == sorted(first | second)
     connection.close.assert_called_once()
 
 
@@ -409,7 +402,6 @@ def test_each_request_stages_its_own_values(
                 frame().geometry.iloc[0].wkb,
                 97,
             )
-        assert set(table_names(statements(cursor, "DROP"))) == names
         connection.close.assert_called_once()
         return names
 
@@ -425,7 +417,6 @@ def test_each_request_stages_its_own_values(
             assert names.isdisjoint(another_request())
             assert selected_change(first, first_cursor, Places.id, 42) == names
             first_connection.close.assert_not_called()
-    assert set(table_names(statements(first_cursor, "DROP"))) == names
     first_connection.close.assert_called_once()
     if not overlap:
         assert names.isdisjoint(another_request())
@@ -511,14 +502,10 @@ def test_operation_publication_after_staging_cleanup(
     assert empty.report.intervention_validations[0].membership_lookup == "executed"
     assert not statements(cursor, "CREATE")
     prior_results = list(database.rows["final_results"])
-    cleanup_error = RuntimeError("drop failed")
+    cleanup_error = RuntimeError("session close failed")
 
-    def execute(sql: str) -> MagicMock:
-        if cleanup_fails and sql.startswith("DROP"):
-            raise cleanup_error
-        return cursor.execute.return_value
-
-    cursor.execute.side_effect = execute
+    if cleanup_fails:
+        connection.close.side_effect = cleanup_error
     candidate = ("007", frame().geometry.iloc[0].wkb, 42)
     cursor.execute.return_value.fetchmany.side_effect = [
         [candidate],
@@ -550,7 +537,4 @@ def test_operation_publication_after_staging_cleanup(
                 )
     assert len(statements(cursor, "SELECT")) == 3
     assert len(statements(cursor, "CREATE")) == 2
-    assert sorted(table_names(statements(cursor, "DROP"))) == sorted(
-        table_names(statements(cursor, "CREATE"))
-    )
     assert connection.close.call_count == 2

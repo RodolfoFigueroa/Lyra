@@ -41,13 +41,11 @@ def prepare_execution(
     Raises:
         PreparationError: If identity, selections, or parameters are invalid.
     """
-    if isinstance(request, ExecutionRequest | JobCreateRequest):
-        raw = request.model_dump(exclude={"interventions"})
-        # Keep the current actions and the distinction between omitted and empty add.
-        if request.interventions or "interventions" in request.model_fields_set:
-            raw["interventions"] = request.interventions
-    else:
-        raw = dict(request)
+    raw = (
+        request.model_dump()
+        if isinstance(request, ExecutionRequest | JobCreateRequest)
+        else dict(request)
+    )
     metric = str(raw.get("metric", "<request>"))
     try:
         parsed = ExecutionRequest.model_validate(deepcopy(raw))
@@ -157,7 +155,7 @@ def _capture_request(
     native_interventions: Sequence[Intervention] | None,
 ) -> tuple[SubmittedRequest, dict[str, ProviderDeclaration]]:
     if native_interventions is not None and (
-        "interventions" in request.model_fields_set
+        request.interventions
         or not isinstance(native_interventions, Sequence)
         or isinstance(native_interventions, str | bytes | bytearray)
         or not all(isinstance(value, Intervention) for value in native_interventions)

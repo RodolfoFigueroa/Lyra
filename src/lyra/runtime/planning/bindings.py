@@ -16,6 +16,7 @@ from lyra.contracts.value_identity import (
     check_json_value,
     value_key,
 )
+from lyra.runtime.lineage import Membership, Selection
 from lyra.runtime.planning.graph import ResolvedDependency
 from lyra.runtime.planning.parameters import (
     prepare_parameter_uses,
@@ -36,32 +37,6 @@ if TYPE_CHECKING:
     from lyra.runtime.planning.graph import (
         ResolvedLocationDependency,
     )
-
-
-class _PairIndex:
-    """Position buckets owned by one immutable correspondence snapshot."""
-
-    def __init__(self, pairs: tuple[tuple[str, str], ...]) -> None:
-        self.forward: dict[str, list[int]] = {}
-        self.reverse: dict[str, list[int]] = {}
-        for position, (source, target) in enumerate(pairs):
-            self.forward.setdefault(source, []).append(position)
-            self.reverse.setdefault(target, []).append(position)
-
-    def matching(
-        self,
-        pairs: tuple[tuple[str, str], ...],
-        ids: frozenset[str],
-        *,
-        reverse: bool = False,
-    ) -> tuple[tuple[str, str], ...]:
-        buckets = self.reverse if reverse else self.forward
-        return tuple(
-            pairs[position]
-            for position in sorted(
-                position for key in ids for position in buckets.get(key, ())
-            )
-        )
 
 
 class _IdentityComponents:
@@ -125,76 +100,40 @@ class BoundLocation:
         _ = self.identity
 
     @cached_property
-    def _pair_index(self) -> _PairIndex:
-        # Not a dataclass field: replace() cannot carry it into a new snapshot,
-        # and equality, repr and dataclass serialization cannot observe it.
-        return _PairIndex(self.pairs)
+    def membership(self) -> Membership:
+        """Correspondence lineage for this immutable snapshot."""
+        return Membership(
+            self.lineage,
+            self.ids,
+            self.pairs,
+            self.computations,
+            self.source.membership if self.source is not None else None,
+        )
 
-    def matching_pairs(
-        self, ids: frozenset[str], *, reverse: bool = False
-    ) -> tuple[tuple[str, str], ...]:
-        """Return snapshot pairs in declaration order for one side's membership."""
-        return self._pair_index.matching(self.pairs, ids, reverse=reverse)
+    def _apply(self, selection: Selection) -> BoundLocation:
+        if (
+            selection.positions is None
+            and selection.ids == self.ids
+            and selection.computations == self.computations
+        ):
+            return self
+        pairs = (
+            self.pairs
+            if selection.positions is None
+            else tuple(self.pairs[i] for i in selection.positions)
+        )
+        return replace(
+            self, ids=selection.ids, pairs=pairs, computations=selection.computations
+        )
 
     def select(self, ids: frozenset[str]) -> BoundLocation:
         """Return target owners with every incoming source pair."""
-        # Even all represented targets can exclude a completed empty source group.
-        if ids == frozenset(self.ids or ()) and (
-            not self.pairs
-            or all(
-                group is None or group in self._pair_index.forward
-                for _, group in self.computations
-            )
-        ):
-            return self
-        pairs = self.matching_pairs(ids, reverse=True)
-        sources = {source for source, _ in pairs}
-        return replace(
-            self,
-            ids=tuple(sorted(ids)),
-            pairs=pairs,
-            computations=tuple(
-                (key, group)
-                for key, group in self.computations
-                if group is None or group in sources
-            )
-            if ids
-            else self.computations,
-        )
+        return self._apply(self.membership.targets(ids))
 
     def related(self, primary: BoundLocation) -> BoundLocation | None:
         """Return related groups by following declared correspondence edges."""
-        if self is primary:
-            return self
-        ancestors = {}
-        current = primary
-        ids = frozenset(current.ids or ())
-        while True:
-            ancestors[current.lineage] = ids
-            if current.source is None:
-                break
-            ids = frozenset(a for a, _ in current.matching_pairs(ids, reverse=True))
-            current = current.source
-        chain = []
-        current = self
-        while current.lineage not in ancestors:
-            if current.source is None:
-                return None
-            chain.append(current)
-            current = current.source
-        selected = current.select(ancestors[current.lineage])
-        for hop in reversed(chain):
-            pairs = hop.matching_pairs(frozenset(selected.ids or ()))
-            selected = replace(
-                hop.select(frozenset(b for _, b in pairs)),
-                pairs=pairs,
-                computations=tuple(
-                    (key, group)
-                    for key, group in hop.computations
-                    if group is None or group in (selected.ids or ())
-                ),
-            )
-        return selected
+        selection = self.membership.related(primary.membership)
+        return self._apply(selection) if selection is not None else None
 
     @cached_property
     def identity(self) -> str:
@@ -311,7 +250,9 @@ class BoundDemand:
                 else None
             )
             inputs[name] = dependency.demand(
-                frozenset(selected.ids or ()) if selected is not None else None
+                frozenset(selected.ids)
+                if selected is not None and selected.ids is not None
+                else None
             ).reference(bound.outputs[name])
         return _identity_components(bound).key(inputs)
 
@@ -437,7 +378,10 @@ class _Binder:
         source_name = next(iter(node.location_inputs))
         invocation = self.visit(name, {source_name: source}, key)
         return BoundLocation(
-            self.effective_reference(node.output_contract.reference), None, invocation
+            self.effective_reference(node.output_contract.reference),
+            None,
+            invocation,
+            source=source,
         )
 
     def visit(
@@ -471,6 +415,7 @@ class _Binder:
                 None,
                 invocation,
                 binding_path=path,
+                source=next(iter(invocation.locations.values())),
             )
             active.remove(key)
             return locations[key]
@@ -555,6 +500,7 @@ class _Binder:
                     None,
                     invocation,
                     binding_path=nested_path,
+                    source=next(iter(invocation.locations.values())),
                 )
             arguments[receiving] = self.routed(
                 value,

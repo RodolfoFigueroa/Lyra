@@ -184,7 +184,7 @@ Expose every registered column through the relation. Use unique strings for loca
 
 Read access to the relation covers exact-ID lookups and base membership checks. It also covers selectors when the request leaves this catalog unchanged.
 
-If a selector queries a catalog with additions or removals, also grant the provider’s role `TEMPORARY` on the database. On the first such query, the provider loads added records and removal IDs into temporary tables. It reuses those tables for that catalog during the run and drops them before the shared connection closes.
+If a selector queries a catalog with additions or removals, also grant the provider’s role `TEMPORARY` on the database. On the first such query, the provider loads added records and removal IDs into temporary tables. It reuses those tables for that catalog during the run. The execution’s `PostgresIO` closes the shared session and releases its temporary tables. A custom pooled resource must clear temporary objects before returning the session to its pool.
 
 ### Collection identity
 

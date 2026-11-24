@@ -4,7 +4,7 @@ import gc
 import traceback
 import weakref
 from collections.abc import Mapping
-from dataclasses import fields, replace
+from dataclasses import replace
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -383,7 +383,6 @@ def test_bound_pair_snapshots_preserve_order_and_shared_targets(
     assert shared.select(frozenset({"X"})).pairs == ()
     assert target.identity == identity
     assert replace(target) == target
-    assert "_pair_index" not in {field.name for field in fields(target)}
     for ids in (frozenset({"A"}), frozenset({"A", "B"}), frozenset({"C"})):
         selected = target.related(source.select(ids))
         assert selected is not None
@@ -422,6 +421,7 @@ def test_bound_pair_multihop_and_sibling_selections() -> None:
         ("S", "T"),
         source=source,
         pairs=(("C", "T"), ("B", "S"), ("A", "S")),
+        computations=(("full", None), ("b", "B"), ("a", "A"), ("c", "C")),
     )
     selected = final.related(source.select(frozenset({"B"})))
     assert selected is not None
@@ -435,6 +435,68 @@ def test_bound_pair_multihop_and_sibling_selections() -> None:
     assert branch.pairs == (("B", "S"), ("A", "S"))
     assert empty is not None
     assert empty.ids == ()
+
+    def native(bound: BoundLocation) -> NativeLocationInput:
+        ids = [b for _, b in bound.pairs] if bound.source else list(bound.ids or ())
+        frame = gpd.GeoDataFrame(
+            {"location_id": ids}, geometry=[Point(0, 1)] * len(ids), crs=4326
+        )
+        if bound.source:
+            frame["source_location_id"] = [a for a, _ in bound.pairs]
+        frame.index = [1] * len(frame)
+        return NativeLocationInput(
+            frame,
+            provider,
+            source_scope=provider if bound.source else None,
+            source=bound.source.membership if bound.source else None,
+            lineage=bound.lineage,
+            computations=bound.computations,
+        )
+
+    native_source = native(source)
+    native_final = native(final)
+    selected_native = native_final.related_selection(
+        native_source.select_ids(frozenset({"B"}))
+    )
+    assert selected_native is not None
+    for actual, expected in [
+        (selected_native, selected),
+        (native(sibling).related_selection(selected_native), branch),
+        (native_source.related_selection(selected_native), ancestor),
+        (
+            native_final.related_selection(native_source.select_ids(frozenset({"C"}))),
+            empty,
+        ),
+    ]:
+        assert actual is not None
+        assert set(actual.ids) == set(expected.ids or ())
+        if actual.source_scope is not None:
+            assert (
+                tuple(
+                    zip(
+                        actual.frame.source_location_id,
+                        actual.frame.location_id,
+                        strict=True,
+                    )
+                )
+                == expected.pairs
+            )
+        assert actual.computations == expected.computations
+    assert (
+        native_final.related_selection(native(BoundLocation(provider, ("B",)))) is None
+    )
+
+
+def test_unknown_bound_membership_stays_symbolic() -> None:
+    provider = chain_runner([]).catalog.provider_registry[Targets.id].contract.reference
+    source = BoundLocation(provider, ("A", "B"))
+    unresolved = BoundLocation(provider, None, source=source)
+    symbolic = unresolved.related(source.select(frozenset({"B"})))
+    assert symbolic is not None
+    assert symbolic.ids is None
+    back = source.related(unresolved)
+    assert back is not None
+    assert back.ids is None
     unknown = BoundLocation(provider, None)
     assert unknown.select(frozenset()).ids is None
     assert BoundLocation(provider, ()).select(frozenset()).ids == ()
@@ -449,7 +511,7 @@ def test_pair_index_lifetime_follows_snapshot_after_failure() -> None:
     def traverse() -> None:
         location = BoundLocation(provider, ("X", "Y"), pairs=(("A", "X"),))
         location.select(frozenset({"X"}))
-        references.append(weakref.ref(vars(location)["_pair_index"]))
+        references.append(weakref.ref(location.membership.pair_index))
         message = "failed traversal"
         raise ValueError(message)
 

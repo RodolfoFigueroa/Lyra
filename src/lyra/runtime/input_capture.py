@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from lyra.contracts.outputs import forwarding_schema
 from lyra.contracts.provider_scope import RecordReferences
 from lyra.contracts.results import LocationInputDescription
+from lyra.runtime.lineage import Selection
 from lyra.runtime.location_inputs import (
     InputBindings,
     InputSelection,
@@ -16,6 +17,7 @@ from lyra.runtime.sqlite_store import DamagedDataError
 
 if TYPE_CHECKING:
     from lyra.runtime.arguments import PreparedResolvedInvocation
+    from lyra.runtime.native_inputs import NativeLocationInput
     from lyra.runtime.planning.bindings import BoundInvocation
     from lyra.runtime.planning.catalog import CompiledCatalog
     from lyra.runtime.sqlite_store import Header, SQLiteStore
@@ -81,29 +83,22 @@ def capture_inputs(
             registration = registration.forwarded
         selection = InputSelection(description=description, registration=registration)
 
-        bound = invocation.bound_use
         related = (
-            bound.locations[name].related(bound.locations[primary_name]) is not None
-            if bound is not None and primary_name is not None
-            else primary is not None and value.related_selection(primary) is not None
+            primary is not None
+            and value.membership.related(primary.membership) is not None
         )
         if related and primary is not None and primary.ids:
             for group in dict.fromkeys(
                 group for _, partitions in computations for group in partitions
             ):
+                membership = value.membership.related(
+                    primary.membership, owners=frozenset({group})
+                )
                 grouped.setdefault(group, {})[name] = (
-                    _capture(
-                        retained,
-                        selection,
-                        invocation,
-                        name,
-                        (primary_name, group),
-                    ),
+                    _capture(retained, selection, value, membership),
                 )
         else:
-            shared[name] = (
-                _capture(retained, selection, invocation, name, (primary_name, None)),
-            )
+            shared[name] = (_capture(retained, selection, value, None),)
     return {
         header.value_key: InputBindings(
             names=tuple(names),
@@ -114,71 +109,33 @@ def capture_inputs(
     }
 
 
-def _related_ids(
-    invocation: "PreparedResolvedInvocation",
-    name: str,
-    primary_name: str | None,
-    group: str,
-) -> tuple[str, ...]:
-    """Select related direct records through runtime lineage.
-
-    Returns:
-        Provider IDs associated with the selected primary partition.
-    """
-    bound = invocation.bound_use
-    if bound is not None:
-        selected = bound.locations[name].related(
-            bound.locations[primary_name or ""].select(frozenset({group}))
-        )
-        return tuple(sorted(selected.ids or ())) if selected is not None else ()
-    native = invocation.locations[name].related_selection(
-        invocation.locations[primary_name or ""].select_ids(frozenset({group}))
-    )
-    return tuple(sorted(native.ids)) if native is not None else ()
-
-
 def _capture(
     retained: LocationInputs,
     selection: InputSelection,
-    invocation: "PreparedResolvedInvocation",
-    name: str,
-    partition: tuple[str | None, str | None],
+    value: "NativeLocationInput",
+    membership: Selection | None,
 ) -> str:
-    """Return a durable reference to selected immediate membership."""
-    primary_name, group = partition
-    value = invocation.locations[name]
+    """Return a durable reference to the selected immediate records or pairs."""
+    targets = tuple(
+        sorted(value.ids if membership is None else membership.acquired_ids)
+    )
     if value.source_scope is None:
-        records = (
-            _related_ids(invocation, name, primary_name, group)
-            if group is not None
-            else tuple(sorted(value.ids))
-        )
         return retained.publish(
             selection.model_copy(
                 update={
-                    "records": records,
-                    "added_ids": tuple(sorted(value.added_ids.intersection(records))),
+                    "records": targets,
+                    "added_ids": tuple(sorted(value.added_ids.intersection(targets))),
                 }
             )
         )
-    primary = invocation.locations.get(primary_name or "")
-    selected = value
-    if group is not None and primary is not None:
-        selected = (
-            value.related_selection(primary.select_ids(frozenset({group}))) or value
-        )
-    computations = selected.computations
-    targets = tuple(sorted(selected.ids))
-    selected_sources = set(selected.frame.source_location_id)
-    bound = invocation.bound_use
-    if bound is not None and group is not None and primary_name is not None:
-        related = bound.locations[name].related(
-            bound.locations[primary_name].select(frozenset({group}))
-        )
-        if related is not None:
-            selected_sources = {source for source, _ in related.pairs}
-            computations = related.computations
-            targets = tuple(sorted(set(related.ids or ()) & set(value.ids)))
+    pairs = value.membership.pairs
+    positions = None if membership is None else membership.positions
+    selected_sources = (
+        {source for source, _ in pairs}
+        if positions is None
+        else {pairs[i][0] for i in positions}
+    )
+    computations = value.computations if membership is None else membership.computations
     return retained.publish(
         selection.model_copy(
             update={
@@ -299,7 +256,9 @@ def remember_inputs(
     if invocation.bound_use is None:
         return
     for name, binding in invocation.bound_use.locations.items():
-        if set(binding.ids or ()) != set(invocation.locations[name].ids):
+        if binding.ids is None or set(binding.ids) != set(
+            invocation.locations[name].ids
+        ):
             continue
         native = invocation.locations[name]
         if native.source_scope is not None and set(binding.pairs) != set(

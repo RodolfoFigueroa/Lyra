@@ -245,13 +245,13 @@ def test_parquet_selector_chain(
         {"places": ResourceConfig(config={"path": str(source)})},
         outside=outside,
     )
-    assert backend.con.register.call_count == backend.con.unregister.call_count == 2
+    assert backend.con.register.call_count == 2
 
 
 def test_postgis_selector_chain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _, cursor = native_postgres(monkeypatch)
+    connection, cursor = native_postgres(monkeypatch)
     batches = [
         [tuple(row.values()) for row in batch.to_pylist()]
         for batch in candidate_batches()
@@ -264,4 +264,4 @@ def test_postgis_selector_chain(
     )
     statements = [call.args[0] for call in cursor.execute.call_args_list]
     assert sum(sql.startswith("CREATE TEMPORARY TABLE") for sql in statements) == 2
-    assert sum(sql.startswith("DROP") for sql in statements) == 2
+    connection.close.assert_called_once()

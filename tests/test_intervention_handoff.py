@@ -349,35 +349,42 @@ def test_acceptance_captures_current_actions_from_request_models(
     assert plan.request.interventions[0].remove == ["old"]
 
 
-def test_multiple_unused_targets_preserve_omitted_and_typed_empty_additions() -> None:
+@pytest.mark.parametrize("transport", ["http", "mcp"])
+@pytest.mark.parametrize("explicit_empty", [False, True])
+def test_worker_preserves_removals_for_each_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transport: str,
+    *,
+    explicit_empty: bool,
+) -> None:
     class Parks(Trees):
         id = "parks"
 
     plugins = definitions()
     plugins["parks"] = PluginDefinition(resources={"parks_resource": Parks})
-    catalog = LocalRunner.from_definitions(plugins).catalog
+    _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
+    runtime.jobs.enqueue = Mock()
     removal = {"id": "remove", "revision": "1", "remove": ["old"]}
-    request = {
-        "metric": "root",
-        "interventions": [
-            removal | {"catalog": "trees"},
-            removal | {"catalog": "parks", "add": []},
-        ],
-    }
-    plan = prepare_execution(catalog, request)
-    restored = PreparedExecution.model_validate_json(plan.model_dump_json())
-    assert (
-        restored.request.submission_payload()["interventions"]
-        == request["interventions"]
-    )
-    assert prepare_execution(catalog, restored.request.submission_payload()) == plan
-    trees, parks = restored.request.interventions
-    assert accepted_additions(trees) is None
-    empty = accepted_additions(parks)
-    assert empty is not None
-    assert empty.empty
-    assert empty.crs == "EPSG:4326"
-    assert str(empty["count"].dtype) == "Int64"
+    targets = ["trees", "parks"]
+    changes = [removal | {"catalog": catalog} for catalog in targets]
+    for index, change in enumerate(changes):
+        if bool(index) == explicit_empty:
+            change["add"] = []
+    request = {"metric": "root", "interventions": changes}
+    assert asyncio.run(submit(runtime, transport, request))
+    envelope = runtime.jobs.enqueue.call_args.args[0]
+    native_job(monkeypatch).id = envelope.job_id
+    saved = worker.run_metric_task(json.loads(envelope.model_dump_json()))
+    received = read_retained(str(saved["result_ref"])).report.request
+    assert received == envelope.accepted.plan.request
+    expected = [change | {"add": []} for change in changes]
+    assert received.submission_payload()["interventions"] == expected
+    for value in received.interventions:
+        empty = accepted_additions(value)
+        assert empty.empty
+        assert empty.crs == "EPSG:4326"
+        assert str(empty["count"].dtype) == "Int64"
 
 
 def test_target_override_must_honor_the_accepted_base() -> None:
@@ -405,7 +412,12 @@ def intervention_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FastAPI
             }
         )
 
-    _, runtime = install_definitions(tmp_path, monkeypatch, definitions(Survey))
+    class Parks(Trees):
+        id = "parks"
+
+    plugins = definitions(Survey)
+    plugins["parks"] = PluginDefinition(resources={"parks_resource": Parks})
+    _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
     runtime.jobs.enqueue = Mock()
     app = create_app(runtime.config, credentials=api_credentials())
     app.root_path = "/public/api"
@@ -444,7 +456,10 @@ def test_client_worker_retains_native_request(
     original = change.add.iloc[:0] if empty else change.add
     if empty:
         original = original.astype({"surveyed": bool})
-    changes = [replace(change, add=original)]
+    changes = [
+        replace(change, add=original),
+        replace(change, catalog="parks", add=gpd.GeoDataFrame()),
+    ]
     with (
         native_api.serve(intervention_app, monkeypatch),
         native_api.connect() as client,
@@ -454,7 +469,19 @@ def test_client_worker_retains_native_request(
     envelope = intervention_app.state.runtime.jobs.enqueue.call_args.args[0]
     native_job(monkeypatch).id = job.job_id
     result = worker.run_metric_task(json.loads(envelope.model_dump_json()))
-    accepted = read_retained(str(result["result_ref"])).report.request.interventions[0]
+    assert [req.method for req in native_api.requests] == (
+        ["POST"] if empty else ["GET", "POST"]
+    )
+    accepted, parks = read_retained(
+        str(result["result_ref"])
+    ).report.request.interventions
+    assert parks.submission_payload() == {
+        "id": "p",
+        "catalog": "parks",
+        "revision": "1",
+        "add": [],
+        "remove": ["old"],
+    }
     assert (accepted.id, accepted.catalog, accepted.revision, accepted.remove) == (
         "p",
         "trees",
@@ -471,17 +498,14 @@ def test_client_worker_retains_native_request(
     assert restored.geometry.to_wkb().tolist() == original.geometry.to_wkb().tolist()
 
 
-@pytest.mark.parametrize("empty", [False, True])
 def test_clients_validate_frames_before_post(
     intervention_app: FastAPI,
     native_api: NativeAPI,
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    empty: bool,
 ) -> None:
     value = survey_proposal()
     assert value.add is not None
-    data = value.add.iloc[:0] if empty else value.add
+    data = value.add
     with (
         native_api.serve(intervention_app, monkeypatch),
         native_api.connect() as client,

@@ -121,7 +121,7 @@ print(result.tables["lengths"])
 
 The `lengths` table contains one row for `proposed-1`, with `length_m` equal to 150. Once Lyra accepts the request, you can edit the frame or removal list without affecting that run.
 
-To submit only removals, omit `add`. If you pass an empty frame, include every declared column and set the active geometry and CRS. See [how to prepare changes for a catalog](../spatial-inputs/#prepare-changes-for-a-catalog).
+To submit only removals, omit `add` or pass a zero-row GeoDataFrame. Lyra uses the target provider’s schema for either spelling. See [how to prepare changes for a catalog](../spatial-inputs/#prepare-changes-for-a-catalog).
 
 ## Inspect results and execution details
 

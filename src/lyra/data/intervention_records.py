@@ -13,19 +13,15 @@ import shapely
 from pyproj import CRS
 
 from lyra.data.location_frames import validate_frame, validate_record_columns
-from lyra.data.relational import (
-    RowLayout,
-    encode_row,
-    logical_dtype,
-    rows_from_validated,
-)
+from lyra.data.relational import WKT_PRECISION, logical_dtype
 from lyra.data.results import validate_serializable
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from lyra.contracts.interventions import AcceptedIntervention
     from lyra.contracts.outputs import OutputMetadata
     from lyra.contracts.types import JsonValue
-    from lyra.data.relational import Cell
 
 
 def _float_cell(value: JsonValue) -> float | None:
@@ -46,45 +42,16 @@ def _integer_cell(value: JsonValue) -> int | None:
     return None
 
 
-def _geometry_cell(value: JsonValue) -> bytes | None:
-    if type(value) is not str or "\x00" in value:
-        return None
-    try:
-        return shapely.to_wkb(shapely.from_wkt(value, on_invalid="raise"))
-    except shapely.errors.GEOSException as exc:
-        msg = "Invalid geometry WKT"
-        raise ValueError(msg) from exc
-
-
-def decode_cell(value: JsonValue, dtype: str, *, nullable: bool) -> Cell:
-    """Decode one exact JSON cell using its declared logical type.
-
-    Returns:
-        A scalar or native geometry WKB, without inference or repair.
-
-    Raises:
-        ValueError: If a cell does not match its logical encoding or nullability.
-    """
-    if value is None and nullable:
-        return None
-    decoders = {
-        "str": lambda item: item if type(item) is str else None,
-        "string": lambda item: item if type(item) is str else None,
-        "string[python]": lambda item: item if type(item) is str else None,
-        "string[pyarrow]": lambda item: item if type(item) is str else None,
-        "int64": _integer_cell,
-        "Int64": _integer_cell,
-        "float64": _float_cell,
-        "Float64": _float_cell,
-        "bool": lambda item: item if type(item) is bool else None,
-        "boolean": lambda item: item if type(item) is bool else None,
-        "geometry": _geometry_cell,
-    }
-    decoded = decoders[dtype](value)
-    if decoded is not None:
-        return decoded
-    msg = f"Invalid {dtype} JSON cell: {value!r}"
-    raise ValueError(msg)
+# Geometry stays textual until the complete column is passed to GeoSeries.from_wkt.
+_JSON_DECODERS = {
+    "string": lambda value: value if type(value) is str else None,
+    "Int64": _integer_cell,
+    "Float64": _float_cell,
+    "boolean": lambda value: value if type(value) is bool else None,
+    "geometry": lambda value: (
+        value if type(value) is str and "\x00" not in value else None
+    ),
+}
 
 
 def encode_additions(
@@ -129,12 +96,21 @@ def encode_validated_additions(
     Returns:
         Schema-directed JSON records in input order.
     """
-    layout = RowLayout(
-        tuple(column.name for column in metadata.columns),
-        tuple(logical_dtype(column.dtype) for column in metadata.columns),
-        tuple(column.nullable for column in metadata.columns),
-    )
-    return [encode_row(row, layout) for row in rows_from_validated(frame, layout)]
+    columns = {}
+    for column in metadata.columns:
+        values = frame[column.name]
+        dtype = logical_dtype(column.dtype)
+        if dtype == "geometry":
+            values = values.to_wkt(rounding_precision=WKT_PRECISION)
+        elif dtype == "Int64":
+            values = values.astype("string")
+        cells = values.to_numpy(dtype=object, copy=True)
+        cells[values.isna().to_numpy()] = None
+        columns[column.name] = cells
+    return [
+        dict(zip(columns, row, strict=True))
+        for row in zip(*columns.values(), strict=True)
+    ]
 
 
 def _matches_dtype(values: pd.Series, declared: str, *, nullable: bool) -> bool:
@@ -154,7 +130,7 @@ def _matches_dtype(values: pd.Series, declared: str, *, nullable: bool) -> bool:
 
 
 def decode_additions(
-    records: list[dict[str, JsonValue]], metadata: OutputMetadata
+    records: Sequence[Mapping[str, JsonValue]], metadata: OutputMetadata
 ) -> gpd.GeoDataFrame:
     """Reconstruct complete records, including empty and all-null typed columns.
 
@@ -178,14 +154,23 @@ def decode_additions(
     crs = cast("str", geometry.parameters["crs"])
     columns = {}
     for column in metadata.columns:
-        values = [
-            decode_cell(row[column.name], column.dtype, nullable=column.nullable)
-            for row in records
-        ]
+        decode = _JSON_DECODERS[logical_dtype(column.dtype)]
+        values = []
+        for row in records:
+            cell = row[column.name]
+            decoded = decode(cell)
+            if decoded is None and (cell is not None or not column.nullable):
+                msg = f"Invalid {column.dtype} JSON cell: {cell!r}"
+                raise ValueError(msg)
+            values.append(decoded)
         if column.dtype == "geometry":
-            columns[column.name] = gpd.GeoSeries.from_wkb(
-                np.asarray(values, dtype=object), crs=crs
-            )
+            try:
+                columns[column.name] = gpd.GeoSeries.from_wkt(
+                    np.asarray(values, dtype=object), crs=crs
+                )
+            except shapely.errors.GEOSException as exc:
+                msg = "Invalid geometry WKT"
+                raise ValueError(msg) from exc
         else:
             dtype = column.dtype
             if any(value is None for value in values):
@@ -194,8 +179,6 @@ def decode_additions(
     return gpd.GeoDataFrame(columns, geometry=metadata.geometry, crs=crs)
 
 
-def accepted_additions(value: AcceptedIntervention) -> gpd.GeoDataFrame | None:
+def accepted_additions(value: AcceptedIntervention) -> gpd.GeoDataFrame:
     """Return independent accepted records without the live registration."""
-    if value.add_omitted:
-        return None
     return decode_additions(value.add, value.addition_schema)

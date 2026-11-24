@@ -1,6 +1,6 @@
 from asyncio import CancelledError
 from pathlib import Path
-from unittest.mock import Mock, call
+from unittest.mock import Mock
 
 import geopandas as gpd
 import ibis
@@ -206,13 +206,7 @@ def test_staged_selection_compilation_and_materialization(
                 filtered=expression is filtered,
             )
         assert Backend().compile(filtered, limit=None) == original
-    assert connection.method_calls[-3:] == [
-        *(
-            call.unregister(entry.args[0])
-            for entry in reversed(connection.register.call_args_list)
-        ),
-        call.close(),
-    ]
+    connection.close.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -224,7 +218,7 @@ def test_owned_staging_cleanup(source: Path, backend: Mock, failure: str) -> Non
     )
     registered = resolver.providers[Places.id]
     primary = CancelledError() if failure == "cancel" else RuntimeError("primary")
-    cleanup = RuntimeError("drop failed")
+    cleanup = RuntimeError("disconnect failed")
     owned = []
 
     def register(name: str, _data: pa.Table) -> None:
@@ -235,7 +229,7 @@ def test_owned_staging_cleanup(source: Path, backend: Mock, failure: str) -> Non
     backend.con.register.side_effect = register
     if failure in {"query", "cancel"}:
         backend.to_pyarrow_batches.side_effect = primary
-    backend.con.unregister.side_effect = cleanup
+    backend.disconnect.side_effect = cleanup
     assert registered.query is not None
     expected = {"cleanup": RuntimeError, "cancel": CancelledError}.get(
         failure, LocationAcquisitionError
@@ -247,13 +241,7 @@ def test_owned_staging_cleanup(source: Path, backend: Mock, failure: str) -> Non
         assert error is cleanup
     else:
         assert error is primary or error.__cause__ is primary
-    assert backend.con.unregister.call_args_list == [
-        call(name) for name in reversed(owned)
-    ]
-    assert backend.mock_calls[-len(owned) - 1 :] == [
-        *(call.con.unregister(name) for name in reversed(owned)),
-        call.disconnect(),
-    ]
+    backend.disconnect.assert_called_once()
 
 
 def test_staging_names_and_values_belong_to_each_request(
@@ -287,7 +275,7 @@ def test_staging_names_and_values_belong_to_each_request(
             assert names.isdisjoint(previous)
             assert added.args[1]["number"].to_pylist() == [number, number]
             previous.update(names)
-        assert {c.args[0] for c in backend.con.unregister.call_args_list} == names
+        backend.disconnect.assert_called_once()
         backend.reset_mock()
 
 

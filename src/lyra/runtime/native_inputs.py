@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import TypeVar
 
 import geopandas as gpd
@@ -10,6 +11,7 @@ import pandas as pd
 from lyra.contracts.locations import LocationContractReference
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.provider_scope import EffectiveScope
+from lyra.runtime.lineage import Membership, Selection
 
 Frame = TypeVar("Frame", bound=pd.DataFrame)
 
@@ -36,78 +38,47 @@ class NativeLocationInput:
     computations: tuple[tuple[str, str | None], ...] = field(default=(), kw_only=True)
 
     lineage: object = field(default_factory=object, repr=False, compare=False)
-    source: "NativeLocationInput | None" = field(
-        default=None, repr=False, compare=False
-    )
+    source: Membership | None = field(default=None, repr=False, compare=False)
+
+    @cached_property
+    def membership(self) -> Membership:
+        """Row-position lineage for the execution-owned frame."""
+        pairs = (
+            tuple(
+                zip(
+                    self.frame["source_location_id"],
+                    self.frame[self.id_column],
+                    strict=True,
+                )
+            )
+            if self.source_scope
+            else ()
+        )
+        return Membership(self.lineage, self.ids, pairs, self.computations, self.source)
+
+    def _apply(self, selection: Selection) -> "NativeLocationInput":
+        if selection.positions is not None:
+            frame = self.frame.iloc[list(selection.positions)]
+        elif selection.ids == self.ids:
+            if selection.computations == self.computations:
+                return self
+            frame = self.frame
+        else:
+            frame = self.frame.loc[
+                self.frame[self.id_column].isin(selection.acquired_ids)
+            ]
+        return replace(self, frame=frame, computations=selection.computations)
 
     def related_selection(
         self, primary: "NativeLocationInput"
     ) -> "NativeLocationInput | None":
-        """Select via explicit lineage, retaining immediate correspondence pairs.
-
-        Walk each hop separately: target ownership maps back to source groups,
-        and source demand maps forward to pairs. No transitive rows are expanded.
-
-        Returns:
-            Related records, or None for independently bound selections.
-        """
-        ancestors = {}
-        current = primary
-        ids = frozenset(current.ids)
-        while True:
-            ancestors[current.lineage] = ids
-            if current.source is None:
-                break
-            ids = frozenset(
-                current.frame.loc[
-                    current.frame[current.id_column].isin(ids), "source_location_id"
-                ]
-            )
-            current = current.source
-        chain = []
-        current = self
-        while current.lineage not in ancestors:
-            if current.source is None:
-                return None
-            chain.append(current)
-            current = current.source
-        ids = ancestors[current.lineage]
-        selected = current.select_ids(ids)
-        for hop in reversed(chain):
-            selected = replace(
-                hop,
-                frame=hop.frame.loc[hop.frame["source_location_id"].isin(selected.ids)],
-                computations=tuple(
-                    (key, group)
-                    for key, group in hop.computations
-                    if group is None or group in selected.ids
-                ),
-            )
-        return selected
+        """Return selected records and immediate pairs for a related binding."""
+        selection = self.membership.related(primary.membership)
+        return self._apply(selection) if selection is not None else None
 
     def select_ids(self, ids: frozenset[str]) -> "NativeLocationInput":
         """Return selected owners with their applicable correspondence references."""
-        complete = ids == frozenset(self.ids)
-        if complete and (not ids or not self.source_scope or not self.computations):
-            return self
-        frame = (
-            self.frame
-            if complete
-            else self.frame.loc[self.frame[self.id_column].isin(ids)]
-        )
-        groups = set(frame["source_location_id"]) if self.source_scope else set(ids)
-        computations = tuple(
-            (key, group)
-            for key, group in self.computations
-            if group is None or group in groups
-        )
-        if complete and computations == self.computations:
-            return self
-        return replace(
-            self,
-            frame=frame,
-            computations=computations,
-        )
+        return self._apply(self.membership.targets(ids))
 
     def __post_init__(self) -> None:
         """Capture records and identity before any handler receives working data.

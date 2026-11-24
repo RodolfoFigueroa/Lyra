@@ -24,7 +24,7 @@ class Places(ParquetLocationProvider):
 
     def source_for_test(self) -> ir.Table:
         # Expose the shared acquisition source to verify readiness and reuse.
-        return self._base_relation()
+        return self._base_relation(ProviderSchema(self.schema))
 
 
 @pytest.fixture

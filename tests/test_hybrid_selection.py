@@ -12,6 +12,7 @@ from lyra.contracts.metric_scope import CachePolicy
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.native_inputs import NativeLocationInput
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk import (
     Dependency,
     Input,
@@ -24,6 +25,80 @@ from lyra.sdk.resources import IOConfig
 from test_support.location_operations import Places
 from test_support.location_schema import column
 from tests.metric_execution_helpers import schema
+
+
+@pytest.mark.parametrize("policy", ["full", "per_location"])
+def test_derived_primary_selects_the_same_sources_for_native_and_planned_execution(
+    policy: CachePolicy,
+) -> None:
+    @location_operation(
+        name="owners",
+        description="Find shared owners",
+        inputs={"source": LocationDependency(provider=Places.id)},
+        target_provider=Places.id,
+    )
+    def owners(source: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+        return {key: ("X",) if key in {"A", "B"} else () for key in source.location_id}
+
+    @metric(
+        name="count_sources",
+        description="Count sources contributing to an owner",
+        cache=policy,
+        inputs={
+            "source": LocationDependency(provider=Places.id),
+            "owner": LocationDependency(operation="owners", primary=True).bind(
+                source=Input("source")
+            ),
+            "independent": LocationDependency(provider=Places.id),
+        },
+        outputs={"data": schema()},
+    )
+    def count_sources(
+        source: gpd.GeoDataFrame, owner: gpd.GeoDataFrame, independent: gpd.GeoDataFrame
+    ) -> pd.DataFrame:
+        assert set(independent.location_id) == {"A", "B", "C"}
+        assert set(zip(owner.source_location_id, owner.location_id, strict=True)) == {
+            ("A", "X"),
+            ("B", "X"),
+        }
+        return pd.DataFrame(
+            {
+                "location_id": owner.location_id.unique(),
+                "row_key": "one",
+                "value": len(source),
+            }
+        )
+
+    runner = LocalRunner.from_definitions(
+        {
+            "test": PluginDefinition(
+                metrics=[count_sources],
+                location_operations=[owners],
+                resources={"places": Places},
+            )
+        }
+    )
+    ids = ["A", "B", "C"]
+    names = ("source", "independent")
+    catalog = runner.catalog
+    planned = prepare_execution(
+        catalog,
+        {
+            "metric": "count_sources",
+            "inputs": {name: {"provider": Places.id, "ids": ids} for name in names},
+        },
+    )
+    frame = Places(IOConfig(), {}).resolve(ids)
+    contract = catalog.provider_registry[Places.id].contract.reference
+    native = catalog.implementations["test"].prepare_resolved_invocation(
+        "count_sources", {name: NativeLocationInput(frame, contract) for name in names}
+    )
+    executor = GraphExecutor(catalog, Mock())
+    expected = executor.execute(planned)
+    actual = executor.execute(native)
+    assert expected.outputs["data"].value.tolist() == [2]
+    pd.testing.assert_frame_equal(actual.outputs["data"], expected.outputs["data"])
+    assert actual.completions == expected.completions
 
 
 @pytest.mark.parametrize("policy", ["off", "full", "per_location"])

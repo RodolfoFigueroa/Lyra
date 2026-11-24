@@ -78,9 +78,9 @@ class PreparedResolvedInvocation:
             )
 
     def select_primary(
-        self, name: str, ids: frozenset[str]
+        self, name: str, ids: frozenset[str] | None = None
     ) -> PreparedResolvedInvocation:
-        """Narrow runtime demand while retaining the complete bound context.
+        """Select related inputs for the complete primary or a subset of its IDs.
 
         This internal boundary is used by execution, independently of request
         preparation. IDs belong to the named input's qualified provider scope.
@@ -97,24 +97,23 @@ class PreparedResolvedInvocation:
             else self.locations
         )
         primary = original[name]
-        if not ids.issubset(primary.ids):
+        if ids is not None and not ids.issubset(primary.ids):
             message = "Primary demand exceeds the original bound selection"
             raise ValueError(message)
-        selected_primary = primary.select_ids(ids)
-        if selected_primary is primary:
+        selected_primary = primary if ids is None else primary.select_ids(ids)
+        locations = {
+            key: selected_primary
+            if key == name
+            else value.related_selection(selected_primary) or value
+            for key, value in original.items()
+        }
+        if all(value is original[key] for key, value in locations.items()):
             return self.original()
-        locations = dict(original)
-        locations[name] = selected_primary
-        for key, value in original.items():
-            if key != name:
-                selected = value.related_selection(locations[name])
-                if selected is not None:
-                    locations[key] = selected
         return replace(
             self,
             parameters=self.inspect_parameters(),
             locations=locations,
-            original_locations=original,
+            original_locations=original if ids is not None else None,
         )
 
     def original(self) -> PreparedResolvedInvocation:

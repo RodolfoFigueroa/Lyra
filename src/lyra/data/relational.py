@@ -169,11 +169,14 @@ def _frame_batch(
     return frame
 
 
+WKT_PRECISION = 20
+
+
 def geometry_wkt(geometry: shapely.Geometry) -> str:
     """Return round-trippable WKT for registered geometry and spatial literals."""
     # GEOS uses fixed notation down to 1e-4. At that magnitude 20 decimal
     # places retain 17 significant digits, enough to round-trip a binary64.
-    return shapely.to_wkt(geometry, rounding_precision=20)
+    return shapely.to_wkt(geometry, rounding_precision=WKT_PRECISION)
 
 
 def encode_row(

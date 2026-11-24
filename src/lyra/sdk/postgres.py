@@ -31,6 +31,7 @@ class PostgresIO(BaseIO[PostgresConfig]):
     Subclasses may add ordinary domain query methods. Consumers borrow the
     backend; only the resource owner closes it. Concurrent callers must provide
     their own synchronization. Sharing does not establish a run-wide transaction.
+    A pooled implementation must clear temporary objects before returning its session.
     Metrics must declare origins for direct and delegated reads.
     """
 

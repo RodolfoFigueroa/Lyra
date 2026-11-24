@@ -186,6 +186,7 @@ class LocationResolver:
         *,
         needed_ids: Mapping[str, Sequence[str]] | None = None,
         use_ids: Mapping[str, str | None] | None = None,
+        lineages: Mapping[str, object] | None = None,
     ) -> dict[str, NativeLocationInput]:
         """Validate bound selections and optional reduced demand before acquisition.
 
@@ -222,19 +223,26 @@ class LocationResolver:
                 selection,
                 ordered,
                 use_ids.get(selection.name) if use_ids is not None else None,
+                lineages[selection.name] if lineages is not None else object(),
             )
             for selection, ordered in prepared
         }
 
     def _resolve_ids(
-        self, selection: PreparedProviderInput, order: list[str], use_id: str | None
+        self,
+        selection: PreparedProviderInput,
+        order: list[str],
+        use_id: str | None,
+        lineage: object,
     ) -> NativeLocationInput:
         provider = selection.provider
         provider_id = provider.scope.provider_id
         retained = self.records.get(provider_id)
         contract = retained.contract if retained else self._contract(provider)
         if not order and retained is None:
-            return NativeLocationInput(provider.schema.empty_frame(), contract)
+            return NativeLocationInput(
+                provider.schema.empty_frame(), contract, lineage=lineage
+            )
 
         missing = selection.ids.difference(retained.ids) if retained else selection.ids
         held_additions = retained.added_ids if retained else frozenset()
@@ -274,7 +282,9 @@ class LocationResolver:
             .loc[order]
             .reset_index(drop=True)
         )
-        return NativeLocationInput(ordered, contract, added_ids=retained.added_ids)
+        return NativeLocationInput(
+            ordered, contract, added_ids=retained.added_ids, lineage=lineage
+        )
 
     def _resolve_base(
         self,
