@@ -5,15 +5,12 @@ from types import MappingProxyType
 
 from lyra.contracts.accepted import AcceptedSource
 from lyra.contracts.dependencies import Input
-from lyra.contracts.locations import LocationContractReference
 from lyra.runtime.planning.graph import PluginGraph, ResolvedDependency
 
 
 def compile_dependency_routes(
     graph: PluginGraph,
-    routes: Mapping[
-        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
-    ],
+    routes: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> Mapping[tuple[str, str, str], AcceptedSource]:
     """Capture routes by caller, binding path, and receiving input.
 
@@ -44,7 +41,9 @@ def compile_dependency_routes(
                     continue
                 supply = edge.dependency.locations.get(key, Input(key))
                 if isinstance(supply, Input):
-                    source = owner.node.location_inputs[supply.path].contract.reference
+                    source = owner.node.location_inputs[
+                        supply.path
+                    ].contract.provider_scope.provider_id
                 elif supply.provider is not None:
                     message = "Location bindings require Input or an operation"
                     raise ValueError(message)
@@ -53,13 +52,13 @@ def compile_dependency_routes(
                     if operation.kind != "location_operation":
                         message = f"Expected location operation {supply.operation!r}"
                         raise ValueError(message)
-                    source = operation.output_contract.reference
-                target = receiving.contract.reference
+                    source = operation.output_contract.provider_scope.provider_id
+                target = receiving.contract.provider_scope.provider_id
                 if (source, target) not in routes:
                     message = (
                         f"Node {name!r}, binding {path!r}, input {key!r}: "
-                        f"No canonical route from {source.collection!r} "
-                        f"to {target.collection!r}"
+                        f"No canonical route from {source!r} "
+                        f"to {target!r}"
                     )
                     raise ValueError(message)
                 result[name, path, key] = AcceptedSource(

@@ -14,8 +14,8 @@ Inspect the selected metric before choosing inputs. The HTTP API exposes these c
 
 | Endpoint | What to read |
 | --- | --- |
-| `GET /metrics` | Public metrics and the source types each metric accepts |
-| `GET /metrics/{name}` | Native location schemas in `native_inputs`, source contracts in `bindings`, and supported source types in `accepted_selections` |
+| `GET /metrics` | Public metric summaries with accepted source provider IDs for each input you supply |
+| `GET /metrics/{name}` | Each input’s `target_provider` in `location_inputs`. Look it up in `providers` for its record schema and `accepted_sources`. |
 | `GET /data-types` | The shared `location_selection_schema` |
 
 The Python client and Model Context Protocol (MCP) tools expose the same metric contracts.
@@ -28,7 +28,7 @@ For each input, supply a provider ID and a list of record IDs. This selection re
 {"provider": "city_streets", "ids": ["street-1"]}
 ```
 
-Choose a provider from the metric’s `accepted_selections` for that input. Every ID must be a nonempty string; an empty list is valid. Lyra removes duplicate IDs while preserving their first-occurrence order.
+Choose a provider ID from the input’s entry in `accepted_selections`. Supply each record ID as a nonempty string, or send `[]` to select no records. Lyra keeps the first occurrence of each ID in the order you supplied.
 
 Matching IDs or columns do not make records from different providers interchangeable. A [provider scope](../../plugins/location-providers/#define-revision-coverage) identifies the dataset through its provider ID, code revision, and origins.
 
@@ -44,7 +44,7 @@ Group all changes for one provider into a single entry in `interventions`. Set `
 | Remove records | In `remove`, list distinct string IDs that exist in the base dataset. |
 | Replace a record | Remove the original ID and add the complete replacement under a new ID. Other records still refer to the original ID. |
 
-Prepare each addition according to the provider’s column types, units, and geometry rules. Obtain missing attributes, geocode addresses, and prepare complex geometries before submission. Reproject coordinates into the declared CRS when needed. If an earlier run selected a record you need, you can [read its retained input](../results/#read-retained-location-inputs).
+Prepare each addition according to the provider’s column types, units, and geometry rules. Obtain missing attributes, geocode addresses, and prepare complex geometries before submission. Reproject coordinates into the provider’s coordinate reference system (CRS) when needed. If an earlier run selected a record you need, you can [read its retained input](../results/#read-retained-location-inputs).
 
 Keep the same set ID and revision when you reorder changes. If you change an addition or removal, change the ID or revision. For a run against the base datasets, omit `interventions` or pass an empty list.
 
@@ -54,7 +54,7 @@ Use a [native Python proposal](../local-execution/#run-with-a-street-proposal) o
 
 ## Understand automatic selection
 
-Lyra chooses a [canonical route](../../plugins/location-operations/#offer-canonical-public-selection) to convert your selection into the metric’s declared native input. An exact provider scope match needs no operations. Without a conversion route, an input accepts only its declared provider.
+If you select the input’s target provider, Lyra uses its records directly. To select another provider, choose one with a [canonical route](../../plugins/canonical-selection/) to that target. Lyra runs the operations on that route to obtain the target records.
 
 Selection preserves the metric’s declared output granularity. Selecting a state for a tract metric still returns tract rows. A batch selects each related target identity once; it does not group or aggregate results.
 

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import TypeAdapter
 
 from lyra.contracts.errors import PluginDefinitionError
-from lyra.contracts.locations import LocationContract, LocationFamily
+from lyra.contracts.locations import LocationContract
 from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import LocationOutputMetadata
 from lyra.contracts.provider_scope import ProviderScope
@@ -69,16 +69,10 @@ class RegisteredProvider:
     def contract(self) -> LocationContract:
         """Existing execution binding retaining authoritative provider identity."""
         return LocationContract(
-            family=LocationFamily(
-                collection=self.scope.provider_id,
-                unit_type="record",
-                structure=LocationOutputMetadata(
-                    id_column="location_id",
-                    output=self.schema.metadata.model_copy(deep=True),
-                ),
+            structure=LocationOutputMetadata(
+                id_column="location_id",
+                output=self.schema.metadata.model_copy(deep=True),
             ),
-            source=self.scope.provider_id,
-            geographical_edition="provider",
             meaning="Provider records",
             provider_scope=self.scope,
         )

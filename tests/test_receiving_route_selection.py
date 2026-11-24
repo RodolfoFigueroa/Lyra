@@ -133,7 +133,7 @@ def test_receiving_route_selection_and_independent_uses(
     for completion in outcome.completions:
         if (
             completion.provider_scope is not None
-            and completion.provider_scope.collection == "target"
+            and completion.provider_scope.provider_id == "target"
         ):
             assert completion.partitions <= {"X", "Y", "Z"}
     for frame in trace.frames["second"]:

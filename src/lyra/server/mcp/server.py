@@ -154,7 +154,7 @@ SERVER_INSTRUCTIONS = (
     "in `inputs`. Each selection takes a public provider ID in `provider` and a "
     "list of strings in `ids`. To add or remove records for this run, choose an "
     "entry in `providers` where `membership_capable` is true. Read "
-    "`contract.family.structure.output` for its columns, units, and geometry CRS. "
+    "`record_schema` for its columns, units, and geometry CRS. "
     "Submit complete addition records and removal IDs in `interventions`. "
     "Change the set ID or revision whenever its contents change. "
     "Lyra converts accepted source selections to the native input through canonical "
@@ -255,7 +255,7 @@ def create_mcp_app(
 
     @server.tool(annotations=read_only)
     async def lyra_list_metrics(
-        cursor: Annotated[str | None, ListMetricsInput.model_fields["cursor"]] = None,
+        offset: Annotated[int, ListMetricsInput.model_fields["offset"]] = 0,
         limit: Annotated[int, ListMetricsInput.model_fields["limit"]] = 20,
     ) -> ListMetricsOutput:
         """List a compact, paginated inventory of Lyra's public metric catalog.
@@ -268,7 +268,7 @@ def create_mcp_app(
         Returns:
             The requested domain response.
         """
-        del cursor, limit
+        del offset, limit
         return await tools.list_metrics(_arguments(ListMetricsInput), backend)
 
     @server.tool(annotations=read_only)

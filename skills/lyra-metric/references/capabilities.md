@@ -66,7 +66,7 @@ Make handlers support empty intermediate selections because execution continues 
 
 Canonical operations are optional. Explicit dependencies can use noncanonical operations, and other enabled plugins may supply compatible canonical routes. Without a route, a public input accepts its native type only. Requests do not name operations or construct pipelines.
 
-Lyra chooses the route with the fewest operations across the enabled catalog. An exact provider scope match requires zero operations. For shortest-path ties, register ordered decorated operation references through `PluginDefinition(route_preferences=[(first_operation, second_operation)])`.
+Lyra uses records directly when the selected provider matches the input’s target provider. For other providers, it chooses the route with the fewest operations across all enabled plugins. To resolve a tie, set `route_preferences` on `PluginDefinition` to a list such as `[(first_operation, second_operation)]`. List the decorated operations in execution order.
 
 Lyra infers each preference’s source and target providers from its operation sequence and uses that preference across metrics. The sequence must contain connected canonical operations and use a shortest route. Lyra rejects invalid or conflicting preferences during catalog compilation. A preference may name the only shortest path.
 
@@ -76,7 +76,7 @@ Alternative paths need not yield equivalent locations; adding a shortcut may cha
 
 Canonical routing applies to public selections and to inputs on metric and operation dependencies. Every `Input(...)` reads its declaring caller’s effective inputs. Explicit bindings take precedence over matching names when selecting the caller’s source. The dependency input declares the provider it requires.
 
-An explicit operation keeps its fixed target, which may need another canonical route to reach the next input’s provider. Matching scopes need no conversion. Missing or ambiguous routes fail before acquisition or job creation.
+An explicit operation always selects records from its declared target provider. If the next input requires a different provider, Lyra adds a canonical route between them. Lyra rejects missing or ambiguous routes before it creates a job or reads data.
 
 Automatic operations use their own parameter defaults. For explicitly invoked dependencies, Lyra chooses values in this order:
 
@@ -161,11 +161,12 @@ Use `runner.inspect()` for an independent diagnostic record of the latest attemp
 
 Inspection is `None` before a run or after preparation fails. After execution starts, it can include partial observations from a failed attempt. A later attempt replaces these diagnostics; durable reports represent complete successful executions only.
 
-On a server, search results show which source types each metric accepts. Inspect the selected metric before submitting:
+Search results list the source provider IDs each metric accepts. Inspect the selected metric before submitting:
 
 - Check parameter constraints and defaults in `parameters`.
 - Read the result schemas in `outputs`.
-- Choose source types from `accepted_selections` and inspect their `bindings`.
+- For an input you supply, read its `target_provider` in `location_inputs`. Choose a source provider ID from `providers[target_provider].accepted_sources`.
+- For an input Lyra derives, read `operation` and `source_provider` in `location_inputs`. Its `record_schema` describes one row per distinct pair of source and target record IDs.
 - Read `computed_inputs` to understand dependency inputs; don’t include them in the request.
 
 Submit once and poll the returned job handle. When execution finishes, preview the results or download them with your agent credentials.

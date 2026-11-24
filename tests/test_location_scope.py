@@ -136,8 +136,8 @@ def test_positional_mapping_completion_isolation_and_shared_acquisition() -> Non
         mapping["a"] = ()
         assert result.groups == {"a": ("x", "y"), "b": ("y",), "c": ()}
         assert result.targets.ids == ("x", "y")
-        assert result.source_scope.collection == "source"
-        assert result.targets.contract.collection == "target"
+        assert result.source_scope.provider_id == "source"
+        assert result.targets.contract.provider_id == "target"
         assert run.invocation.locations["declared_source"].ids == ("a", "b", "c")
         assert run.events == [("source", "a", "b", "c"), ("target", "x", "y")]
         repeated = run.run()
@@ -157,7 +157,7 @@ def test_empty_groups_complete_without_target_initialization(*, explicit: bool) 
         result = run.run()
         assert result.groups == dict.fromkeys(("a", "b", "c"), ())
         assert result.targets.ids == ()
-        assert result.targets.contract.collection == "target"
+        assert result.targets.contract.provider_id == "target"
         assert result.targets.frame.crs == "EPSG:4326"
         assert run.events == [("source", "a", "b", "c")]
 
@@ -169,7 +169,7 @@ def test_empty_source_skips_callback_and_acquisition() -> None:
     with execution(handler, ids=()) as run:
         result = run.run()
         assert result.groups == {}
-        assert result.targets.contract.collection == "target"
+        assert result.targets.contract.provider_id == "target"
         assert run.events == []
 
 

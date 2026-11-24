@@ -131,7 +131,7 @@ Use `Input` references or nested `LocationDependency` declarations for location 
 
 Use bindings to choose locations from the calling metric. The dependency’s input declaration determines which provider it requires. For example, bind your metric’s `blocks` input to a street producer’s `streets` input. Lyra converts the blocks to streets through registered canonical operations, including when matching names supply the binding.
 
-[Canonical routing](../canonical-selection/) applies to public selections and to inputs on metric and operation dependencies. Lyra chooses the shortest route using `canonical=True` operations and declared preferences for ties. Matching [provider scopes](../location-providers/#define-revision-coverage) need no conversion. Matching schemas or bare IDs don’t establish compatibility; missing or ambiguous routes fail before acquisition or queueing.
+If the provider IDs match, Lyra passes the selection directly to the dependency. Otherwise, Lyra uses [canonical routing](../canonical-selection/) for dependency inputs and public selections alike. It chooses the path with the fewest `canonical=True` operations and uses the registered preference to resolve a tie. Lyra rejects missing or ambiguous routes before it queues a job or reads provider data.
 
 Explicit bindings can invoke canonical or noncanonical operations, and each operation keeps its fixed `target_provider`. If the next dependency input requires another provider, Lyra adds a canonical route. For example, an operation can filter blocks before Lyra converts them for a street metric.
 

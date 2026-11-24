@@ -149,7 +149,7 @@ def test_each_live_metric_owns_its_schema_and_computed_inputs() -> None:
     assert set(numeric.outputs) == {"numbers"}
     assert set(textual.outputs) == {"labels"}
     detail = view.inspect("combined")
-    assert detail.accepted_selections == {}
+    assert detail.metric.accepted_selections == {}
     assert detail.computed_inputs["values"]["producer"] == "numbers"
     detail.computed_inputs.clear()
     assert view.inspect("combined").computed_inputs

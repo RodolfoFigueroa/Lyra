@@ -167,7 +167,7 @@ Inspect these fields on `description.manifest`:
 | `location_inputs[name].description` | The optional argument description |
 | `location_inputs[name].dependency` | The declared provider or operation dependency |
 
-Check `manifest.kind` to choose the output declaration: metrics expose table `outputs`, while operations expose `output_contract`. An operation’s generated `output_contract.family` describes its target provider structure and scope; the target provider schema supplies coercion and custom validation.
+For a metric, read `manifest.outputs` for its table schemas. For a location operation, read `manifest.output_contract.structure` for the target record schema and `manifest.output_contract.provider_scope` for the dataset identity. The target provider applies its schema’s coercion rules and custom checks when it resolves records.
 
 ## Inspect registered implementations
 

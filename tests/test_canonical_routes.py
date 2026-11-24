@@ -29,10 +29,7 @@ def edges(pairs: list[tuple[str, str]]) -> dict[str, tuple[str, str]]:
 def test_shortcuts_cycles_identity_and_unreachable() -> None:
     graph = edges([("a", "b"), ("b", "c"), ("c", "a"), ("a", "c"), ("a", "a")])
     catalog = compile_live_catalog(route_plugins(graph, isolated=["isolated"]))
-    a, b, c, isolated = (
-        catalog.provider_registry[key].contract.reference
-        for key in ("a", "b", "c", "isolated")
-    )
+    a, b, c, isolated = "a", "b", "c", "isolated"
     assert catalog.routes[a, a] == ()
     assert catalog.routes[a, c] == ("op_3",)
     assert catalog.routes[b, a] == ("op_1", "op_2")
@@ -72,7 +69,7 @@ def test_many_paths_keep_only_two_witnesses() -> None:
     paths = next(
         paths
         for (source, target), paths in error.value.ambiguities.items()
-        if (source.collection, target.collection) == ("0_0", "25_0")
+        if (source, target) == ("0_0", "25_0")
     )
     assert len(paths) == 2
     assert all(len(path) == 25 for path in paths)
@@ -87,8 +84,7 @@ def test_catalog_routes_span_plugins_and_reject_ties() -> None:
         ),
     }
     catalog = compile_live_catalog(definitions)
-    refs = {name: p.contract.reference for name, p in catalog.provider_registry.items()}
-    assert catalog.routes[refs["a"], refs["c"]] == ("first", "second")
+    assert catalog.routes["a", "c"] == ("first", "second")
     assert (
         catalog.routes
         == compile_live_catalog(dict(reversed(definitions.items()))).routes
@@ -111,7 +107,7 @@ def test_native_catalog_inputs_have_zero_routes_without_edges() -> None:
             )
         }
     )
-    a, b = (catalog.provider_registry[key].contract.reference for key in "ab")
+    a, b = "a", "b"
     assert catalog.routes == {(a, a): (), (b, b): ()}
     with pytest.raises(TypeError):
         cast("Any", catalog.routes)[a, b] = ("changed",)
@@ -130,8 +126,8 @@ def test_preferences_resolve_ties(
     graph = edges(pairs)
     catalog = compile_live_catalog(route_plugins(graph, preferences=[preference]))
     pair = (
-        catalog.provider_registry[pairs[0][0]].contract.reference,
-        catalog.provider_registry[pairs[-1][1]].contract.reference,
+        pairs[0][0],
+        pairs[-1][1],
     )
     assert catalog.routes[pair] == preference
     assert (
@@ -167,7 +163,7 @@ def test_catalog_preference_serialization_and_conflicts() -> None:
         "providers": PluginDefinition(resources={key: provider(key) for key in "ab"}),
     }
     catalog = compile_live_catalog(definitions)
-    a, b = (catalog.provider_registry[key].contract.reference for key in "ab")
+    a, b = "a", "b"
     assert catalog.routes[a, b] == ("second",)
     definitions["two"] = PluginDefinition(
         location_operations=[second], route_preferences=[(first,)]
@@ -176,7 +172,7 @@ def test_catalog_preference_serialization_and_conflicts() -> None:
         compile_live_catalog(definitions)
 
 
-def test_edition_endpoints() -> None:
+def test_distinct_target_provider_ids() -> None:
     catalog = compile_live_catalog(
         route_plugins(
             {"first": ("a", "b_next"), "second": ("a", "b_next")},
@@ -184,10 +180,7 @@ def test_edition_endpoints() -> None:
             isolated=["b"],
         )
     )
-    a, b, edition = (
-        catalog.provider_registry[key].contract.reference
-        for key in ("a", "b", "b_next")
-    )
+    a, b, edition = "a", "b", "b_next"
     assert catalog.routes[a, edition] == ("second",)
     assert (a, b) not in catalog.routes
 
@@ -240,7 +233,5 @@ def test_local_runner_preserves_route_preferences() -> None:
         resources={"source": Source, "target": Target},
     )
     local = LocalRunner.from_definitions({"test": plugin})
-    a, b = (
-        local.catalog.provider_registry[name].contract.reference for name in ("a", "b")
-    )
+    a, b = "a", "b"
     assert local.catalog.routes[a, b] == ("second",)

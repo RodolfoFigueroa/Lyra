@@ -121,7 +121,7 @@ def test_package_version_does_not_invalidate_nodes(
 ) -> None:
     versions: dict[str, str] = {}
     read = Mock(side_effect=versions.get)
-    monkeypatch.setattr(computation, "installed_version", read)
+    monkeypatch.setattr("importlib.metadata.version", read)
     calls: list[str] = []
     plugins = definitions(calls)
     old = LocalRunner.from_definitions(
@@ -278,6 +278,7 @@ def test_provider_scope_changes_only_explicit_consumers() -> None:
         },
     )
     changed = compile_with_unused("2")
+    assert changed.routes == before.routes
     assert (
         prepare_execution(changed, request).computation_identity
         != prepare_execution(before, request).computation_identity

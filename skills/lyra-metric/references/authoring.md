@@ -679,7 +679,7 @@ The owning metric declares `blocks: gpd.GeoDataFrame`; its public request suppli
 
 Every nested `Input` reads the effective inputs of the caller that declares the binding. The binding selects that caller’s source, while the dependency input declares its required provider. Lyra chooses the shortest canonical route between them and uses declared preferences to resolve ties.
 
-An explicit operation keeps its fixed target provider; the next input may require another canonical route. Matching provider scopes need no conversion. Missing or ambiguous routes fail before acquisition, and graph validation also rejects missing bindings and cycles.
+When you bind an operation explicitly, Lyra resolves its results through its declared target provider. If the next input requires a different provider, Lyra routes the results to that provider. Before reading data, Lyra rejects missing or ambiguous routes, missing bindings, and cycles in the execution plan.
 
 Supply provider selections in requests, such as `{"provider": "city_blocks", "ids": ["b1"]}`. Omit inputs declared with `LocationDependency(operation=...)`; Lyra computes those inputs.
 

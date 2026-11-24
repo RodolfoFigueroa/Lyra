@@ -29,7 +29,7 @@ pytestmark = pytest.mark.usefixtures("worker_state")
 
 @pytest.mark.parametrize(
     "change",
-    ["middle_provider", "target_provider", "origin"],
+    ["middle_provider", "target_provider", "origin", "preference"],
 )
 def test_old_route_rejected_by_worker_with_unchanged_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
@@ -44,7 +44,7 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
     _, current = install_definitions(
         tmp_path,
         monkeypatch,
-        definitions({change: "2"}),
+        definitions({change: "alternate" if change == "preference" else "2"}),
     )
     assert current.config.build_revision == envelope.accepted.plan.build_revision
     native = native_job(monkeypatch)
@@ -52,7 +52,8 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
     lookup = Mock(side_effect=AssertionError("cache lookup"))
     monkeypatch.setattr("lyra.runtime.resources.ResourceScope.get", acquire)
     monkeypatch.setattr(MetricTables, "lookup", lookup)
-    with pytest.raises(worker.BoundPlanError, match="provider scopes"):
+    diagnostic = "Selected computation" if change == "preference" else "provider scopes"
+    with pytest.raises(worker.BoundPlanError, match=diagnostic):
         worker.run_metric_task(envelope.model_dump(mode="json"))
     acquire.assert_not_called()
     lookup.assert_not_called()

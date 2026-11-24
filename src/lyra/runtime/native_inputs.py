@@ -139,9 +139,7 @@ class NativeLocationInput:
     def identity_payload(self) -> dict:
         """Qualified records and selected correspondence computation groups."""
         return {
-            "provider": self.contract.provider_scope.identity_payload
-            if self.contract.provider_scope
-            else self.contract.identity_payload,
+            "provider": self.contract.provider_scope.identity_payload,
             "ids": sorted(set(self.ids)),
             "upstream": [
                 {"computation": key, "group": group}

@@ -18,7 +18,7 @@ Use this index to find the public objects used by guides. Generated module pages
 | Read saved result metadata | `ResultDescription`, `ResultStore.describe()`, `client.results.describe()` | [Description contracts](../../api/lyra/contracts/results/) and [read a retained description](../../use/results/#read-a-retained-description) |
 | Interpret execution reports | `ExecutionReport`, `ReportNode`, `OperationReport`, `DataBinding`, `ParameterBinding` | [Report contracts](../../api/lyra/contracts/reports/) |
 | Handle publication and lookup failures | `ExecutionPersistenceError`, `ResultAccessError` | [Errors](../../api/lyra/contracts/errors/) |
-| Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/contracts/locations/) |
+| Identify a provider’s dataset and data sources | `LocationProvider`, `Origin` | [Provider revision coverage](../../plugins/location-providers/#define-revision-coverage) |
 | Work with resolved locations | `geopandas.GeoDataFrame` | [Native location tables](../locations/) |
 | Add or remove locations for one run | `Intervention` | [Native intervention values](../../api/lyra/data/interventions/) and [street proposal example](../../use/local-execution/#run-with-a-street-proposal) |
 | Bind table and location dependencies | `Dependency`, `LocationDependency`, `Input` | [Dependencies](../../api/lyra/sdk/dependencies/) |

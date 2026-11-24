@@ -753,7 +753,7 @@ def test_worker_normalized_route(
                     k: v
                     for k, v in {
                         item.name: {
-                            "provider": item.binding.source.collection,
+                            "provider": item.binding.source,
                             "ids": list(item.ids),
                         }
                         for item in work.prepared.inputs
@@ -762,7 +762,7 @@ def test_worker_normalized_route(
                 },
                 parameters={
                     item.name: {
-                        "provider": item.binding.source.collection,
+                        "provider": item.binding.source,
                         "ids": list(item.ids),
                     }
                     for item in work.prepared.inputs

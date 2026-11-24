@@ -101,7 +101,7 @@ class LocationResolver:
 
     def retain(self, value: NativeLocationInput) -> None:
         """Reuse execution-owned provider records without another acquisition."""
-        provider_id = value.contract.collection
+        provider_id = value.contract.provider_id
         registered = self.providers.get(provider_id)
         if registered is None or self._contract(registered) != value.contract:
             return
@@ -159,11 +159,13 @@ class LocationResolver:
             LocationAcquisitionError: If provider setup or resolution fails.
             LocationProviderContractError: If returned records violate the schema.
         """
+        scopes = prepared.required_scopes()
         for item in prepared.inputs:
-            registered = self.providers.get(item.binding.source.collection)
+            registered = self.providers.get(item.binding.source)
             if (
                 registered is None
-                or registered.contract.reference != item.binding.source
+                or registered.scope
+                != scopes[item.binding.source].contract.provider_scope
             ):
                 raise LocationSelectionError(
                     item.name, "Prepared provider scope differs"

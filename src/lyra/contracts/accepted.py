@@ -23,7 +23,6 @@ from lyra.contracts.interventions import (
 )
 from lyra.contracts.locations import (
     LocationContract,
-    LocationContractReference,
     LocationSelection,
 )
 from lyra.contracts.outputs import OutputMetadata
@@ -81,8 +80,8 @@ class SubmittedRequest(BaseModel):
 class AcceptedSource:
     """Concrete public selection binding and its native input route."""
 
-    source: LocationContractReference
-    target: LocationContractReference
+    source: str
+    target: str
     operations: tuple[str, ...]
 
 
@@ -143,7 +142,7 @@ class PreparedExecution(BaseModel):
 
     def required_scopes(self) -> dict[str, RevisionBinding]:
         """Return the selected provider identities including intervention targets."""
-        scopes = {item.contract.collection: item for item in self.revisions.bindings}
+        scopes = {item.contract.provider_id: item for item in self.revisions.bindings}
         for name, provider in self.intervention_targets.items():
             scopes[name] = RevisionBinding(
                 provider.contract.reference, provider.contract.data_revision
@@ -201,11 +200,11 @@ def _validate_intervention_targets(plan: PreparedExecution) -> None:
         if target.id != value.catalog or not target.membership_capable:
             msg = f"Incompatible pinned intervention target: {value.catalog!r}"
             raise ValueError(msg)
-        if value.addition_schema != target.contract.family.structure.output:
+        if value.addition_schema != target.contract.structure.output:
             msg = f"Addition schema differs from pinned target: {value.catalog!r}"
             raise ValueError(msg)
     for binding in plan.revisions.bindings:
-        target = plan.intervention_targets.get(binding.contract.collection)
+        target = plan.intervention_targets.get(binding.contract.provider_id)
         if target is not None and (
             target.contract.reference != binding.contract
             or target.contract.data_revision != binding.revision
@@ -219,12 +218,12 @@ def _validate_bindings(plan: PreparedExecution, request: SubmittedRequest) -> No
     revisions = {}
     for binding in plan.revisions.bindings:
         if (
-            binding.contract in revisions
-            and revisions[binding.contract] != binding.revision
+            binding.contract.provider_id in revisions
+            and revisions[binding.contract.provider_id] != binding
         ):
             message = "Conflicting pinned revisions"
             raise ValueError(message)
-        revisions[binding.contract] = binding.revision
+        revisions[binding.contract.provider_id] = binding
     if plan.node != plan.metric:
         message = "Metric identity disagrees with binding"
         raise ValueError(message)
@@ -232,7 +231,7 @@ def _validate_bindings(plan: PreparedExecution, request: SubmittedRequest) -> No
         selection = request.inputs[item.name]
         source = item.binding.source
         if (selection.provider, tuple(selection.ids)) != (
-            source.collection,
+            source,
             item.ids,
         ):
             message = "Original selection disagrees with binding"
@@ -247,7 +246,7 @@ def _validate_bindings(plan: PreparedExecution, request: SubmittedRequest) -> No
 
 
 def _validate_dependency_routes(
-    plan: PreparedExecution, revisions: dict[LocationContractReference, str | None]
+    plan: PreparedExecution, revisions: dict[str, RevisionBinding]
 ) -> None:
     for route in plan.dependency_routes.values():
         if route.source not in revisions or route.target not in revisions:
@@ -266,6 +265,7 @@ class WorkerRequest(BaseModel):
     parameters: dict[str, JsonValue]
     parameter_uses: dict[str, dict[str, JsonValue]]
     build_revision: BuildRevision | None
+    computation_identity: str = Field(min_length=1)
     provider_scopes: dict[str, RevisionBinding]
     intervention_targets: dict[str, ProviderDeclaration] = Field(default_factory=dict)
     has_parameters: bool
@@ -282,6 +282,7 @@ class WorkerRequest(BaseModel):
             parameters=plan.parameters,
             parameter_uses=plan.parameter_uses,
             build_revision=plan.build_revision,
+            computation_identity=plan.computation_identity,
             provider_scopes=plan.required_scopes(),
             intervention_targets=plan.intervention_targets,
             has_parameters=plan.has_parameters,

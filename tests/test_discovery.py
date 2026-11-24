@@ -1,4 +1,4 @@
-"""Family projections preserve visibility and executable contracts."""
+"""Metric projections preserve visibility and executable contracts."""
 
 import pytest
 
@@ -15,10 +15,10 @@ def test_direct_names_visibility_pagination_and_detachment() -> None:
         view.search(offset=-1)
     detail = view.inspect("measure_1")
     assert detail.node == "measure_1"
-    scope = detail.bindings["places"].provider_scope
+    scope = detail.providers[detail.location_inputs["places"].target_provider].scope
     assert scope is not None
     assert scope.provider_id == "measurement_1"
-    assert detail.accepted_selections["places"] == [detail.bindings["places"]]
+    assert detail.providers["measurement_1"].accepted_sources == ["measurement_1"]
     detail.outputs.clear()
     view.search()[0].accepted_selections.clear()
     assert view.inspect("measure_1").outputs
@@ -38,15 +38,17 @@ def test_constraints_and_source_definitions_survive_projection() -> None:
     count = properties["count"]
     assert isinstance(count, dict)
     assert count["maximum"] == 9
-    assert detail.bindings["places"].family.structure.id_column == "location_id"
-    assert detail.accepted_selections["places"] == [detail.bindings["places"]]
+    assert "location_id" in {
+        c.name for c in detail.providers["measurement_1"].record_schema.columns
+    }
+    assert detail.providers["measurement_1"].accepted_sources == ["measurement_1"]
 
 
-def test_routed_source_availability_is_edition_specific() -> None:
+def test_routed_source_availability_is_provider_specific() -> None:
     view = discovery(regional=True)
     assert [item.name for item in view.search("regional")] == ["measure_0"]
-    assert [
-        item.family.collection
-        for item in view.inspect("measure_0").accepted_selections["places"]
-    ] == ["measurement_0", "regional"]
+    assert view.inspect("measure_0").providers["measurement_0"].accepted_sources == [
+        "measurement_0",
+        "regional",
+    ]
     assert discovery(private=0, regional=True).search("regional") == []

@@ -6,7 +6,7 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 
-from lyra.contracts.location_validation import validate_location_families
+from lyra.contracts.location_validation import validate_provider_structures
 from lyra.contracts.plugins import (
     LocationInputDeclaration,
     PluginInfo,
@@ -77,8 +77,8 @@ def test_location_structure_conflicts_still_rejected() -> None:
     first, second = node("first"), node("second")
     first.location_inputs = {"places": LocationInputDeclaration(contract=dataset())}
     second.location_inputs = {"places": LocationInputDeclaration(contract=dataset())}
-    second.location_inputs["places"].contract.family.structure.output.columns[
+    second.location_inputs["places"].contract.structure.output.columns[
         -1
     ].nullable = True
     with pytest.raises(ValueError, match="incompatible structure"):
-        validate_location_families([first, second])
+        validate_provider_structures([first, second])

@@ -201,9 +201,7 @@ class BoundLocation:
         """Canonical unordered selection, or the operation discovering target IDs."""
         return value_key(
             {
-                "provider": self.provider.provider_scope.identity_payload
-                if self.provider.provider_scope
-                else self.provider.identity_payload,
+                "provider": self.provider.provider_scope.identity_payload,
                 "ids": sorted(set(self.ids)) if self.ids is not None else None,
                 "upstream": [
                     {"computation": key, "group": group}
@@ -419,7 +417,10 @@ class _Binder:
         self, value: BoundLocation, target: LocationContractReference, key: str
     ) -> BoundLocation:
         route = self.routes[key]
-        if (route.source, route.target) != (value.provider.declaration, target):
+        if (route.source, route.target) != (
+            value.provider.provider_id,
+            target.provider_id,
+        ):
             message = f"Receiving route differs from bound providers: {key}"
             raise ValueError(message)
         for index, operation in enumerate(route.operations):
@@ -588,7 +589,10 @@ class _Binder:
         supplied = {}
         for item in prepared.inputs:
             value = BoundLocation(
-                self.effective_reference(item.binding.source), item.ids
+                self.effective_reference(
+                    self.catalog.revisions.contracts[item.binding.source].contract
+                ),
+                item.ids,
             )
             for index, operation in enumerate(item.binding.operations):
                 value = self.operation_result(
@@ -605,8 +609,7 @@ def _origins(
 ) -> frozenset[Origin]:
     origins = set(node.origins) if node.kind == "metric" else set()
     for value in locations.values():
-        if value.provider.provider_scope is not None:
-            origins.update(value.provider.provider_scope.origins)
+        origins.update(value.provider.provider_scope.origins)
         if value.upstream is not None:
             origins.update(value.upstream.origins)
     for dependency in dependencies.values():

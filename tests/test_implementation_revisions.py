@@ -73,9 +73,7 @@ def test_exact_revision_survives_inspection_and_preparation(
     assert [node.code_revision for node in restored.nodes] == [revision, revision]
     for name in ("root", "select"):
         assert plugin.describe(name).manifest.code_revision == revision
-    scope = (
-        Discovery(catalog).inspect("root").providers["tracts"].contract.provider_scope
-    )
+    scope = Discovery(catalog).inspect("root").providers["tracts"].scope
     assert scope is not None
     assert scope.code_revision == revision
     assert scope.origins == frozenset({Origin(id="source", revision=None)})

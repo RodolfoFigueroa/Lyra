@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, cast
 
 import pyproj
 
-from lyra.contracts.locations import LocationFamily
 from lyra.contracts.outputs import LocationOutputMetadata
 from lyra.data.location_frames import validate_frame, validate_record_columns
 from lyra.sdk import storage_schema
@@ -51,14 +50,6 @@ class LocationOutputSchema:
         self.metadata = LocationOutputMetadata(id_column=id_column, output=output)
         self.id_column = id_column
         self.geometry_column = geometry_column
-
-    def family(self, collection: str, unit_type: str) -> LocationFamily:
-        """Return detached family metadata from this executable schema."""
-        return LocationFamily(
-            collection=collection,
-            unit_type=unit_type,
-            structure=self.metadata.model_copy(deep=True),
-        )
 
     def prepare_frame(
         self, frame: gpd.GeoDataFrame, *, lazy: bool = False

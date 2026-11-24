@@ -46,13 +46,13 @@ def test_matching_and_explicit_routes_have_equivalent_effective_bindings() -> No
         ]
         assert native.operations == ()
         assert native.source == native.target
-        assert {item.contract.collection for item in plan.revisions.bindings} == {
+        assert {item.contract.provider_id for item in plan.revisions.bindings} == {
             "source",
             "middle",
             "target",
             "reference",
         }
-        assert {item.family.collection for item in plan.locations} == {
+        assert {item.provider_scope.provider_id for item in plan.locations} == {
             "source",
             "middle",
             "target",
@@ -75,7 +75,7 @@ def test_nested_operation_results_and_sources_keep_original_caller_scope() -> No
     plan = prepare_execution(catalog, request())
     bound = bind_execution(catalog, plan)
     target = bound.dependencies["left"].locations["places"]
-    assert target.provider.collection == "target"
+    assert target.provider.provider_id == "target"
     finish = target.upstream
     assert finish is not None
     assert finish.node == "finish"
@@ -125,6 +125,9 @@ def test_live_route_changes_invalidate_only_selected_computations(
         build_revision="same-build",
     )
     changed = prepare_execution(current, request())
+    if change == "origin":
+        assert original.routes == current.routes
+        assert original.sources_by_target == current.sources_by_target
     invalid = change not in {"description", "unused", "alternate"}
     assert (changed.computation_identity != restored.computation_identity) == invalid
     executor = GraphExecutor(current, Mock())
@@ -293,8 +296,8 @@ def test_independent_receiving_uses_may_order_operations_differently() -> None:
         },
     )
     bound = GraphExecutor(catalog, Mock()).validate_plan(plan)
-    assert bound.locations["left"].provider.collection == "b"
-    assert bound.locations["right"].provider.collection == "a"
+    assert bound.locations["left"].provider.provider_id == "b"
+    assert bound.locations["right"].provider.provider_id == "a"
     assert plan.dependency_routes[
         receiving_key("root", "inputs.left", "source")
     ].operations == ("reverse",)

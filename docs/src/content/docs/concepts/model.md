@@ -24,7 +24,7 @@ Your plugin determines the data sources and scientific choices, including how it
 
 ## Providers resolve IDs and operations derive locations
 
-A [location provider](../../plugins/location-providers/) resolves exact IDs within a declared collection and unit type. A location operation maps source IDs to target-provider IDs. The runtime supplies the corresponding native records to consumers. Metrics can consume location inputs and table dependencies.
+A [location provider](../../plugins/location-providers/) resolves record IDs within its own dataset. A [location operation](../../plugins/location-operations/) maps those IDs to records in a target provider. For example, an operation can map each block ID to the IDs of its streets. Lyra gives the metric the corresponding street records alongside any tables it receives from dependencies.
 
 Public requests name a registered public metric and supply named ID selections. Canonical operations convert accepted source types into native inputs: the location contracts the metric declares.
 

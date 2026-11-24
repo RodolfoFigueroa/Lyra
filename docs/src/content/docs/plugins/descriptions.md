@@ -18,8 +18,8 @@ Write each description around the decision that its reader needs to make:
 | Parameter | What the caller chooses and how that choice affects the calculation |
 | Output schema | Declared `meaning` and `granularity`, including what one row represents |
 | Output column | What a value means, including its unit or scale |
-| Edition metadata | Source releases, observation periods, and fixed methodological choices |
-| Location contract | Source meaning, field definitions, geographical edition, and revision coverage |
+| Provider | What one record represents and which dataset its provider ID selects |
+| Origin | Which source the provider uses and what changes its revision covers |
 
 Begin the metric description with a useful summary. Catalog listings abbreviate descriptions, while individual metric inspection returns the full metadata.
 
@@ -31,7 +31,7 @@ Describe the measured quantity precisely enough to explain the result. For examp
 
 A year parameter should explain whether it selects a census observation, an imagery composite, or another temporal concept. A score column should describe its scale. Explain established missing-value meanings when they matter.
 
-Keep each explanation in its relevant field instead of repeating the whole methodology across metric, parameter, and column descriptions. Shared structure does not make observations or statistical definitions comparable. Preserve source editions, observation periods, releases, and geographical editions as separate metadata.
+For a 2025 count that uses 2020 boundaries, give both dates and their meanings in the provider description. Record the source release in `Origin.revision`. Describe each field and its unit on the corresponding schema column.
 
 Describe a metric and each operation once. The catalog derives accepted selections from typed routes; authors need no description for every metric/route pair. Keep operation descriptions as relationship metadata without inventing containment or equivalence claims. Selecting a broader source does not change the metric’s declared output granularity.
 

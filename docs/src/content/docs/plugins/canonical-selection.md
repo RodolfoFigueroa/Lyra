@@ -31,9 +31,7 @@ Use [dependency bindings](../dependencies/#4-forward-the-required-spatial-inputs
 
 An explicitly bound operation keeps its fixed target provider. If the next input requires another provider, Lyra adds a canonical route. Automatic operations use their own defaults and fixed bindings; they don’t inherit matching metric parameters.
 
-Canonical operations are optional. A plugin can use only explicit noncanonical operations; compatible routes may come from other enabled plugins. Without a route to an input’s native contract, callers must select that native type. Accepted selections identify source providers by their public IDs.
-
-Lyra compiles shortest routes across the complete enabled catalog, counting every operation equally. An exact provider scope match uses zero operations; matching schemas or bare IDs is insufficient.
+Your plugin can use explicit operations and rely on other enabled plugins to register canonical routes. Lyra considers all enabled plugins and chooses the path with the fewest operations. If you select the input’s target provider, Lyra uses its records directly. Other source providers need a canonical route to that target.
 
 Routes in opposite directions are independent, and the conversion graph can contain cycles. Each request’s selected routes and calculation dependencies must form an execution plan without cycles.
 
@@ -51,14 +49,15 @@ See [the capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/e
 
 ## Choose a route when shortest paths tie
 
-When several canonical routes connect the same contracts with the fewest operations, declare a preference for that pair. Canonical operations declare `canonical=True` to participate in route selection. Each tied source and target pair requires its own preference, shared across all metrics.
+If two shortest routes connect the same source and target providers, declare which route Lyra should use. Set `route_preferences` on `PluginDefinition` to a list of operation sequences, such as `[(first_operation, second_operation)]`. List the decorated functions in execution order.
 
-Pass an ordered sequence of decorated operation references to `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. Discovery describes their concrete names. During catalog compilation, Lyra infers the source and target provider scopes from the sequence.
+Lyra takes the source provider from the first operation and the target provider from the last. The preference applies to that provider pair across all metrics. Declare a preference for each pair with a tie.
 
 Lyra rejects preferences that:
 
 - Reference unknown or noncanonical operations
-- Contain no operations or connect operations with mismatched contracts
+- Contain no operations
+- Have a gap between consecutive operations (the first target must match the next source)
 - Use more operations than a shortest route
 - Conflict with another preference for the same source and target
 

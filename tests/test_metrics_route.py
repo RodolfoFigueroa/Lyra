@@ -83,8 +83,8 @@ def test_metric_route_returns_schema_metadata_only(
 
     payload = response.model_dump()
     assert payload["metric"]["name"] == "light_metric"
-    assert "location" in payload["native_inputs"]
-    assert payload["accepted_selections"]["location"]
+    assert "location" in payload["location_inputs"]
+    assert payload["metric"]["accepted_selections"]["location"]
     assert payload["outputs"]["light_metric"]["kind"] == "table"
     assert payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
 
@@ -160,12 +160,21 @@ def test_http_metric_inspection_and_bounded_search() -> None:
         assert listing.status_code == 200
         assert listing.headers["ETag"] == view.fingerprint
         assert listing.json()[0]["name"] == "measure_1"
-        assert client.get("/metrics?offset=2").json() == []
+        for query in (
+            "offset=2",
+            "offset=3",
+            "query=absent&offset=0",
+            "query=1&offset=1",
+        ):
+            empty = client.get(f"/metrics?{query}")
+            assert empty.status_code == 200
+            assert empty.json() == []
+            assert empty.headers["ETag"] == view.fingerprint
         assert client.get("/metrics?limit=101").status_code == 422
         assert client.get("/metrics?offset=-1").status_code == 422
         assert client.get("/metrics/measure_0").json()["node"] == "measure_0"
         concrete = client.get("/metrics/measure_1")
         assert concrete.json()["node"] == "measure_1"
-        assert concrete.json()["accepted_selections"]["places"]
+        assert concrete.json()["metric"]["accepted_selections"]["places"]
         assert client.get("/metrics/unknown").status_code == 404
         assert client.get("/metrics/missing").status_code == 404

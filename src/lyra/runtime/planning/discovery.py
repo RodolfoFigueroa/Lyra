@@ -26,25 +26,23 @@ class Discovery:
         """Index public metrics from the authoritative catalog."""
         self.catalog = catalog
         self._summaries: dict[str, discovery.MetricSummary] = {}
-        self._contracts = {
-            contract.reference: contract
-            for entry in catalog.graph.nodes.values()
-            for contract in (
-                *(value.contract for value in entry.node.location_inputs.values()),
-                *(
-                    (entry.node.output_contract,)
-                    if entry.node.kind == "location_operation"
-                    else ()
-                ),
-            )
-        }
-        if catalog.providers:
-            self._contracts.update(
-                {
-                    p.declaration.contract.reference: p.declaration.contract
-                    for p in catalog.providers.values()
-                }
-            )
+        self._providers = {}
+        for name, selected in catalog.providers.items():
+            declared = selected.declaration
+            schema = declared.contract.structure.output
+            registered = catalog.provider_registry[name]
+            self._providers[name] = discovery.ProviderDescription(
+                scope=declared.contract.provider_scope,
+                resource=declared.resource,
+                record_schema=schema,
+                crs=str(registered.schema.schema.columns["geometry"].dtype.crs),
+                description=declared.description,
+                cache=declared.cache,
+                query_schema=declared.query_schema,
+                query_capable=declared.query_capable,
+                membership_capable=declared.membership_capable,
+                accepted_sources=list(catalog.sources_by_target[name]),
+            ).model_copy(deep=True)
         for name, entry in sorted(catalog.graph.nodes.items()):
             node = entry.node
             if node.kind != "metric" or not node.is_public_metric:
@@ -56,13 +54,25 @@ class Discovery:
                     key: output.granularity for key, output in node.outputs.items()
                 },
                 accepted_selections={
-                    key: sorted(sources)
+                    key: list(sources)
                     for key, sources in catalog.accepted_sources[name].items()
                 },
             )
-        payload = [
-            self.inspect(name).model_dump(mode="json") for name in self._summaries
-        ]
+        self._ordered = tuple(self._summaries.values())
+        self._tokens = {
+            summary.name: _summary_tokens(summary) for summary in self._ordered
+        }
+        self._details = {name: self._describe(name) for name in self._summaries}
+        payload = {
+            "providers": {
+                name: value.model_dump(mode="json")
+                for name, value in self._providers.items()
+            },
+            "metrics": [
+                item.model_dump(mode="json", exclude={"providers"})
+                for item in self._details.values()
+            ],
+        }
         self.fingerprint = hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
         ).hexdigest()
@@ -70,7 +80,13 @@ class Discovery:
     def search(
         self, query: str = "", *, offset: int = 0, limit: int = 50
     ) -> list[discovery.MetricSummary]:
-        """Return name-ordered metrics matching all tokens.
+        """Return detached summaries from the requested page."""
+        return self.page(query, offset=offset, limit=limit)[0]
+
+    def page(
+        self, query: str = "", *, offset: int = 0, limit: int = 50
+    ) -> tuple[list[discovery.MetricSummary], int]:
+        """Return a detached page and the full public match count.
 
         Raises:
             ValueError: If pagination bounds are negative.
@@ -79,69 +95,57 @@ class Discovery:
             message = "Pagination bounds must be nonnegative"
             raise ValueError(message)
         tokens = set(normalize_metric_search_tokens(query))
-        matches = []
-        for summary in self._summaries.values():
-            text = " ".join(
-                [
-                    summary.name,
-                    summary.description,
-                    *[value or "" for value in summary.output_granularity.values()],
-                    *[
-                        provider
-                        for providers in summary.accepted_selections.values()
-                        for provider in providers
-                    ],
-                ]
+        if not tokens:
+            summaries = self._ordered[offset : offset + limit]
+            return [item.model_copy(deep=True) for item in summaries], len(
+                self._ordered
             )
-            if tokens <= set(normalize_metric_search_tokens(text)):
-                matches.append(summary.model_copy(deep=True))
-        return matches[offset : offset + limit]
+        page = []
+        count = 0
+        for summary in self._ordered:
+            if not tokens <= self._tokens[summary.name]:
+                continue
+            if offset <= count < offset + limit:
+                page.append(summary.model_copy(deep=True))
+            count += 1
+        return page, count
 
     def inspect(self, name: str) -> discovery.MetricInspection:
         """Return a detached public metric description."""
+        detail = self._details[name].model_copy(deep=True)
+        detail.providers = deepcopy(self._providers)
+        return detail
+
+    def _describe(self, name: str) -> discovery.MetricInspection:
         summary = self._summaries[name]
         node = cast("MetricManifest", self.catalog.graph.nodes[name].node)
-        bindings = {
-            key: value.contract.model_copy(deep=True)
-            for key, value in node.location_inputs.items()
+        inputs: dict[str, discovery.LocationInput | discovery.OperationInput] = {}
+        computed = {
+            key: describe_dependency(value) for key, value in node.inputs.items()
         }
         for key, value in node.location_inputs.items():
-            if value.dependency is not None and value.dependency.operation is not None:
-                structure = bindings[key].family.structure
-                structure.output = forwarding_schema(structure.output)
+            target = value.contract.provider_scope.provider_id
+            dependency = value.dependency
+            if dependency is None or dependency.operation is None:
+                inputs[key] = discovery.LocationInput(target_provider=target)
+                continue
+            computed[key] = describe_dependency(dependency)
+            operation = self.catalog.graph.nodes[dependency.operation].node
+            source = next(iter(operation.location_inputs.values()))
+            inputs[key] = discovery.OperationInput(
+                target_provider=target,
+                operation=operation.name,
+                source_provider=source.contract.provider_scope.provider_id,
+                record_schema=forwarding_schema(self._providers[target].record_schema),
+            )
         return discovery.MetricInspection(
-            metric=summary.model_copy(deep=True),
+            metric=summary,
             node=name,
-            native_inputs={
-                key: value.family.model_copy(deep=True)
-                for key, value in bindings.items()
-            },
+            location_inputs=inputs,
             parameters=deepcopy(parameter_contract(node)),
             outputs=deepcopy(node.outputs),
-            bindings=bindings,
-            accepted_selections={
-                key: [
-                    self._contracts[binding.source].model_copy(deep=True)
-                    for _, binding in sorted(sources.items())
-                ]
-                for key, sources in self.catalog.accepted_sources[name].items()
-            },
-            computed_inputs={
-                **{
-                    key: describe_dependency(value)
-                    for key, value in node.inputs.items()
-                },
-                **{
-                    key: describe_dependency(value.dependency)
-                    for key, value in node.location_inputs.items()
-                    if value.dependency is not None
-                    and value.dependency.operation is not None
-                },
-            },
-            providers={
-                key: value.declaration.model_copy(deep=True)
-                for key, value in self.catalog.providers.items()
-            },
+            computed_inputs=computed,
+            providers={},
             origins=[
                 origin.model_copy(deep=True)
                 for origin in sorted(
@@ -154,3 +158,11 @@ class Discovery:
                 )
             ],
         )
+
+
+def _summary_tokens(summary: discovery.MetricSummary) -> frozenset[str]:
+    fields = [summary.name, summary.description]
+    fields.extend(value for value in summary.output_granularity.values() if value)
+    for sources in summary.accepted_selections.values():
+        fields.extend(sources)
+    return frozenset(normalize_metric_search_tokens(" ".join(fields)))

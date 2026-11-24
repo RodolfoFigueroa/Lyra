@@ -97,14 +97,11 @@ class Places(pa.DataFrameModel):
 
 
 def dataset(**changes: object) -> LocationContract:
-    family = contract(declaration(count=column(int, checks=pa.Check.ge(0)))).family(
-        "example:places", "point"
-    )
+    structure = contract(declaration(count=column(int, checks=pa.Check.ge(0)))).metadata
     return LocationContract.model_validate(
         {
-            "family": family,
-            "source": "survey-2020",
-            "geographical_edition": "boundaries-2010",
+            "structure": structure,
+            "provider_scope": {"provider_id": "example:places"},
             "meaning": "Population survey",
             "observation_period": "2020",
             "release": "final",

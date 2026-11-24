@@ -82,7 +82,7 @@ def _prepare(
         {
             name: catalog.graph.nodes[node_name]
             .node.location_inputs[name]
-            .contract.family.collection
+            .contract.provider_scope.provider_id
             for name in sources
         },
         sources,

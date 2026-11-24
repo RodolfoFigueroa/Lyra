@@ -61,7 +61,7 @@ def with_interventions(
             if discovery is None or value.catalog not in discovery.providers:
                 msg = f"Unknown intervention catalog: {value.catalog!r}"
                 raise ValueError(msg)
-            schema = discovery.providers[value.catalog].contract.family.structure.output
+            schema = discovery.providers[value.catalog].record_schema
             codec = import_module("lyra.data.intervention_records")
             actions["add"] = codec.encode_additions(value.add, schema)
         sets.append(InterventionSpec.model_validate(actions))

@@ -16,7 +16,7 @@ def native_inputs(values: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(value, gpd.GeoDataFrame):
             result[name] = NativeLocationInput(
                 value,
-                node_contract("example:places", "point").reference
+                node_contract("example:places").reference
                 if str(value.columns[0]) == "key"
                 else node_contract().reference,
                 str(value.columns[0]),

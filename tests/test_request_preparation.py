@@ -110,7 +110,7 @@ def test_native_and_owned_nested_defaults() -> None:
     node = catalog.graph.nodes["score"].node
     native = node.location_inputs["places"].contract
     request["inputs"]["places"] = {
-        "provider": native.family.collection,
+        "provider": native.provider_scope.provider_id,
         "ids": ["unknown", "unknown"],
     }
 

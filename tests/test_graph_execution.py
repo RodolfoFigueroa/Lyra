@@ -226,7 +226,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         cache="full",
         code_revision="1",
         inputs={
-            "location": LocationDependency(provider="test:units_lot"),
+            "location": LocationDependency(provider="test:units"),
         },
         name="source",
         description="source",
@@ -240,7 +240,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         cache="full",
         code_revision="1",
         inputs={
-            "location": LocationDependency(provider="test:units_lot"),
+            "location": LocationDependency(provider="test:units"),
             "table": Dependency("source", producer="source"),
         },
         name="root",
@@ -252,7 +252,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         return table
 
     runner, plugin = executor(
-        root, source, resources={"test:units_lot": provider("test:units_lot")}
+        root, source, resources={"test:units": provider("test:units")}
     )
     first = plugin.prepare_resolved_invocation(
         "root",

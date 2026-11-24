@@ -209,12 +209,12 @@ def test_inspection_of_operations_and_nested_bindings(
         assert operation["kind"] == "location_operation"
         assert {
             column["name"]
-            for column in operation["output_contract"]["family"]["structure"]["output"][
-                "columns"
-            ]
+            for column in operation["output_contract"]["structure"]["output"]["columns"]
         } == {"location_id", "geometry", "count"}
-        assert operation["output_contract"]["family"]["collection"] == "example:places"
-        assert operation["output_contract"]["family"]["unit_type"] == "record"
+        assert (
+            operation["output_contract"]["provider_scope"]["provider_id"]
+            == "example:places"
+        )
         assert operation["resources"] == {}
         assert "Location operation: select_places" in render_description(tmp_path)
         assert "Location output:" in render_description(tmp_path)
@@ -246,7 +246,7 @@ def test_inspection_preserves_provider_scopes_without_acquisition(
     ]
     assert providers[0].contract.provider_scope is not None
     assert providers[0].contract.provider_scope.provider_id == Places.id
-    assert providers[0].contract.family.structure.output.columns
+    assert providers[0].contract.structure.output.columns
     setup.assert_not_called()
 
 

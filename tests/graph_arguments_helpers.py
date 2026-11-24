@@ -104,7 +104,7 @@ def plugin(
 
 
 def location_provider_id(contract: LocationContract) -> str:
-    return f"{contract.family.collection}_{contract.family.unit_type}"
+    return contract.provider_scope.provider_id
 
 
 def scoped_inputs(values: Mapping[str, Any]) -> dict[str, Any]:

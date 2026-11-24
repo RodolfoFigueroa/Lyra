@@ -13,11 +13,11 @@ from tests.dependency_route_helpers import definitions, request
 def test_selected_route_revision_boundary() -> None:
     catalog, inputs = routed_request()
     plan = prepare_execution(catalog, inputs)
-    assert {item.contract.collection for item in plan.revisions.calculation} == {
+    assert {item.contract.provider_id for item in plan.revisions.calculation} == {
         "native",
         "other",
     }
-    assert {item.contract.collection for item in plan.revisions.selection} == {
+    assert {item.contract.provider_id for item in plan.revisions.selection} == {
         "native",
         "source",
         "other",

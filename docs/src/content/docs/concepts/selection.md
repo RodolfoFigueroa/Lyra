@@ -12,7 +12,7 @@ Public selection determines the native locations supplied to a metric. Explicit 
 
 `city_street_maintenance` calculates one row per street and accepts block selections through a [canonical operation](../../plugins/canonical-selection/). The operation preserves each block/street pair, including streets that belong to both blocks. The street calculation then deduplicates street IDs so it measures each street once.
 
-The request supplies IDs, not operation names or a pipeline. The catalog fixes a route before acquisition or enqueueing. A native contract match requires zero operations. The accepted route stays fixed during execution.
+Your request supplies the provider ID and record IDs. Lyra chooses the route before it queues the job or reads provider data, then uses that route throughout execution.
 
 ## Declare methodology explicitly
 
@@ -20,6 +20,8 @@ The request supplies IDs, not operation names or a pipeline. The catalog fixes a
 
 Each dependency input declares the provider it requires. Its [binding](../../plugins/dependencies/#4-forward-the-required-spatial-inputs) selects locations from the calling metric. For example, a block metric can supply blocks to a dependency that requires streets; canonical routing converts the selection. Nested `Input` references still read the inputs of the metric that declares the binding.
 
-An explicit operation keeps its fixed target provider. Lyra can add canonical routes before its source or between its target and the next dependency input. Matching [provider scopes](../../plugins/location-providers/#define-revision-coverage) need no conversion; missing or ambiguous routes fail before acquisition. The receiving metric’s [primary input](../../plugins/outputs/#declare-location-ownership) determines output ownership, while your calculation performs any aggregation.
+Lyra can route a selection to an explicit operation’s source provider, then route its results to the next input’s provider. When the provider IDs match, Lyra uses the records directly. It rejects missing or ambiguous routes before reading provider data.
+
+The receiving metric’s [primary input](../../plugins/outputs/#declare-location-ownership) determines which records own its output rows. Your calculation performs any aggregation.
 
 Follow [the worked comparison](../../plugins/tutorial/canonical/) or [canonical selection rules](../../plugins/canonical-selection/) for eligibility, shortest routes, and ties.

@@ -27,7 +27,7 @@ def test_nested_uses_preserve_caller_scope_and_fixed_targets() -> None:
     assert first.parameter_values() == {"year": 2020}
     assert second.parameter_values() == {"year": 2021}
     target = first.locations["places"]
-    assert target.provider.collection == "counties"
+    assert target.provider.provider_id == "counties"
     assert target.ids is None
     operation = target.upstream
     assert operation is not None
@@ -46,7 +46,7 @@ def test_unordered_selections_and_empty_provider_identity() -> None:
     assert first.identity == permuted.identity
     assert first.identity != changed.identity
     assert empty.locations["seed"].ids == ()
-    assert empty.locations["seed"].provider.collection == "tracts"
+    assert empty.locations["seed"].provider.provider_id == "tracts"
     assert empty.dependencies["first"].locations["places"].provider == (
         first.dependencies["first"].locations["places"].provider
     )

@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from lyra.api.client.endpoints import get_metric
 from lyra.contracts.dependencies import Input, LocationDependency
+from lyra.contracts.discovery import OperationInput
 from lyra.contracts.origins import Origin
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
@@ -22,6 +23,7 @@ from lyra.server.mcp.tools import InProcessLyraBackend
 from lyra.server.routes import metrics
 from lyra.server.runtime import get_catalog
 from test_support.mcp import call_tool
+from test_support.routing_plugins import conversion
 from tests.node_declaration_helpers import provider
 
 CENSUS = Origin(id="census", revision="2025", description="Census release")
@@ -36,6 +38,7 @@ def definition(monkeypatch: pytest.MonkeyPatch) -> PluginDefinition:
         "database_counties": provider(
             id="counties", code_revision="2", origins=(CENSUS,), description="Counties"
         ),
+        "parcels": provider(id="parcels"),
         "combined": provider(id="combined", origins=(CENSUS, ELEVATION)),
     }
     for cls in resources.values():
@@ -87,7 +90,12 @@ def definition(monkeypatch: pytest.MonkeyPatch) -> PluginDefinition:
         )
 
     return PluginDefinition(
-        metrics=[measure], location_operations=[aggregate], resources=resources
+        metrics=[measure],
+        location_operations=[
+            conversion("locate_tract", "parcels", "tracts"),
+            aggregate,
+        ],
+        resources=resources,
     )
 
 
@@ -98,14 +106,14 @@ def test_live_inspection_scope_routes_and_isolation(
     view = Discovery(catalog)
     detail = view.inspect("measure")
     assert detail.origins == [CENSUS]
-    assert set(detail.providers) == {"tracts", "counties", "combined"}
+    assert set(detail.providers) == {"tracts", "counties", "combined", "parcels"}
     for key, revision, origins, description in (
         ("tracts", "1", {CENSUS}, None),
         ("counties", "2", {CENSUS}, "Counties"),
         ("combined", None, {CENSUS, ELEVATION}, None),
     ):
         declared = detail.providers[key]
-        scope = declared.contract.provider_scope
+        scope = declared.scope
         assert scope is not None
         assert (scope.provider_id, scope.code_revision, scope.origins) == (
             key,
@@ -113,29 +121,36 @@ def test_live_inspection_scope_routes_and_isolation(
             origins,
         )
         assert declared.description == description
-        assert declared.contract == detail.bindings[key]
+        assert detail.location_inputs[key].target_provider == key
+        assert declared.accepted_sources == detail.metric.accepted_selections[key]
     assert detail.providers["tracts"].resource == "database_tracts"
     assert (
-        detail.native_inputs["tracts"].structure
-        == detail.native_inputs["counties"].structure
+        detail.providers["tracts"].record_schema
+        == detail.providers["counties"].record_schema
     )
     assert detail.metric.accepted_selections == {
-        "tracts": ["tracts"],
-        "counties": ["counties", "tracts"],
+        "tracts": ["parcels", "tracts"],
+        "counties": ["counties", "parcels", "tracts"],
         "combined": ["combined"],
     }
-    actual = detail.native_inputs["derived"].structure.output
-    assert actual == detail.bindings["derived"].family.structure.output
+    derived = detail.location_inputs["derived"]
+    assert isinstance(derived, OperationInput)
+    actual = derived.record_schema
+    assert derived.target_provider == "counties"
+    assert derived.source_provider == "tracts"
     assert actual.columns[0].name == "source_location_id"
     assert actual.unique == ["source_location_id", "location_id"]
     assert "source_location_id" not in {
-        c.name
-        for c in detail.providers["counties"].contract.family.structure.output.columns
+        c.name for c in detail.providers["counties"].record_schema.columns
     }
-    assert detail.computed_inputs["derived"]["operation"] == "aggregate"
+    assert derived.operation == "aggregate"
+    assert detail.computed_inputs["derived"]["operation"] == derived.operation
     sdk = definition.describe("measure").manifest
     assert set(sdk.request_schema["properties"]) == {"tracts", "counties", "combined"}
-    assert sdk.location_inputs["derived"].provider == detail.providers["counties"]
+    assert (
+        sdk.location_inputs["derived"].contract.structure.output
+        == detail.providers["counties"].record_schema
+    )
     request = {
         "metric": "measure",
         "inputs": {
@@ -144,20 +159,16 @@ def test_live_inspection_scope_routes_and_isolation(
         },
     }
     before = prepare_execution(catalog, request)
-    detail.providers["tracts"].contract.family.structure.output.columns.clear()
+    detail.providers["tracts"].record_schema.columns.clear()
     detail.origins.clear()
-    detail.computed_inputs["derived"].clear()
-    sdk.location_inputs["tracts"].contract.family.structure.output.columns.clear()
-    assert (
-        view.inspect("measure")
-        .providers["tracts"]
-        .contract.family.structure.output.columns
-    )
+    derived.record_schema.columns.clear()
+    sdk.location_inputs["tracts"].contract.structure.output.columns.clear()
+    assert view.inspect("measure").providers["tracts"].record_schema.columns
     assert view.inspect("measure").origins == [CENSUS]
     assert (
         definition.describe("measure")
         .manifest.location_inputs["tracts"]
-        .contract.family.structure.output.columns
+        .contract.structure.output.columns
     )
     assert prepare_execution(catalog, request) == before
 

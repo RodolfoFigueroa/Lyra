@@ -41,25 +41,22 @@ from tests.sqlite_helpers import database
 
 def resolved() -> NativeLocationInput:
     return records(
-        scoped_payload(geometry())
-        | {"collection": "example:areas", "unit_type": "block"},
+        scoped_payload(geometry()) | {"provider": "example:areas_block"},
         schema=output_schema(label=str),
     )
 
 
 @pytest.mark.parametrize(
     "change",
-    ["collection", "unit_type", "id", "geometry", "properties", "crs", "parameters"],
+    ["provider", "id", "geometry", "properties", "crs", "parameters"],
 )
 def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
     first = resolved()
     payload = raw_records()
     parameters = Producer()
     match change:
-        case "collection":
-            payload["collection"] = "other:areas"
-        case "unit_type":
-            payload["unit_type"] = "lot"
+        case "provider":
+            payload["provider"] = "other:areas"
         case "id":
             payload["features"][0]["id"] = "another"
         case "geometry":
@@ -101,7 +98,7 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
 
 def test_scoped_preparation_rejects_unscoped_and_missing_inputs() -> None:
     implementation = plugin(
-        None, spatial=True, location_contract=node_contract("example:areas", "block")
+        None, spatial=True, location_contract=node_contract("example:areas_block")
     )
     with pytest.raises(MetricInputError, match="location"):
         implementation.prepare_resolved_invocation(
@@ -283,7 +280,8 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         runner.store = SQLiteStore(tmp_path / "values.sqlite")
     shared = resolved()
     different = records(
-        raw_records() | {"unit_type": "lot"}, schema=output_schema(label=str)
+        raw_records() | {"provider": "example:areas_lot"},
+        schema=output_schema(label=str),
     )
     snapshot = shared.frame.copy(deep=True)
     inputs = {
@@ -400,7 +398,7 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
 def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> None:
     selected = resolved()
     other = records(
-        raw_records() | {"collection": "other:areas"},
+        raw_records() | {"provider": "other:areas"},
         schema=output_schema(label=str),
     )
     consumer = PreparedResolvedInvocation(
@@ -409,9 +407,9 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
         scoped_inputs({"location": other, "bounds": selected, "alias": selected}),
     )
     implementation = plugin(
-        None, spatial=True, location_contract=node_contract("example:areas", "block")
+        None, spatial=True, location_contract=node_contract("example:areas_block")
     )
-    edge = location_edge(alias=True, contract=node_contract("example:areas", "block"))
+    edge = location_edge(alias=True, contract=node_contract("example:areas_block"))
     prepared = prepare_dependency(consumer, edge, implementation)
     direct = implementation.prepare_resolved_invocation(
         "producer", scoped_inputs({"location": selected, "bounds": selected})
@@ -431,16 +429,13 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
 
 def raw_records() -> dict:
     return scoped_payload(geometry()) | {
-        "collection": "example:areas",
-        "unit_type": "block",
+        "provider": "example:areas_block",
     }
 
 
 def records(payload: dict, *, schema: LocationOutputSchema) -> NativeLocationInput:
     frame = fixture_locations(payload, schema=schema)
-    return scoped_frame(
-        frame, node_contract(payload["collection"], payload["unit_type"])
-    )
+    return scoped_frame(frame, node_contract(payload["provider"]))
 
 
 __all__ = ["database"]

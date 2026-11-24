@@ -37,20 +37,16 @@ class ProviderDeclaration(StrictBaseModel):
     @property
     def id(self) -> str:
         """Public provider ID."""
-        return self.contract.family.collection
+        return self.contract.provider_scope.provider_id
 
     @model_validator(mode="after")
-    def validate_scope(self) -> Self:
-        """Return a declaration whose public provider ID agrees with its scope.
+    def validate_query_schema(self) -> Self:
+        """Return a declaration with consistent query capability and schema.
 
         Raises:
-            ValueError: If the contract does not retain its provider identity.
+            ValueError: If the declared capability and schema disagree.
         """
-        scope = self.contract.provider_scope
         if self.query_capable != (self.query_schema is not None):
             message = "Query capability requires a declared query schema"
-            raise ValueError(message)
-        if scope is None or scope.provider_id != self.id:
-            message = "Provider contract must retain its declared provider scope"
             raise ValueError(message)
         return self

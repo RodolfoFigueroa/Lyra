@@ -11,6 +11,7 @@ from shapely.geometry import shape
 from typing_extensions import override
 
 from lyra.contracts.locations import LocationContract
+from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.resources import IOConfig
 from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.sdk.location_schema import LocationOutputSchema
@@ -187,8 +188,7 @@ def fixture_locations(
 
 
 def node_contract(
-    collection: str = "test:units",
-    unit_type: str = "lot",
+    provider_id: str = "test:units",
     schema: LocationOutputSchema | OutputSchema | None = None,
 ) -> LocationContract:
     """Return an explicit concrete fixture contract."""
@@ -200,9 +200,8 @@ def node_contract(
         else output_schema()
     )
     return LocationContract(
-        family=output.family(collection, unit_type),
-        source="fixture",
-        geographical_edition="current",
+        structure=output.metadata.model_copy(deep=True),
+        provider_scope=ProviderScope(provider_id=provider_id),
         meaning="Provider locations",
     )
 
@@ -213,7 +212,7 @@ def provider_plugin(
     """Return a provider backed solely by a fixture frame."""
 
     class FixtureProvider(LocationProvider[IOConfig]):
-        id = contract.family.collection
+        id = contract.provider_scope.provider_id
         origins = ()
 
         @override

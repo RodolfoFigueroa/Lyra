@@ -25,7 +25,8 @@ async def list_metrics(
     """
     discovery = catalog.discovery
     response.headers["ETag"] = discovery.fingerprint
-    return discovery.search(query, offset=offset, limit=limit)
+    page, _ = discovery.page(query, offset=offset, limit=limit)
+    return page
 
 
 @router.get("/metrics/{metric_name}")

@@ -2,8 +2,13 @@
 
 import pytest
 
+from lyra.runtime.planning.catalog import compile_live_catalog
+from lyra.runtime.planning.discovery import Discovery
+from lyra.sdk.plugin import PluginDefinition
 from test_support.imports import assert_fresh_imports
-from test_support.location_resolution import SELECTED
+from test_support.location_resolution import Provider
+from test_support.routing_plugins import provider as route_provider
+from test_support.routing_plugins import score_plugin
 
 HIGHER_LAYERS = ("lyra.sdk", "lyra.data", "lyra.runtime", "lyra.server")
 NATIVE = (
@@ -325,7 +330,15 @@ def test_submission_without_native_dependencies() -> None:
 
 
 def test_additions_submission_with_tables_extra() -> None:
-    provider = SELECTED.declaration.model_dump(mode="json")
+    catalog = compile_live_catalog(
+        {
+            "metrics": score_plugin(target=Provider.id),
+            "providers": PluginDefinition(
+                resources={"locations": Provider, "reference": route_provider("other")}
+            ),
+        }
+    )
+    detail = Discovery(catalog).inspect("score").model_dump(mode="json")
     assert_fresh_imports(
         ["lyra.api"],
         blocked=("lyra.sdk", "lyra.runtime", "lyra.server", "pandera"),
@@ -339,9 +352,8 @@ def test_additions_submission_with_tables_extra() -> None:
         from shapely.geometry import Point
         from lyra.api import LyraClient
         from lyra.data.interventions import Intervention
-        from tests.client_helpers import _job_response, _metric_response
-        detail = _metric_response()
-        detail["providers"]["test_units"] = {provider!r}
+        from tests.client_helpers import _job_response
+        detail = {detail!r}
         def handle(request):
             if request.method == "GET":
                 return httpx.Response(200, json=detail)
@@ -354,6 +366,6 @@ def test_additions_submission_with_tables_extra() -> None:
         transport = httpx.MockTransport(handle)
         with patch("httpx.Client", partial(httpx.Client, transport=transport)):
             with LyraClient("example.test") as client:
-                assert client.jobs.create("metric", interventions=[change]).job_id
+                assert client.jobs.create("score", interventions=[change]).job_id
         """,
     )

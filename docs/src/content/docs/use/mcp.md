@@ -16,20 +16,22 @@ The examples use the finished [city plugin](../../plugins/tutorial/package/). Yo
 
 Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
 
-List and search results identify public metrics by their registered names. Each entry describes the calculation, its output rows, and accepted source types.
+For an inventory, start at `offset=0` (the default) and choose a `limit` from 1 to 20. Pass each `next_offset` as the next call’s `offset` until `next_offset` is `null`. An offset at or above `total_count` returns an empty page. If `catalog_fingerprint` changes between calls, restart at zero to list metrics from a single catalog version.
 
-Pass the selected name as `metric` to `lyra_get_metric`. Read these fields before submitting:
+Both tools return each public metric’s registered name. Check its `accepted_selections` for the source provider IDs you can use for each input.
 
-- `parameters`: parameter constraints and defaults
-- `outputs`: named result schemas
-- `accepted_selections`: source types you can select for each input
-- `bindings`: concrete source contracts for native inputs
-- `computed_inputs`: inputs that dependencies supply during execution
-- `providers`: each provider’s record schema and whether it supports interventions
+Pass the registered name as `metric` to `lyra_get_metric`. Use the response to choose inputs and settings for your request.
 
-Build your request from the accepted selections and parameter schema. Lyra supplies computed inputs; don’t include them in the request.
+| Field | What to check |
+| --- | --- |
+| `metric.accepted_selections` | Source provider IDs you can select for each input you supply |
+| `parameters` | Allowed settings and defaults |
+| `location_inputs` | Target provider for each input. For a derived input, read `operation` and `source_provider` to see how Lyra obtains its records. |
+| `computed_inputs` | Inputs Lyra supplies through dependencies |
+| `providers` | Record schemas and capabilities by provider ID |
+| `outputs` | Result tables and their schemas |
 
-To propose changes, look up the public provider ID in `providers` and check that `membership_capable` is `true`. Read `contract.family.structure.output.columns` for each column’s type, unit, and nullability. On the active geometry column, read `parameters.crs` before preparing coordinates.
+To add or remove records for a run, find your provider in `providers` and check that `membership_capable` is `true`. For additions, read `record_schema.columns` for each column’s type, unit, and nullability. Prepare coordinates in the provider’s coordinate reference system, `crs`.
 
 ## 2. Submit once
 

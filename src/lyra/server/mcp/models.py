@@ -87,10 +87,8 @@ class SearchMetricsInput(MCPContractModel):
 class ListMetricsInput(MCPContractModel):
     """Select a page of the public metric catalog."""
 
-    cursor: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Opaque continuation cursor from the preceding list response.",
+    offset: int = Field(
+        default=0, ge=0, description="Number of public metrics to skip."
     )
     limit: int = Field(
         default=MAX_METRIC_PAGE_SIZE,
@@ -158,12 +156,12 @@ class SearchMetricsOutput(MCPContractModel):
 
 
 class ListMetricsOutput(MCPContractModel):
-    """Return a catalog page and its continuation cursor."""
+    """Return a catalog page and its next offset."""
 
     catalog_fingerprint: str = Field(min_length=1)
     total_count: int = Field(ge=0)
     metrics: list[MetricSummary]
-    next_cursor: str | None = Field(default=None, min_length=1)
+    next_offset: int | None = Field(default=None, ge=0)
 
 
 class RunMetricOutput(MCPContractModel):

@@ -62,7 +62,7 @@ def test_conversion_cycle_is_not_an_execution_cycle() -> None:
             )
         }
     )
-    a, b = (catalog.provider_registry[key].contract.reference for key in "ab")
+    a, b = "a", "b"
     assert catalog.routes[a, b] == ("forward",)
     assert catalog.routes[b, a] == ("reverse",)
     assert catalog.routes[a, a] == ()

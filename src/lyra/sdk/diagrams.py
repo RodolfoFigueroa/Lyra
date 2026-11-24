@@ -200,22 +200,15 @@ def _contract_details(node: dict, *, detailed: bool) -> list[str]:
         lines.extend(
             [
                 "<b>Location output</b>",
-                _label(
-                    f"ID: {node['output_contract']['family']['structure']['id_column']}"
-                ),
+                _label(f"ID: {node['output_contract']['structure']['id_column']}"),
             ]
         )
-        scope = {
-            key: value
-            for key, value in node["output_contract"]["family"].items()
-            if key != "structure"
-        }
-        lines.append(_label(f"Scope: {scope}"))
+        lines.append(_label(f"Target provider: {node['target_provider']}"))
         if detailed:
             lines.append(
                 _label(
                     json.dumps(
-                        node["output_contract"]["family"]["structure"]["output"],
+                        node["output_contract"]["structure"]["output"],
                         sort_keys=True,
                     )
                 )

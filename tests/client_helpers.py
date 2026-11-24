@@ -371,10 +371,8 @@ def _metric_response() -> dict[str, Any]:
         "computed_inputs": {},
         "providers": {},
         "origins": [],
-        "native_inputs": {},
+        "location_inputs": {},
         "parameters": {},
-        "bindings": {},
-        "accepted_selections": {},
         "outputs": {
             "accessibility_by_destination": {
                 "kind": "table",

@@ -75,7 +75,7 @@ class RunnerSuite:
 
 
 class AcceptedSourcesSuite:
-    """Compile native source selections across concrete edition families."""
+    """Compile native source selections across target providers."""
 
     version = "2"
     params: ClassVar[list[list[int]]] = [[10, 100], [10, 100]]
@@ -101,7 +101,7 @@ class AcceptedSourcesSuite:
 
 
 class DiscoverySuite:
-    """Shared family projections across representative edition counts."""
+    """Metric discovery across representative provider counts."""
 
     version = "2"
     params: ClassVar[list[int]] = [10, 100]
@@ -112,7 +112,7 @@ class DiscoverySuite:
         self.discovery = discovery(editions)
 
     def time_list(self, _editions: int) -> None:
-        """List compact families."""
+        """List compact metric summaries."""
         self.discovery.search()
 
     def time_search(self, _editions: int) -> None:
@@ -120,11 +120,11 @@ class DiscoverySuite:
         self.discovery.search("places")
 
     def time_inspect(self, _editions: int) -> None:
-        """Inspect one executable edition."""
+        """Inspect one public metric."""
         self.discovery.inspect("measure_0")
 
     def track_list_bytes(self, _editions: int) -> int:
-        """Return serialized family discovery size."""
+        """Return serialized metric listing size."""
         return sum(
             len(item.model_dump_json().encode()) for item in self.discovery.search()
         )

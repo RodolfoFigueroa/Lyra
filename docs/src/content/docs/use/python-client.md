@@ -14,7 +14,7 @@ Get the server address and an agent key from your operator. Install `lyra[client
 
 Set `LYRA_AGENT_API_KEY` to the key from your operator. Create `run_remote.py` and replace `lyra.example.com` with your server’s hostname. The script reads the catalog and inspects the example metric:
 
-```python title="run_remote.py" {17}
+```python title="run_remote.py" {17,19}
 import os
 
 import httpx
@@ -33,7 +33,7 @@ with LyraClient(
 
     metric = client.catalog.metric("city_street_maintenance")
     print(metric.parameters)
-    print(metric.accepted_selections)
+    print(metric.metric.accepted_selections["streets"])
     print(metric.outputs)
 ```
 
@@ -43,11 +43,11 @@ Use a `with` block to close the client’s HTTP session after success or failure
 
 Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use `LyraClient("localhost:5219", secure=False, agent_api_key=...)`.
 
-Your server must offer the example metric. Read its schema before choosing inputs, and check `metric.accepted_selections` for available providers.
+The example requires `city_street_maintenance` on your server. The script prints the provider IDs you can use for its `streets` input.
 
 ## Search and select metrics
 
-Use `client.catalog.metrics(query="maintenance", limit=20)` to search registered public metrics. Each result lists accepted source types and describes what each output row represents.
+Use `client.catalog.metrics(query="maintenance", limit=20)` to find public metrics. Each summary lists accepted source provider IDs and describes what each output row represents.
 
 Inspect `client.catalog.metric(name)` to read the [metric’s request and output contracts](../rest-api/#read-the-live-contract). Submit the registered name with any of these methods:
 
@@ -56,11 +56,11 @@ Inspect `client.catalog.metric(name)` to read the [metric’s request and output
 - `client.jobs.run()`
 - `client.jobs.run_to_file()`
 
-Search results include the source types each metric accepts. See [spatial inputs](../spatial-inputs/) for named ID selections and how the server converts them to the metric’s inputs.
+For a different metric, use each input’s name to look up its provider IDs in the summary’s `accepted_selections`. See [spatial inputs](../spatial-inputs/) for the selection format.
 
 ## Submit a job and wait
 
-Append this request to `run_remote.py`. It selects a street from `city_streets` and sets a condition threshold. For another metric, choose a provider from `metric.accepted_selections`. Supply IDs that exist in that dataset.
+Append this request to `run_remote.py`. It selects `street-1` from `city_streets` and sets the maintenance threshold to 50.
 
 ```python title="run_remote.py" {11-15,18-19}
 inputs: JsonObject = {

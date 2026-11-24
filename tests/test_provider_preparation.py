@@ -19,7 +19,7 @@ def test_preparation_captures_order_and_duplicates_without_acquisition(
     )
     ids.append("later")
     assert plan.inputs[0].ids == expected
-    assert plan.inputs[0].binding.source.collection == "target"
+    assert plan.inputs[0].binding.source == "target"
     assert events == []
 
 

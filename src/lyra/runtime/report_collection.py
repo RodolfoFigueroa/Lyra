@@ -398,9 +398,7 @@ class ReportCollection:
                     if location.ids is not None
                     else None,
                 },
-                location.provider.provider_scope.provider_id
-                if location.provider.provider_scope is not None
-                else location.provider.collection,
+                location.provider.provider_id,
                 "provider",
                 (),
             )

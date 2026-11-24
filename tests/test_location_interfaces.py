@@ -280,7 +280,7 @@ def test_catalog_inspection_is_service_free(
     assert response.headers["ETag"] == catalog.discovery.fingerprint
     detail = client.get("/metrics/report")
     assert detail.status_code == 200
-    assert detail.json()["accepted_selections"]
+    assert detail.json()["metric"]["accepted_selections"]
     schema = client.get("/openapi.json").json()
     assert "MetricInspection" in schema["components"]["schemas"]
     assert set(client.get("/data-types").json()) == {"location_selection_schema"}
@@ -310,12 +310,8 @@ def test_catalog_inspection_is_service_free(
         == "alternate_binding"
     )
     assert (
-        updated.discovery.inspect("report")
-        .providers[Provider.id]
-        .contract.provider_scope
-        == catalog.discovery.inspect("report")
-        .providers[Provider.id]
-        .contract.provider_scope
+        updated.discovery.inspect("report").providers[Provider.id].scope
+        == catalog.discovery.inspect("report").providers[Provider.id].scope
     )
     # The discovery ETag tracks visible metadata, including resource bindings.
     assert updated.discovery.fingerprint != catalog.discovery.fingerprint

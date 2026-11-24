@@ -48,10 +48,8 @@ def capture_inputs(
     names = []
     for name, value in locations.items():
         dataset = invocation.location_contract(name).provider_scope
-        if dataset is None or value.contract.provider_scope is None:
-            continue
         names.append(name)
-        provider = catalog.provider_registry[value.contract.collection]
+        provider = catalog.provider_registry[value.contract.provider_id]
         ProviderRecords(store).publish(
             provider,
             value.frame.drop(
@@ -241,7 +239,7 @@ def capture_skipped_inputs(
         if value.identity in matching:
             references[name] = matching[value.identity]
             continue
-        provider = catalog.provider_registry[value.provider.collection]
+        provider = catalog.provider_registry[value.provider.provider_id]
         registration = provider_registration(provider)
         schema = provider.schema.metadata.model_copy(deep=True)
         source = value.source
@@ -275,7 +273,7 @@ def capture_skipped_inputs(
         available = value.ids == ()
         description = LocationInputDescription(
             kind="correspondence" if derived else "provider",
-            provider_scope=value.provider.provider_scope or provider.scope,
+            provider_scope=value.provider.provider_scope,
             source_scope=source.provider.provider_scope if source else None,
             table_schema=schema,
             availability="available" if available else "not_materialized",

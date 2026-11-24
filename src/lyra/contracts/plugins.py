@@ -19,7 +19,7 @@ from lyra.contracts.dependencies import (
     describe_dependency,
     validate_bindings,
 )
-from lyra.contracts.locations import LocationContract, LocationContractReference
+from lyra.contracts.locations import LocationContract
 from lyra.contracts.metric_scope import (
     CachePolicy,
     OutputScope,
@@ -70,7 +70,6 @@ class LocationInputDeclaration(StrictBaseModel):
     provider: ProviderDeclaration | None = None
     dependency: LocationDependency | None = None
     description: str | None = Field(default=None, min_length=1)
-    source_bindings: tuple[LocationContractReference, ...] = ()
 
     @field_serializer("dependency")
     @staticmethod
@@ -271,7 +270,7 @@ class LocationOperationManifest(_NodeManifest):
 
     @model_validator(mode="after")
     def validate_operation(self) -> Self:
-        """Validate canonical shape and metric-only source overrides.
+        """Validate canonical operation shape.
 
         Returns:
             This operation with valid routing and input declarations.
@@ -282,9 +281,6 @@ class LocationOperationManifest(_NodeManifest):
         validate_cache(self.cache, "location")
         if self.canonical and len(self.location_inputs) != 1:
             message = "Canonical operations require exactly one named location input"
-            raise ValueError(message)
-        if any(value.source_bindings for value in self.location_inputs.values()):
-            message = "Source bindings apply only to metrics"
             raise ValueError(message)
         return self
 

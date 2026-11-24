@@ -339,7 +339,7 @@ class GraphExecutor:
             raise ValueError(message)
         for item in prepared.inputs:
             source = item.binding.source
-            if sources[item.name].get(source.collection) != item.binding:
+            if sources[item.name].get(source) != item.binding:
                 message = (
                     f"Input {item.name!r}: selected route differs from live definitions"
                 )
@@ -788,7 +788,7 @@ class GraphExecutor:
             return resolver.resolve(
                 {
                     name: LocationSelection(
-                        provider=location.provider.collection,
+                        provider=location.provider.provider_id,
                         ids=list(location.ids or ()),
                     )
                 },
@@ -799,7 +799,7 @@ class GraphExecutor:
         targets = resolver.resolve(
             {
                 name: LocationSelection(
-                    provider=location.provider.collection, ids=list(location.ids or ())
+                    provider=location.provider.provider_id, ids=list(location.ids or ())
                 )
             },
             use_ids={name: completed.report.target_use_id(location.upstream)},
@@ -812,7 +812,7 @@ class GraphExecutor:
         forwarded = forward_correspondences(
             result,
             self.catalog.provider_registry[
-                location.provider.collection
+                location.provider.provider_id
             ].schema.metadata,
         )
         return replace(
@@ -1328,7 +1328,7 @@ class GraphExecutor:
             outputs = self._invoke(invocation, path, completed, context_factory)
             if isinstance(outputs, OperationResult):
                 target = self.catalog.provider_registry[
-                    outputs.targets.contract.collection
+                    outputs.targets.contract.provider_id
                 ]
                 return self._forward_operation(
                     outputs, invocation, target.schema.metadata

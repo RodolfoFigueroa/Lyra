@@ -391,6 +391,9 @@ def _execute_bound_job(
     if live.required_scopes() != plan.provider_scopes:
         msg = "Required provider scopes differ from acceptance"
         raise BoundPlanError(msg)
+    if live.computation_identity != plan.computation_identity:
+        msg = "Selected computation differs from acceptance"
+        raise BoundPlanError(msg)
     report = ReportCollection()
     progress = WorkerProgress(native.id, runtime.config.jobs)
     with SQLiteStore(runtime.config.result_store_path) as store:

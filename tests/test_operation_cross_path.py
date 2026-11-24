@@ -285,7 +285,7 @@ def test_selector_identity_precedes_acquisition(change: str) -> None:
         operation = root.locations["chosen"].upstream
         assert operation is not None
         assert root.locations["chosen"].ids is None
-        assert root.locations["chosen"].provider.collection == "targets"
+        assert root.locations["chosen"].provider.provider_id == "targets"
         assert set(operation.locations) == {"declared_source"}
         upstream = operation.locations["declared_source"].upstream
         assert upstream is not None

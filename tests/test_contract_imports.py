@@ -167,17 +167,16 @@ def test_fixture_manifests_and_discovery_without_execution_dependencies() -> Non
                     "metric": summary.model_dump(mode="json"),
                     "node": node["name"], "computed_inputs": node["inputs"],
                     "providers": {}, "origins": [],
-                    "native_inputs": {
-                        name: value["contract"]["family"]
+                    "location_inputs": {
+                        name: {
+                            "target_provider": value["contract"]["provider_scope"][
+                                "provider_id"
+                            ]
+                        }
                         for name, value in node["location_inputs"].items()
                     },
                     "parameters": node["parameters_schema"] or {},
                     "outputs": node["outputs"],
-                    "bindings": {
-                        name: value["contract"]
-                        for name, value in node["location_inputs"].items()
-                    },
-                    "accepted_selections": {},
                 }))
                 for value in (summary, inspection):
                     assert (

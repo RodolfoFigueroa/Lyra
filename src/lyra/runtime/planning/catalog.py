@@ -8,7 +8,6 @@ from types import MappingProxyType
 
 from lyra.contracts.accepted import AcceptedSource
 from lyra.contracts.dependencies import Input
-from lyra.contracts.locations import LocationContract, LocationContractReference
 from lyra.contracts.plugins import NodeManifest, PluginInfo, PluginManifest
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.computation import CatalogComputation, compile_computation
@@ -44,10 +43,9 @@ class CompiledCatalog:
     graph: PluginGraph
     providers: Mapping[str, SelectedLocationProvider]
     canonical_edges: tuple["CanonicalEdge", ...]
-    routes: Mapping[
-        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
-    ]
+    routes: Mapping[tuple[str, str], tuple[str, ...]]
 
+    sources_by_target: Mapping[str, Mapping[str, AcceptedSource]]
     accepted_sources: Mapping[str, Mapping[str, Mapping[str, "AcceptedSource"]]]
 
 
@@ -81,7 +79,16 @@ def compile_live_catalog(
     }
     selected = select_location_providers(registry, definitions)
     edges = _canonical_edges(graph)
-    routes = _catalog_routes(graph, selected, edges, descriptions)
+    routes = compile_routes(
+        edges,
+        selected,
+        (
+            route
+            for manifest in descriptions.values()
+            for route in manifest.route_preferences
+        ),
+    )
+    sources_by_target = _sources_by_target(routes)
     catalog = CompiledCatalog(
         computation=compile_computation(graph, selected),
         revisions=compile_revisions(graph, selected),
@@ -90,7 +97,8 @@ def compile_live_catalog(
         providers=selected,
         canonical_edges=edges,
         routes=routes,
-        accepted_sources=_accepted_sources(graph, routes),
+        sources_by_target=sources_by_target,
+        accepted_sources=_accepted_sources(graph, sources_by_target),
         resources=resources,
         implementations=MappingProxyType(implementations),
         provider_registry=registry,
@@ -102,116 +110,44 @@ def compile_live_catalog(
     return catalog
 
 
-def _catalog_routes(
-    graph: PluginGraph,
-    selected: Mapping[str, SelectedLocationProvider],
-    edges: tuple["CanonicalEdge", ...],
-    captured: Mapping[str, PluginManifest],
-) -> Mapping[
-    tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
-]:
-    contracts = [
-        contract.reference
-        for entry in graph.nodes.values()
-        for contract in (
-            value.contract for value in entry.node.location_inputs.values()
+def _sources_by_target(
+    routes: Mapping[tuple[str, str], tuple[str, ...]],
+) -> Mapping[str, Mapping[str, AcceptedSource]]:
+    by_target: dict[str, dict[str, AcceptedSource]] = {}
+    for (source, target), operations in sorted(routes.items()):
+        by_target.setdefault(target, {})[source] = AcceptedSource(
+            source, target, operations
         )
-    ]
-    contracts.extend(
-        entry.node.output_contract.reference
-        for entry in graph.nodes.values()
-        if entry.node.kind == "location_operation"
-    )
-    contracts.extend(p.declaration.contract.reference for p in selected.values())
-    return compile_routes(
-        edges,
-        contracts,
-        (
-            route
-            for manifest in captured.values()
-            for route in manifest.route_preferences
-        ),
+    return MappingProxyType(
+        {target: MappingProxyType(sources) for target, sources in by_target.items()}
     )
 
 
 def _accepted_sources(
-    graph: PluginGraph,
-    routes: Mapping[
-        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
-    ],
+    graph: PluginGraph, by_target: Mapping[str, Mapping[str, AcceptedSource]]
 ) -> Mapping[str, Mapping[str, Mapping[str, AcceptedSource]]]:
-    by_target: dict[LocationContractReference, dict[str, list[AcceptedSource]]] = {}
-    for (source, target), operations in routes.items():
-        by_target.setdefault(target, {}).setdefault(source.collection, []).append(
-            AcceptedSource(source, target, operations)
-        )
-    result = {}
-    for name, entry in graph.nodes.items():
-        node = entry.node
-        if node.kind != "metric":
-            continue
-        inputs = {}
-        for input_name, declaration in node.location_inputs.items():
-            if (
-                declaration.dependency is not None
-                and declaration.dependency.operation is not None
-            ):
-                continue
-            native = declaration.contract
-            candidates = by_target[native.reference]
-            overrides = _source_overrides(
-                node, input_name, native.reference, candidates
+    return MappingProxyType(
+        {
+            name: MappingProxyType(
+                {
+                    key: by_target[value.contract.provider_scope.provider_id]
+                    for key, value in entry.node.location_inputs.items()
+                    if value.dependency is None or value.dependency.operation is None
+                }
             )
-            selections = {}
-            for key, choices in candidates.items():
-                selected = [
-                    choice
-                    for choice in choices
-                    if key not in overrides or choice.source == overrides[key]
-                ]
-                if len(selected) != 1:
-                    message = (
-                        f"Ambiguous source binding on {name!r}/{input_name} "
-                        f"for {key!r}: {[choice.source for choice in selected]!r}"
-                    )
-                    raise ValueError(message)
-                selections[key] = selected[0]
-            inputs[input_name] = MappingProxyType(selections)
-        result[name] = MappingProxyType(inputs)
-    return MappingProxyType(result)
-
-
-def _source_overrides(
-    node: NodeManifest,
-    input_name: str,
-    native: LocationContractReference,
-    candidates: Mapping[str, list[AcceptedSource]],
-) -> dict[str, LocationContractReference]:
-    overrides = {}
-    label = f"{node.name!r}/{input_name}"
-    for source in node.location_inputs[input_name].source_bindings:
-        key = source.collection
-        if key in overrides:
-            message = f"Duplicate source binding on {label}"
-            raise ValueError(message)
-        if not any(choice.source == source for choice in candidates.get(key, ())):
-            message = f"Unreachable source binding on {label}: {source!r}"
-            raise ValueError(message)
-        if key == native.collection and source != native:
-            message = f"Source binding replaces native selection on {label}"
-            raise ValueError(message)
-        overrides[key] = source
-    return overrides
+            for name, entry in graph.nodes.items()
+            if entry.node.kind == "metric"
+        }
+    )
 
 
 @dataclass(frozen=True)
 class CanonicalEdge:
-    """An eligible operation connecting two concrete location contracts."""
+    """A canonical operation connecting two registered providers."""
 
     operation: str
-    input_name: str
-    source: LocationContract
-    target: LocationContract
+    source: str
+    target: str
 
 
 def _canonical_edges(graph: PluginGraph) -> tuple[CanonicalEdge, ...]:
@@ -224,10 +160,12 @@ def _canonical_edges(graph: PluginGraph) -> tuple[CanonicalEdge, ...]:
             message = f"Canonical operation {node.name!r} requires one input"
             raise ValueError(message)
         _validate_canonical_invocation(graph, node, set(), node.name)
-        input_name, declaration = next(iter(node.location_inputs.items()))
+        declaration = next(iter(node.location_inputs.values()))
         edges.append(
             CanonicalEdge(
-                node.name, input_name, declaration.contract, node.output_contract
+                node.name,
+                declaration.contract.provider_scope.provider_id,
+                node.output_contract.provider_scope.provider_id,
             )
         )
     return tuple(edges)
@@ -273,7 +211,7 @@ class AmbiguousRoutesError(ValueError):
     def __init__(
         self,
         ambiguities: Mapping[
-            tuple[LocationContractReference, LocationContractReference],
+            tuple[str, str],
             tuple[tuple[str, ...], ...],
         ],
     ) -> None:
@@ -284,11 +222,9 @@ class AmbiguousRoutesError(ValueError):
 
 def compile_routes(
     edges: Iterable[CanonicalEdge],
-    contracts: Iterable[LocationContractReference] = (),
+    providers: Iterable[str] = (),
     preferences: Iterable[tuple[str, ...]] = (),
-) -> Mapping[
-    tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
-]:
+) -> Mapping[tuple[str, str], tuple[str, ...]]:
     """Compute unit-cost shortest sequences, retaining at most two witnesses.
 
     Breadth-first traversal completes each preceding distance layer before
@@ -296,32 +232,28 @@ def compile_routes(
     remain distinct choices. Missing pairs are unreachable.
 
     Returns:
-        Immutable routes keyed by concrete source and target identity.
+        Immutable routes keyed by source and target provider IDs.
 
     Raises:
         AmbiguousRoutesError: If any pair has unresolved shortest sequences.
     """
     edges = tuple(edges)
     preferred = _route_preferences(edges, preferences)
-    adjacency: dict[LocationContractReference, list[CanonicalEdge]] = {
-        contract: [] for contract in contracts
-    }
+    adjacency: dict[str, list[CanonicalEdge]] = {provider: [] for provider in providers}
     for edge in sorted(edges, key=lambda edge: edge.operation):
-        adjacency.setdefault(edge.source.reference, []).append(edge)
-        adjacency.setdefault(edge.target.reference, [])
+        adjacency.setdefault(edge.source, []).append(edge)
+        adjacency.setdefault(edge.target, [])
     routes = {}
     ambiguities = {}
-    for source in sorted(adjacency, key=lambda ref: ref.model_dump_json()):
+    for source in sorted(adjacency):
         distances = {source: 0}
-        witnesses: dict[LocationContractReference, tuple[tuple[str, ...], ...]] = {
-            source: ((),)
-        }
+        witnesses: dict[str, tuple[tuple[str, ...], ...]] = {source: ((),)}
         queue = deque([source])
         while queue:
             current = queue.popleft()
             distance = distances[current] + 1
             for edge in adjacency[current]:
-                target = edge.target.reference
+                target = edge.target
                 if target not in distances:
                     distances[target] = distance
                     witnesses[target] = ()
@@ -346,7 +278,7 @@ def compile_routes(
 
 def _route_preferences(
     edges: Iterable[CanonicalEdge], preferences: Iterable[tuple[str, ...]]
-) -> dict[tuple[LocationContractReference, LocationContractReference], tuple[str, ...]]:
+) -> dict[tuple[str, str], tuple[str, ...]]:
     operations = {edge.operation: edge for edge in edges}
     selected = {}
     for declared in preferences:
@@ -361,10 +293,10 @@ def _route_preferences(
                 f"Unknown or noncanonical route preference operation: {exc.args[0]!r}"
             )
             raise ValueError(message) from exc
-        if any(a.target.reference != b.source.reference for a, b in pairwise(route)):
+        if any(a.target != b.source for a, b in pairwise(route)):
             message = f"Disconnected route preference: {sequence!r}"
             raise ValueError(message)
-        pair = route[0].source.reference, route[-1].target.reference
+        pair = route[0].source, route[-1].target
         if pair in selected and selected[pair] != sequence:
             message = f"Conflicting route preferences for {pair!r}"
             raise ValueError(message)
@@ -373,11 +305,9 @@ def _route_preferences(
 
 
 def _validate_preferred_lengths(
-    source: LocationContractReference,
-    distances: Mapping[LocationContractReference, int],
-    preferred: Mapping[
-        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
-    ],
+    source: str,
+    distances: Mapping[str, int],
+    preferred: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> None:
     for pair, preference in preferred.items():
         if pair[0] == source and len(preference) != distances[pair[1]]:

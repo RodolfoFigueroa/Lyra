@@ -14,7 +14,6 @@ from lyra.contracts.errors import MetricResultError
 from lyra.contracts.resources import IOConfig
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning import computation
 from lyra.runtime.planning.bindings import bind_execution
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
@@ -217,7 +216,7 @@ def test_repeated_executions_preserve_entries(tmp_path: Path) -> None:
 def test_namespace_contract_versions_and_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(computation, "installed_version", lambda _: None)
+    monkeypatch.setattr("importlib.metadata.version", lambda _: None)
     runner, _, _, _, _ = setup_graph(tmp_path)
 
     def key() -> str:
@@ -233,7 +232,7 @@ def test_namespace_contract_versions_and_order(
     assert key() == original
     runner, *_ = setup_graph(tmp_path, description="Edited description")
     assert key() == original
-    monkeypatch.setattr(computation, "installed_version", lambda _: "2")
+    monkeypatch.setattr("importlib.metadata.version", lambda _: "2")
     runner, *_ = setup_graph(tmp_path)
     assert key() == original
     runner, *_ = setup_graph(tmp_path, revision="2")
@@ -247,7 +246,7 @@ def test_only_participating_versions_invalidate_seeded_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     versions: dict[str, str] = {}
-    monkeypatch.setattr(computation, "installed_version", versions.get)
+    monkeypatch.setattr("importlib.metadata.version", versions.get)
     runner, root, _, events, _ = setup_graph(tmp_path)
     runner.store = SQLiteStore(tmp_path / "values.sqlite")
 
@@ -354,7 +353,7 @@ def test_runs_reuse_compiled_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     versions = Mock(return_value=None)
-    monkeypatch.setattr(computation, "installed_version", versions)
+    monkeypatch.setattr("importlib.metadata.version", versions)
     runner, root, _, _, _ = setup_graph(tmp_path)
     runner.store = SQLiteStore(tmp_path / "values.sqlite")
     versions.reset_mock()

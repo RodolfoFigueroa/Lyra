@@ -187,7 +187,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     )
     caller: dict[str, object] = {
         name: {
-            "provider": value.contract.collection,
+            "provider": value.contract.provider_id,
             "ids": list(value.ids),
         }
         for name, value in invocation.locations.items()

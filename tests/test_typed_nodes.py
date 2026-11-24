@@ -161,7 +161,7 @@ def test_registered_provider_is_input_schema_authority() -> None:
     plugin = PluginDefinition(metrics=[consume], resources={"places": FakeProvider})
     location = plugin.node_manifests[0].location_inputs["subject"].contract
     assert location == capture_provider("places", FakeProvider).contract
-    assert {column.name for column in location.family.structure.output.columns} == {
+    assert {column.name for column in location.structure.output.columns} == {
         "location_id",
         "geometry",
         "label",

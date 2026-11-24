@@ -65,7 +65,7 @@ def test_provider_inspection_and_loading_without_services(
     assert loaded.definition.node_names == ()
     assert loaded.resources["places"] is FakeProvider
     described = loaded.definition.providers
-    described[0].contract.family.structure.output.columns.clear()
+    described[0].contract.structure.output.columns.clear()
     assert loaded.definition.providers == expected
     payload = json.loads(render_description(tmp_path, json_output=True))
     assert payload["nodes"] == []
@@ -101,8 +101,8 @@ def test_resource_only_plugin_and_empty_manifest_validation() -> None:
 
 def test_provider_description_consistency() -> None:
     payload = _manifest(create_provider(), "places").model_dump(mode="json")
-    payload["providers"][0]["contract"]["family"]["collection"] = "different"
-    with pytest.raises(ValidationError, match="provider scope"):
+    payload["providers"][0]["contract"]["provider_scope"]["provider_id"] = ""
+    with pytest.raises(ValidationError, match="provider_id"):
         PluginManifest.model_validate_json(json.dumps(payload))
 
 

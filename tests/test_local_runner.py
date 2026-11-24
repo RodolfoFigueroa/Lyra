@@ -720,7 +720,7 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
     request = {
         item.name: selection(
             *item.ids,
-            provider=item.binding.source.collection,
+            provider=item.binding.source,
         ).model_dump()
         for item in work.prepared.inputs
     }

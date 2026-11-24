@@ -108,7 +108,9 @@ def _inspection_metric(node: MetricManifest) -> Callable:
     inputs: dict[str, Dependency | LocationDependency] = dict(node.inputs)
     hints: dict[str, object] = dict.fromkeys(inputs, pd.DataFrame)
     for name, location in node.location_inputs.items():
-        inputs[name] = LocationDependency(provider=location.contract.family.collection)
+        inputs[name] = LocationDependency(
+            provider=location.contract.provider_scope.provider_id
+        )
         hints[name] = (
             Annotated[gpd.GeoDataFrame, Field(description=location.description)]
             if location.description

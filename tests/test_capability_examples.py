@@ -78,7 +78,12 @@ def test_routing_preserves_method_and_granularity(
         (origin.id, origin.revision) for origin in scopes[example.STREETS].origins
     } == {("city-survey", "2025")}
     inspection = Discovery(runner.catalog).inspect(f"street_rating_{edition}")
-    assert inspection.bindings["streets"].provider_scope == scopes[example.STREETS]
+    assert (
+        inspection.providers[
+            inspection.location_inputs["streets"].target_provider
+        ].scope
+        == scopes[example.STREETS]
+    )
     assert (
         inspection.outputs["scores"].granularity
         == example.STREET_SCORES.metadata["granularity"]

@@ -1122,9 +1122,7 @@ def test_capability_client_workflow(
 ) -> None:
 
     seen: list[RequestSpec[Any]] = []
-    payload: JsonObject = {
-        "location": {"collection": "areas", "unit_type": "area", "ids": ["1"]}
-    }
+    payload: JsonObject = {"location": {"provider": "areas", "ids": ["1"]}}
 
     def response(spec: RequestSpec[Any]) -> object:
         seen.append(spec)

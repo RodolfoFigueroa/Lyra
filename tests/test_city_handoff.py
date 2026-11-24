@@ -324,7 +324,7 @@ def discover_street_schema(server: CityServer, name: str, proposal: dict) -> dic
     metric = server.tool("lyra_get_metric", {"metric": name})
     provider = metric["providers"][proposal["catalog"]]
     assert provider["membership_capable"]
-    schema = provider["contract"]["family"]["structure"]["output"]
+    schema = provider["record_schema"]
     columns = {column["name"]: column for column in schema["columns"]}
     (addition,) = proposal["add"]
     assert set(addition) == columns.keys()
@@ -533,4 +533,4 @@ def test_documented_python_client_runs_against_city_server(
     )
     if filename == "run_remote.py":
         assert json.loads((tmp_path / "result.json").read_text()) == result
-        assert namespace["metric"].accepted_selections["streets"]
+        assert namespace["metric"].metric.accepted_selections["streets"]

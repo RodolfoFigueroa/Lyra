@@ -1,33 +1,31 @@
 ---
-title: Understand sources, editions, and revisions
-description: Distinguish unit identity, source observations, concrete metrics, and cache invalidation.
+title: Understand provider IDs and dataset revisions
+description: Select records by provider ID and identify the dataset revisions a calculation uses.
 contentType: Conceptual
 contentPlan: concepts/identity
-sidebar: { label: "Understand Sources, Editions, And Revisions" }
+sidebar: { label: "Provider IDs and Dataset Revisions" }
 ---
 
-A schema describes structure. Source contracts describe which observations and geographical units a calculation uses. These identities answer different questions even when their tables share columns.
+Select records by naming their provider and listing their record IDs. For example, `{"provider": "city_streets", "ids": ["street-1"]}` selects one street. The provider’s revisions identify which version of that street’s geometry and attributes your calculation uses.
 
 | Choice | Meaning | City example |
 | --- | --- | --- |
-| Collection and unit type | Which kind of entity IDs select | `example:city` / `street` |
-| Geographical edition | Which boundaries and unit identities apply | `layout_v1` |
-| Source contract | Which observation provides geometry and attributes | `bundled-survey` |
+| Provider ID | Which dataset contains the records | `city_streets` or `city_blocks` |
+| Origin ID and revision | Which release of the external data the provider uses | Both providers use origin `example-city` at revision `fixture_1` |
+| Provider `code_revision` | Which revision of the provider implementation supplies the records | Both city providers declare `"1"` |
 | Metric name | Which registered calculation runs | `city_street_maintenance` |
-| Data revision | Which maintained correction/version of a concrete dataset applies | `fixture_1` covers street geometry and condition observations |
-| `code_revision` | An optional string identifying an implementation | `"1"` for a metric, operation, or provider |
+
+To select streets by block, use a metric that accepts `city_blocks`. The [canonical operation](../../plugins/canonical-selection/) `city_streets_for_blocks` reads the street IDs for each block. Lyra then resolves those IDs through `city_streets`.
 
 ## Choose metric names and parameters
 
 Use ordinary parameters for choices a handler supports, such as the city’s condition threshold. Register each calculation variant under its own metric name. Each metric declares its parameters, named inputs, and outputs.
 
-Equal IDs across geographical editions establish no correspondence. Matching schemas establish neither equivalent observations nor statistical comparability. A source edition, observation period, release, and geographical edition remain separate metadata.
-
 ## Maintain revision coverage
 
-The city street revision covers geometry and condition observations; its block revision covers geometry and membership. Advance the appropriate revision when covered data changes.
+A [provider scope](../../plugins/location-providers/#define-revision-coverage) identifies a fixed set of records and their contents. It includes the provider ID and code revision, along with each origin’s ID and revision. The city providers share an origin and code revision. Their different provider IDs give streets and blocks distinct scopes.
 
-A [provider scope](../../plugins/location-providers/#define-revision-coverage) fixes records and collection membership, including for an unversioned origin. The provider must honor the scope captured during preparation or fail.
+Update the city origin revision when you change the bundled street or block data, including block membership. During execution, each provider must resolve records from the scope Lyra selected during preparation or report an error.
 
 Represent differences that affect outputs through declared identities or effective parameters. Change a node ID or its optional `code_revision` when declarations or callbacks change its output. An operation revision covers both its selector and mapper.
 

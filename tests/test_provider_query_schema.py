@@ -136,8 +136,8 @@ def test_capability_is_class_based_and_capture_is_isolated(
         == inspected
     )
     inspected.query_schema.columns.clear()
-    inspected.contract.family.structure.output.columns.clear()
-    assert len(captured.declaration.contract.family.structure.output.columns) == 3
+    inspected.contract.structure.output.columns.clear()
+    assert len(captured.declaration.contract.structure.output.columns) == 3
     assert len(captured.query.metadata.columns) == 3
     ordinary = type(
         "Impostor", (FakeProvider,), {"query_capable": True, "backend": object()}
@@ -165,7 +165,10 @@ def test_discovery_carries_query_metadata_without_executable_objects() -> None:
     payload = json.loads(detail.model_dump_json())
     assert payload["providers"]["managed"]["query_capable"] is True
     assert payload["providers"]["managed"]["query_schema"]["crs"] == "EPSG:4326"
-    assert detail.providers["managed"] == definition.providers[0]
+    assert (
+        detail.providers["managed"].scope
+        == definition.providers[0].contract.provider_scope
+    )
     assert detail.providers["managed"].query_schema is not None
     detail.providers["managed"].query_schema.columns.clear()
     fresh = view.inspect("query_metadata").providers["managed"].query_schema

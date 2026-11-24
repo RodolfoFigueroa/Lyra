@@ -17,10 +17,6 @@ def native() -> NativeLocationInput:
     return NativeLocationInput(
         value,
         LocationContractReference(
-            collection="records",
-            unit_type="record",
-            source="records",
-            geographical_edition="provider",
             provider_scope=ProviderScope(provider_id="records", code_revision="1"),
         ),
     )

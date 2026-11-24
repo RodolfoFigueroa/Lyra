@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol
@@ -59,7 +57,6 @@ OPERATION_TIMEOUT_SECONDS = 30.0
 _UNKNOWN_METRIC_ERROR = "unknown_metric"
 _INVALID_PARAMETERS_ERROR = "invalid_parameters"
 _BACKEND_ERROR = "backend_error"
-_METRIC_CURSOR_VERSION = 1
 _MAX_COMPACT_DESCRIPTION_LENGTH = 240
 
 
@@ -300,24 +297,17 @@ async def list_metrics(
     arguments: ListMetricsInput,
     backend: LyraMCPBackend,
 ) -> ListMetricsOutput:
-    """Return a bounded catalog page with an opaque continuation cursor."""
+    """Return a bounded catalog page and its next offset."""
     async with _operation_boundary():
         discovery = await backend.get_discovery()
         fingerprint = discovery.fingerprint
-        metrics = discovery.search(limit=len(discovery.catalog.graph.nodes))
-        offset = _metric_page_offset(arguments.cursor, fingerprint, len(metrics))
-        page = metrics[offset : offset + arguments.limit]
-        next_offset = offset + len(page)
-        next_cursor = (
-            _encode_metric_cursor(fingerprint, next_offset)
-            if next_offset < len(metrics)
-            else None
-        )
+        page, count = discovery.page(offset=arguments.offset, limit=arguments.limit)
+        end = arguments.offset + len(page)
         return ListMetricsOutput(
             catalog_fingerprint=fingerprint,
-            total_count=len(metrics),
+            total_count=count,
             metrics=[_compact_summary(metric) for metric in page],
-            next_cursor=next_cursor,
+            next_offset=end if end < count else None,
         )
 
 
@@ -427,73 +417,6 @@ def _compact_description(value: str) -> str:
     if len(compact) <= _MAX_COMPACT_DESCRIPTION_LENGTH:
         return compact
     return f"{compact[: _MAX_COMPACT_DESCRIPTION_LENGTH - 1]}…"
-
-
-def _encode_metric_cursor(fingerprint: str, offset: int) -> str:
-    payload = json.dumps(
-        {
-            "fingerprint": fingerprint,
-            "offset": offset,
-            "version": _METRIC_CURSOR_VERSION,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
-
-
-def _metric_page_offset(
-    cursor: str | None,
-    fingerprint: str,
-    total_count: int,
-) -> int:
-    if cursor is None:
-        return 0
-    try:
-        padding = "=" * (-len(cursor) % 4)
-        decoded = base64.b64decode(
-            f"{cursor}{padding}",
-            altchars=b"-_",
-            validate=True,
-        )
-        payload = json.loads(decoded)
-    except (UnicodeDecodeError, ValueError) as exc:
-        _raise_invalid_metric_cursor("The cursor is malformed.", exc)
-
-    if not isinstance(payload, dict) or set(payload) != {
-        "fingerprint",
-        "offset",
-        "version",
-    }:
-        _raise_invalid_metric_cursor("The cursor payload is invalid.")
-    if payload["version"] != _METRIC_CURSOR_VERSION:
-        _raise_invalid_metric_cursor("The cursor version is unsupported.")
-    if payload["fingerprint"] != fingerprint:
-        _raise_invalid_metric_cursor("The metric catalog changed between pages.")
-
-    offset = payload["offset"]
-    if isinstance(offset, bool) or not isinstance(offset, int):
-        _raise_invalid_metric_cursor("The cursor offset is invalid.")
-    if offset <= 0 or offset >= total_count:
-        _raise_invalid_metric_cursor("The cursor offset is outside the catalog.")
-    return offset
-
-
-def _raise_invalid_metric_cursor(
-    reason: str,
-    cause: Exception | None = None,
-) -> NoReturn:
-    error = ToolCallError(
-        "invalid_cursor",
-        "Metric catalog cursor is invalid or no longer current.",
-        {
-            "reason": reason,
-            "action": "Call lyra_list_metrics again without cursor.",
-        },
-    )
-    if cause is None:
-        raise error
-    raise error from cause
 
 
 def _raise_tool_error(

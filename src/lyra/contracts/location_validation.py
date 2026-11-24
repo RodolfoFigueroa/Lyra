@@ -26,25 +26,24 @@ def _structure(value: object) -> object:
     return result
 
 
-def validate_location_families(nodes: Sequence[NodeManifest]) -> None:
-    """Check that location contracts sharing a family agree structurally.
+def validate_provider_structures(nodes: Sequence[NodeManifest]) -> None:
+    """Check that declarations sharing a provider ID agree structurally.
 
     Raises:
-        ValueError: If a location family has conflicting structures.
+        ValueError: If a provider has conflicting structures.
     """
-    location_families: dict[tuple[str, str], tuple[str, object]] = {}
+    structures: dict[str, tuple[str, object]] = {}
     for node in nodes:
         for binding in [
             *(value.contract for value in node.location_inputs.values()),
             *([node.output_contract] if node.kind == "location_operation" else []),
         ]:
-            family = binding.family
-            key = (family.collection, family.unit_type)
-            structure = _structure(family.structure.model_dump(mode="json"))
-            if key in location_families and location_families[key][1] != structure:
+            key = binding.provider_scope.provider_id
+            structure = _structure(binding.structure.model_dump(mode="json"))
+            if key in structures and structures[key][1] != structure:
                 message = (
-                    f"Location family {key!r}: variants {location_families[key][0]!r} "
+                    f"Provider {key!r}: variants {structures[key][0]!r} "
                     f"and {node.name!r} have incompatible structure"
                 )
                 raise ValueError(message)
-            location_families[key] = (node.name, structure)
+            structures[key] = (node.name, structure)

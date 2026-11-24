@@ -78,7 +78,7 @@ def test_catalog_reuses_discovery_without_resource_access(
     assert discovery.catalog is catalog.compiled
     assert info.metric.name == "light_metric"
     assert info.metric.description == "A metric."
-    assert set(info.native_inputs) == {"location"}
+    assert set(info.location_inputs) == {"location"}
     assert info.outputs["light_metric"].columns[0].name == "value"
     assert (
         cast("dict[str, Any]", info.parameters["properties"])["value"]["type"]
@@ -162,7 +162,7 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
     assert catalog.metric_queues["smoke_table_metric"] == "interactive"
     for name in ("smoke_table_metric", "smoke_summary_metric"):
         info = catalog.discovery.inspect(name)
-        assert set(info.native_inputs) == {"location"}
+        assert set(info.location_inputs) == {"location"}
         assert info.outputs[name].kind == "table"
 
 
@@ -408,7 +408,7 @@ def test_catalog_prepares_location_and_bounds(
         "location": ("location",),
         "bounds": ("bounds",),
     }
-    assert set(catalog.discovery.inspect("light_metric").bindings) == set(inputs)
+    assert set(catalog.discovery.inspect("light_metric").location_inputs) == set(inputs)
 
 
 def test_catalog_captures_and_validates_routing(

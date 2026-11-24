@@ -331,9 +331,7 @@ def _empty_bound_identity(bound: BoundInvocation) -> str:
     inputs = {
         name: value_key(
             {
-                "provider": location.provider.provider_scope.identity_payload
-                if location.provider.provider_scope is not None
-                else location.provider.identity_payload,
+                "provider": location.provider.provider_scope.identity_payload,
                 "ids": [],
                 "upstream": _empty_bound_identity(location.upstream)
                 if location.upstream

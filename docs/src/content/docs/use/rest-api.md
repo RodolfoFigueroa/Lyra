@@ -44,21 +44,23 @@ Call `GET /metrics` to list registered public metrics. Then call `GET /metrics/{
 Each summary lists accepted selections and describes what each output row represents. Control the listing with these query parameters:
 
 - `query`: search terms
-- `offset`: entries to skip
-- `limit`: page size, at most 100
+- `offset`: number of matching metrics to skip, starting at zero
+- `limit`: page size, from 1 to 100
 
-The `ETag` response header identifies the public contract, so you can detect changes.
+If the offset reaches or exceeds the match count, the API returns `200` with `[]`. Every page includes the catalog fingerprint in its `ETag` header. To list one catalog version, compare `ETag` across pages and restart at zero if it changes.
 
-Read these fields in the metric inspection response:
+Use the inspection response from `GET /metrics/{name}` to prepare your request.
 
-- `parameters`: ordinary parameter constraints and defaults
-- `native_inputs`: the location types the metric calculates on
-- `outputs`: output schemas, units, and definitions
-- `bindings`: concrete location contracts for native inputs
-- `accepted_selections`: source types you can select for each input
-- `computed_inputs`: inputs that dependencies supply during execution
+| Field | What it tells you |
+| --- | --- |
+| `metric.accepted_selections` | Which source provider IDs you can select for each input you supply |
+| `location_inputs` | Which provider each input targets. For a derived input, `operation` names the operation and `source_provider` identifies its immediate source. |
+| `providers` | Each provider’s record schema, coordinate reference system, and accepted sources. `query_capable` and `membership_capable` indicate support for queries and membership checks. |
+| `parameters` | Which parameter values the metric accepts and which defaults it uses |
+| `computed_inputs` | Which inputs Lyra supplies through dependencies |
+| `outputs` | Result tables, column definitions, and units |
 
-Submit the registered name in `metric`. Build your request from the accepted selections and parameter schema; Lyra supplies computed inputs during execution.
+Submit the registered name in `metric`. Supply the inputs listed in `metric.accepted_selections` and choose settings from `parameters`.
 
 ## Construct the request
 

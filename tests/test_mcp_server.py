@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 from copy import deepcopy
 from dataclasses import replace
@@ -42,6 +41,7 @@ from lyra.contracts.jobs import (
     ResultLifetime,
     TableJobResult,
 )
+from lyra.contracts.locations import LocationSelection
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.types import (
     JsonObject,
@@ -119,20 +119,6 @@ def _initialize_payload() -> JsonObject:
             },
         }
     )
-
-
-def _metric_cursor_payload(
-    *,
-    fingerprint: str = "catalog-1",
-    offset: int = 1,
-    version: int = 1,
-) -> str:
-    payload = json.dumps(
-        {"fingerprint": fingerprint, "offset": offset, "version": version},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
 _MANAGED_CLIENTS: list[ManagedTestClient] = []
@@ -707,45 +693,36 @@ def test_mcp_list_metrics_returns_compact_paginated_inventory() -> None:
     assert len(first["metrics"][0]["description"]) == 240
     assert "\n" not in first["metrics"][0]["description"]
     assert first["metrics"][0]["description"].endswith("…")
-    assert first["next_cursor"]
+    assert first["next_offset"] == 20
 
     second = tool_payload(
         client.post(
             "/",
             json=tool_call_payload(
                 "lyra_list_metrics",
-                {"cursor": first["next_cursor"], "limit": 1},
+                {"offset": first["next_offset"], "limit": 1},
             ),
             headers=mcp_headers(),
         )
     )
     assert [metric["name"] for metric in second["metrics"]] == ["metric_20"]
-    assert second["next_cursor"]
+    assert second["next_offset"] == 21
 
     third = tool_payload(
         client.post(
             "/",
             json=tool_call_payload(
                 "lyra_list_metrics",
-                {"cursor": second["next_cursor"]},
+                {"offset": second["next_offset"]},
             ),
             headers=mcp_headers(),
         )
     )
     assert [metric["name"] for metric in third["metrics"]] == ["metric_21"]
-    assert third["next_cursor"] is None
+    assert third["next_offset"] is None
 
 
-@pytest.mark.parametrize(
-    "cursor",
-    [
-        "not-a-cursor!",
-        _metric_cursor_payload(version=2),
-        _metric_cursor_payload(offset=0),
-        _metric_cursor_payload(offset=2),
-    ],
-)
-def test_mcp_list_metrics_rejects_invalid_cursors(cursor: str) -> None:
+def test_mcp_list_metrics_rejects_negative_offset() -> None:
     client = managed_client(
         create_mcp_app(
             agent_api_key="agent-secret",
@@ -755,17 +732,15 @@ def test_mcp_list_metrics_rejects_invalid_cursors(cursor: str) -> None:
 
     response = client.post(
         "/",
-        json=tool_call_payload("lyra_list_metrics", {"cursor": cursor}),
+        json=tool_call_payload("lyra_list_metrics", {"offset": -1}),
         headers=mcp_headers(),
     )
 
     result = response.json()["result"]
     assert result["isError"] is True
-    assert result["structuredContent"]["error"]["code"] == "invalid_cursor"
-    assert "without cursor" in result["structuredContent"]["error"]["details"]["action"]
 
 
-def test_mcp_list_metrics_rejects_cursor_after_catalog_change() -> None:
+def test_mcp_list_metrics_reports_catalog_change() -> None:
     backend = FakeMCPBackend(
         [
             _table_metric("metric_a", "First metric."),
@@ -786,14 +761,13 @@ def test_mcp_list_metrics_rejects_cursor_after_catalog_change() -> None:
 
     response = client.post(
         "/",
-        json=tool_call_payload("lyra_list_metrics", {"cursor": first["next_cursor"]}),
+        json=tool_call_payload("lyra_list_metrics", {"offset": first["next_offset"]}),
         headers=mcp_headers(),
     )
 
-    result = response.json()["result"]
-    assert result["isError"] is True
-    details = result["structuredContent"]["error"]["details"]
-    assert details["reason"] == "The metric catalog changed between pages."
+    result = tool_payload(response)
+    assert result["catalog_fingerprint"] == "catalog-2"
+    assert result["metrics"][0]["name"] == "metric_b"
 
 
 def test_mcp_list_metrics_handles_empty_and_exact_boundary_catalogs() -> None:
@@ -809,7 +783,7 @@ def test_mcp_list_metrics_handles_empty_and_exact_boundary_catalogs() -> None:
     )
     assert empty["total_count"] == 0
     assert empty["metrics"] == []
-    assert empty["next_cursor"] is None
+    assert empty["next_offset"] is None
 
     exact_client = managed_client(
         create_mcp_app(
@@ -833,7 +807,21 @@ def test_mcp_list_metrics_handles_empty_and_exact_boundary_catalogs() -> None:
         "metric_a",
         "metric_b",
     ]
-    assert exact["next_cursor"] is None
+    assert exact["next_offset"] is None
+    for offset in (2, 3):
+        page = tool_payload(
+            exact_client.post(
+                "/",
+                json=tool_call_payload("lyra_list_metrics", {"offset": offset}),
+                headers=mcp_headers(),
+            )
+        )
+        assert page == {
+            "metrics": [],
+            "total_count": 2,
+            "catalog_fingerprint": "catalog-1",
+            "next_offset": None,
+        }
 
 
 def test_official_client_supports_normalized_discovery() -> None:
@@ -937,7 +925,7 @@ def test_mcp_get_metric_returns_public_contract() -> None:
 
     payload = tool_payload(response)
     assert payload["metric"]["name"] == "smoke_table_metric"
-    assert set(payload["native_inputs"]) == {"location"}
+    assert set(payload["location_inputs"]) == {"location"}
     assert payload["outputs"][payload["metric"]["name"]]["kind"] == "table"
 
 
@@ -1033,8 +1021,7 @@ def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None
                 "metric": "smoke_table_metric",
                 "inputs": {
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["09.01"],
                     }
                 },
@@ -1047,7 +1034,7 @@ def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None
     payload = tool_payload(response)
     assert backend.payloads[0] == {
         "parameters": {"value": 7},
-        "location": {"collection": "test:units", "unit_type": "lot", "ids": ["09.01"]},
+        "location": {"provider": "test:units", "ids": ["09.01"]},
     }
     assert payload["job_id"] == "job-1"
     assert "status" not in payload
@@ -1077,8 +1064,7 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
                 "metric": "smoke_bounds_metric",
                 "inputs": {
                     "bounds": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["13.02"],
                     }
                 },
@@ -1092,7 +1078,7 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
     assert "status" not in payload
     assert backend.payloads[0] == {
         "parameters": {"value": 3},
-        "bounds": {"collection": "test:units", "unit_type": "lot", "ids": ["13.02"]},
+        "bounds": {"provider": "test:units", "ids": ["13.02"]},
     }
 
 
@@ -1111,8 +1097,7 @@ def test_mcp_run_metric_never_observes_completion() -> None:
                 "metric": "slow_metric",
                 "inputs": {
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["09.01"],
                     }
                 },
@@ -1139,8 +1124,7 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
         "metric": "slow_metric",
         "inputs": {
             "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
+                "provider": "test:units",
                 "ids": ["09.01"],
             }
         },
@@ -1169,8 +1153,7 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
         {
             "parameters": {"value": 7},
             "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
+                "provider": "test:units",
                 "ids": ["09.01"],
             },
         }
@@ -1190,8 +1173,7 @@ def test_mcp_run_metric_surfaces_unknown_metric_as_tool_error() -> None:
                 "metric": "missing",
                 "inputs": {
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["09.01"],
                     }
                 },
@@ -1220,8 +1202,7 @@ def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
                 "metric": "smoke_table_metric",
                 "inputs": {
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["09.01"],
                     }
                 },
@@ -1260,13 +1241,11 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
                 "metric": "multi_spatial_metric",
                 "inputs": {
                     "bounds": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["13.02"],
                     },
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["09.01"],
                     },
                 },
@@ -1278,7 +1257,14 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
 
     result = response.json()["result"]
     assert result.get("isError", False) is False
-    assert set(backend.payloads[0]) == {"location", "bounds", "parameters"}
+    payload = backend.payloads[0]
+    assert set(payload) == {"location", "bounds", "parameters"}
+    assert LocationSelection.model_validate(payload["location"]) == LocationSelection(
+        provider=MCPPlaces.id, ids=["09.01"]
+    )
+    assert LocationSelection.model_validate(payload["bounds"]) == LocationSelection(
+        provider=MCPPlaces.id, ids=["13.02"]
+    )
 
 
 def test_main_mounts_mcp_when_enabled(
@@ -1584,8 +1570,7 @@ def test_operation_deadlines_and_cancellation(
             "metric": "metric",
             "inputs": {
                 "location": {
-                    "collection": "test:units",
-                    "unit_type": "lot",
+                    "provider": "test:units",
                     "ids": ["09.01"],
                 }
             },
@@ -1935,9 +1920,7 @@ def test_mcp_parameterless_metric_preserves_input() -> None:
     client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
-    payload = {
-        "location": {"collection": "test:units", "unit_type": "lot", "ids": ["09.01"]}
-    }
+    payload = {"location": {"provider": "test:units", "ids": ["09.01"]}}
     response = client.post(
         "/",
         json=tool_call_payload(
@@ -1974,8 +1957,7 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
                 "metric": "nested_metric",
                 "inputs": {
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test:units",
                         "ids": ["09.01"],
                     }
                 },
@@ -1988,8 +1970,7 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
     assert backend.payloads == [
         {
             "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
+                "provider": "test:units",
                 "ids": ["09.01"],
             },
             "parameters": parameters,

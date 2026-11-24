@@ -464,15 +464,15 @@ def test_operation_implementation_owns_location_metadata() -> None:
     assert impl.manifest.kind == "location_operation"
     contract = impl.manifest.output_contract.model_copy(deep=True)
     assert impl.location_schema is not None
-    assert impl.location_schema.metadata == contract.family.structure
+    assert impl.location_schema.metadata == contract.structure
     impl.location_schema.metadata.output.columns.clear()
     impl.location_schema.geometry_column = "changed"
-    impl.manifest.output_contract.family.structure.output.columns.clear()
+    impl.manifest.output_contract.structure.output.columns.clear()
     fresh = plugin.implementation("select")
     assert fresh.location_schema is not None
     assert fresh.location_schema.id_column == "location_id"
     assert fresh.location_schema.geometry_column == "geometry"
-    assert fresh.location_schema.metadata == contract.family.structure
+    assert fresh.location_schema.metadata == contract.structure
     assert fresh.manifest.kind == "location_operation"
     assert fresh.manifest.output_contract == contract
 

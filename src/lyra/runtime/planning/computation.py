@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from lyra.contracts.locations import LocationContract, LocationContractReference
+from lyra.contracts.locations import LocationContract
 from lyra.contracts.outputs import CheckMetadata, ColumnMetadata
 from lyra.contracts.plugins import (
     LocationInputDeclaration,
@@ -20,7 +20,6 @@ from lyra.contracts.plugins import (
 from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.schema import schema_nodes
-from lyra.runtime.planning.distributions import installed_version
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -65,7 +64,6 @@ def _contract_exclusions(value: object) -> dict:
         if isinstance(value, LocationOperationManifest):
             result["canonical"] = True
         if isinstance(value, LocationInputDeclaration):
-            result["source_bindings"] = True
             # Inspection includes lifecycle metadata; the contract owns identity.
             result["provider"] = True
         if isinstance(value, LocationContract):
@@ -128,9 +126,7 @@ class CatalogComputation:
     """Owned immutable identity fragments captured once per compiled catalog."""
 
     nodes: Mapping[str, str]
-    contracts: Mapping[str, str]
-    versions: Mapping[str, str | None]
-    sources: Mapping[LocationContractReference, str]
+    sources: Mapping[str, str]
 
     def plan(
         self,
@@ -147,7 +143,7 @@ class CatalogComputation:
                 "dependency_routes": {
                     key: {
                         "source": self.sources[route.source],
-                        "target": route.target.identity_payload,
+                        "target": route.target,
                         "operations": [
                             (name, self.nodes[name]) for name in route.operations
                         ],
@@ -157,7 +153,7 @@ class CatalogComputation:
                 "inputs": {
                     item.name: {
                         "source": self.sources[item.binding.source],
-                        "target": item.binding.target.identity_payload,
+                        "target": item.binding.target,
                         "operations": [
                             (name, self.nodes[name]) for name in item.binding.operations
                         ],
@@ -173,32 +169,10 @@ def compile_computation(
     providers: Mapping[str, SelectedLocationProvider],
 ) -> CatalogComputation:
     """Return captured semantic contracts and dependency identities."""
-    distributions = {entry.distribution for entry in graph.nodes.values()}
-    distributions.update(p.distribution for p in providers.values())
-    versions = {name: installed_version(name) for name in sorted(distributions)}
-    contracts = {
-        name: _json(executable_contract(entry.node))
-        for name, entry in graph.nodes.items()
-    }
     sources = {
-        contract.reference: digest(executable_contract(contract))
-        for entry in graph.nodes.values()
-        for contract in (
-            *(item.contract for item in entry.node.location_inputs.values()),
-            *(
-                (entry.node.output_contract,)
-                if entry.node.kind == "location_operation"
-                else ()
-            ),
-        )
+        name: digest(provider.declaration.contract.provider_scope.identity_payload)
+        for name, provider in providers.items()
     }
-    for provider in providers.values():
-        contract = provider.declaration.contract
-        sources[contract.reference] = digest(
-            contract.provider_scope.identity_payload
-            if contract.provider_scope is not None
-            else executable_contract(contract)
-        )
     nodes: dict[str, str] = {}
     for name in graph.order:
         entry = graph.nodes[name]
@@ -211,7 +185,7 @@ def compile_computation(
         nodes[name] = digest(
             {
                 "protocols": PROTOCOLS,
-                "contract": contracts[name],
+                "contract": _json(executable_contract(entry.node)),
                 "implementation": (entry.node.name, entry.node.code_revision),
                 "dependencies": {
                     dependency: nodes[dependency] for dependency in sorted(dependencies)
@@ -220,7 +194,5 @@ def compile_computation(
         )
     return CatalogComputation(
         MappingProxyType(nodes),
-        MappingProxyType(contracts),
-        MappingProxyType(versions),
         MappingProxyType(sources),
     )

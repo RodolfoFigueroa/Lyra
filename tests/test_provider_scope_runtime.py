@@ -39,9 +39,7 @@ ORIGIN = Origin(id="external", revision="1", description="Initial description")
 
 def contract(scope: ProviderScope) -> LocationContract:
     return LocationContract(
-        family=SCHEMA.family(scope.provider_id, "record"),
-        source=scope.provider_id,
-        geographical_edition="provider",
+        structure=SCHEMA.metadata,
         meaning="Provider records",
         provider_scope=scope,
     )
@@ -224,7 +222,8 @@ def test_opaque_provider_ids_through_managed_execution(
         runner.catalog, {"metric": "inspect_records", "inputs": selected}
     )
     restored = PreparedExecution.model_validate_json(plan.model_dump_json())
-    assert restored.inputs[0].binding.source.provider_scope == scope
+    assert restored.inputs[0].binding.source == provider_id
+    assert restored.required_scopes()[provider_id].contract.provider_scope == scope
     assert restored.request.inputs["places"].provider == provider_id
     assert events == []
     run = runner.run_development if development else runner.run
