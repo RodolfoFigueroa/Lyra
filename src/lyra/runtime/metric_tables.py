@@ -11,7 +11,7 @@ from sqlalchemy import exc
 
 from lyra.data.relational import Cell, rows_from_validated
 from lyra.runtime.location_inputs import InputBindings, LocationInputs
-from lyra.runtime.output_selection import OutputSelection, prepare_computation
+from lyra.runtime.output_selection import ComputationReader, OutputSelection
 from lyra.runtime.sqlite_schema import Registration
 from lyra.runtime.sqlite_store import DamagedDataError, Header, MissingValueError
 
@@ -41,15 +41,22 @@ class MetricTables:
         """Publish one invocation atomically, keeping independently reusable keys."""
         if not selections:
             return
-        publications = _prepare_publications(
-            selections, outputs, descriptions, location_inputs
-        )
         first = selections[0][0]
         registrations = tuple(
             Registration.from_description(
                 first.node_id, name, description, output_scope=first.output_scope
             )
             for name, description in descriptions.items()
+        )
+        publications = _prepare_publications(
+            selections,
+            outputs,
+            descriptions,
+            location_inputs,
+            {
+                registration.output_name: registration.key
+                for registration in registrations
+            },
         )
         with self.store.schema_transaction() as connection:
             pending = self._pending(connection, publications, registrations)
@@ -109,10 +116,6 @@ class MetricTables:
     ) -> list[_MetricPublication]:
         names = {registration.output_name for registration in registrations}
         pending = []
-        registrations_match = all(
-            self.store.layout.descriptions.get(registration.key) == registration
-            for registration in registrations
-        )
         for publication in publications:
             header = publication.header
             try:
@@ -121,11 +124,9 @@ class MetricTables:
                 pending.append(publication)
                 continue
             if (
-                saved.model_copy(update={"output_rows": None})
-                != header.model_copy(update={"output_rows": None})
+                saved.computation_identity() != header.computation_identity()
                 or saved.output_rows is None
                 or saved.output_rows.keys() != names
-                or not registrations_match
             ):
                 msg = "Retained metric header or output registrations differ"
                 raise DamagedDataError(msg)
@@ -137,7 +138,9 @@ class MetricTables:
                 raise DamagedDataError(msg)
             _check_partitions(saved, publication.partitions)
             for registration in registrations:
-                prepare_computation(self.store, connection, registration, saved, None)
+                ComputationReader(self.store, connection, registration).prepare(
+                    saved, None
+                )
         return pending
 
     def lookup(
@@ -165,15 +168,16 @@ class MetricTables:
             # Connection close releases the snapshot before computation or publication.
             connection.exec_driver_sql("BEGIN")
             try:
+                # Probe schema existence without loading unrelated metric revisions.
                 self.store.load_registrations(
-                    allow_uninitialized=not required, connection=connection
+                    (), allow_uninitialized=not required, connection=connection
                 )
                 saved = self.store.header(
                     connection, header.value_key, required=required
                 )
             except MissingValueError:
                 return None
-            if saved.model_copy(update={"output_rows": None}) != header:
+            if saved.computation_identity() != header.computation_identity():
                 msg = "Metric header differs from required computation"
                 raise DamagedDataError(msg)
             if expected_partitions is not None:
@@ -204,40 +208,42 @@ class MetricTables:
             Detached named native frames.
 
         Raises:
-            ValueError: If required descriptions or partitions are incomplete.
+            DamagedDataError: If required descriptions or partitions are incomplete.
             MissingValueError: If the named output is undeclared.
         """
-        layout = self.store.layout
-        registrations = {
-            r.output_name: r
-            for r in layout.descriptions.values()
-            if r.node_id == header.node_id
-            and r.kind == "metric"
-            and r.output_scope == header.output_scope
-        }
-        if output_name is not None and output_name not in registrations:
-            raise MissingValueError(output_name)
-        counts = header.output_rows
-        if counts is None or (
-            counts.keys() != registrations.keys()
-            if output_name is None
-            else output_name not in counts
-        ):
+        inventory = header.output_registrations
+        if inventory is None:
             msg = "Incomplete metric output descriptions"
-            raise ValueError(msg)
+            raise DamagedDataError(msg)
+        if output_name is not None and output_name not in inventory:
+            raise MissingValueError(output_name)
+        selected = {
+            name: key
+            for name, key in inventory.items()
+            if output_name is None or name == output_name
+        }
+        self.store.load_registrations(tuple(selected.values()), connection=connection)
+        registrations = {
+            name: self.store.layout.descriptions[key] for name, key in selected.items()
+        }
+        if any(
+            name != registration.output_name
+            for name, registration in registrations.items()
+        ):
+            msg = "Retained metric output registration has the wrong name"
+            raise DamagedDataError(msg)
         return {
             name: OutputSelection(
                 connection,
                 registration,
                 header.owner_scope,
                 (
-                    prepare_computation(
-                        self.store, connection, registration, header, partitions
+                    ComputationReader(self.store, connection, registration).prepare(
+                        header, partitions
                     ),
                 ),
             ).frame()
             for name, registration in registrations.items()
-            if output_name is None or name == output_name
         }
 
 
@@ -317,6 +323,7 @@ def _prepare_publications(
     outputs: NativeOutputs,
     descriptions: Mapping[str, StorageDescription],
     location_inputs: Mapping[str, InputBindings],
+    inventory: dict[str, str],
 ) -> list[_MetricPublication]:
     publications, owners = _publication_inventory(
         selections, outputs, descriptions, location_inputs
@@ -346,6 +353,6 @@ def _prepare_publications(
                     frequencies[str(row[owner])] += 1
                 counts[name] = frequencies
         publication.header = publication.header.model_copy(
-            update={"output_rows": counts}
+            update={"output_rows": counts, "output_registrations": inventory}
         )
     return publications

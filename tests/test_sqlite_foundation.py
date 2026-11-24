@@ -137,8 +137,16 @@ def test_registration_metadata_and_collision() -> None:
     assert data.value_column not in declaration.columns
     assert data.row_column not in declaration.columns
     assert set(declaration.columns) <= set(data.table.c.keys())
-    with pytest.raises(ValueError, match="conflicts"):
-        layout.register(restored.model_copy(update={"columns": ()}))
+    reworded = restored.model_copy(
+        update={
+            "columns": tuple(
+                column.model_copy(update={"description": "Edited"})
+                for column in restored.columns
+            )
+        }
+    )
+    assert restored.key != reworded.key
+    assert layout.register(reworded).table is data.table
 
 
 def test_invalid_structural_layouts() -> None:

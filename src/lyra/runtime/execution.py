@@ -1257,8 +1257,6 @@ class GraphExecutor:
                         for group, key in completion.computations
                     ),
                 )
-            if not any(output.computations for output in outputs.values()):
-                store.initialize(registrations)
             description = ResultDescription(
                 metric_name=metadata.metric_name,
                 code_revision=entry.node.code_revision,
@@ -1277,7 +1275,9 @@ class GraphExecutor:
                 else InputBindings(),
             )
             report = completed.report.complete()
-            projection = _ResultPublication(store).publish_metadata(description, report)
+            projection = _ResultPublication(store).publish_metadata(
+                description, report, registrations
+            )
             metadata.location_inputs = projection.location_inputs
             completed.committed_report = report
 

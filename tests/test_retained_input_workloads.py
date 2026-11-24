@@ -67,7 +67,7 @@ def test_shared_membership_and_dense_pairs(
         for row in database.rows["storage_registrations"]
     ]
     for registration in registrations:
-        rows = database.rows["data_" + registration.key]
+        rows = database.rows["data_" + registration.table_key]
         if registration.kind == "provider":
             assert len(rows) == 130  # Each source, reference and target is stored once.
         if registration.kind == "operation":

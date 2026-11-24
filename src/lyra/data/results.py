@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import date
-from importlib import import_module
 from typing import TYPE_CHECKING, TypeAlias
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 from shapely import get_coordinates
 
 from lyra.contracts.errors import MetricResultError
+from lyra.contracts.types import validate_json_value
 from lyra.data.scalars import date_property
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from lyra.contracts.types import JsonValue
 
 NativeOutputs: TypeAlias = "dict[str, pd.DataFrame | gpd.GeoDataFrame]"
@@ -65,7 +65,6 @@ def _validate_categories(validated: pd.DataFrame) -> None:
 
 
 def _validate_scalar_values(values: object, label: str) -> None:
-    pd = import_module("pandas")
     kind = pd.api.types.infer_dtype(values, skipna=True)
     if kind not in {
         "integer",
@@ -95,7 +94,7 @@ def serialize_outputs(node: str, outputs: NativeOutputs) -> dict[str, JsonValue]
     encoded: dict[str, JsonValue] = {}
     for name, table in outputs.items():
         try:
-            encoded[name] = json.loads(_encode_table(table))
+            encoded[name] = _encode_table(table)
         except (AttributeError, TypeError, ValueError, OverflowError) as exc:
             raise MetricResultError(
                 node, f"output {name!r} serialization", str(exc)
@@ -103,18 +102,40 @@ def serialize_outputs(node: str, outputs: NativeOutputs) -> dict[str, JsonValue]
     return encoded
 
 
-def _encode_table(table: pd.DataFrame | gpd.GeoDataFrame) -> str:
+def _encode_table(table: pd.DataFrame | gpd.GeoDataFrame) -> JsonValue:
     if isinstance(table, gpd.GeoDataFrame):
         if table.crs is None:
             msg = "GeoJSON serialization requires a known CRS"
             raise ValueError(msg)
-        return table.to_json(
-            drop_id=True,
-            na="null",
-            to_wgs84=True,
-            default=date_property,
-            allow_nan=False,
+        return json.loads(
+            table.to_json(
+                drop_id=True,
+                na="null",
+                to_wgs84=True,
+                default=date_property,
+                allow_nan=False,
+            )
         )
-    return table.to_json(
-        orient="records", date_format="iso", default_handler=date_property
-    )
+    names = tuple(map(str, table.columns))
+    return [
+        {name: _json_cell(value) for name, value in zip(names, row, strict=True)}
+        for row in table.itertuples(index=False, name=None)
+    ]
+
+
+def _json_cell(value: object) -> JsonValue:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or value is pd.NA or value is pd.NaT:
+        return None
+    if isinstance(value, float):
+        if math.isnan(value):
+            return None
+        if not math.isfinite(value):
+            msg = "Nonfinite JSON number"
+            raise ValueError(msg)
+    if isinstance(value, str | int | float):
+        return value
+    if isinstance(value, dict | list):
+        return validate_json_value(value)
+    return date_property(value)

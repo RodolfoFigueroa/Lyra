@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
@@ -95,54 +95,85 @@ class ComputationRows:
             raise DamagedDataError(msg)
 
 
-def prepare_computation(
-    store: SQLiteStore,
-    connection: sa.Connection,
-    registration: Registration,
-    header: Header,
-    groups: tuple[str, ...] | None,
-) -> ComputationRows:
-    """Validate required completion without materializing output values.
+@dataclass
+class ComputationReader:
+    """Validate producing schemas once per selected output and transaction."""
 
-    Returns:
-        A bounded SQL reader for exactly the retained computation and groups.
+    store: SQLiteStore
+    connection: sa.Connection
+    registration: Registration
+    _tables: dict[str, DataTable] = field(default_factory=dict, init=False)
 
-    Raises:
-        DamagedDataError: If the required registration or partitions disagree.
-    """
-    if (
-        registration.kind != "metric"
-        or registration.node_id != header.node_id
-        or registration.output_scope != header.output_scope
-        or (header.output_scope == "unpartitioned" and groups is not None)
-    ):
-        msg = "Incomplete metric output descriptions or scope"
-        raise DamagedDataError(msg)
-    if header.output_rows is None or registration.output_name not in header.output_rows:
-        msg = "Incomplete metric output descriptions"
-        raise DamagedDataError(msg)
-    counts = header.output_rows[registration.output_name]
-    if isinstance(counts, dict):
-        partitions = store.layout.partitions
-        retained = {
-            row["location_id"]
-            for row in _read(
-                connection,
-                sa.select(partitions.c.location_id).where(
-                    partitions.c.value_key == header.value_key
-                ),
-            )
-        }
-        if set(counts) != retained or (
-            groups is not None and not set(groups) <= retained
-        ):
-            msg = "Incomplete or missing metric partitions"
+    def table(self, header: Header) -> DataTable:
+        """Resolve the physical table shared by the producing and selected declarations.
+
+        Returns:
+            The compatible table from the retained computation's inventory.
+
+        Raises:
+            DamagedDataError: If the producing schema is missing or incompatible.
+        """
+        key = (header.output_registrations or {}).get(self.registration.output_name)
+        if key is None:
+            msg = "Missing metric output registration"
             raise DamagedDataError(msg)
-    selection = ComputationRows(
-        registration, store.layout.tables[registration.key], header.value_key, groups
-    )
-    selection.validate(connection, counts)
-    return selection
+        if key not in self._tables:
+            if self.store.layout.descriptions.get(key) is not self.registration:
+                produced = self.store.read_registration(self.connection, key)
+                if produced.table_key != self.registration.table_key:
+                    msg = "Retained metric output registrations differ"
+                    raise DamagedDataError(msg)
+            self._tables[key] = self.store.layout.tables[key]
+        return self._tables[key]
+
+    def prepare(
+        self, header: Header, groups: tuple[str, ...] | None
+    ) -> ComputationRows:
+        """Validate required completion without materializing output values.
+
+        Returns:
+            A bounded SQL reader for exactly the retained computation and groups.
+
+        Raises:
+            DamagedDataError: If the required registration or partitions disagree.
+        """
+        registration = self.registration
+        connection = self.connection
+        if (
+            registration.kind != "metric"
+            or registration.node_id != header.node_id
+            or registration.output_scope != header.output_scope
+            or (header.output_scope == "unpartitioned" and groups is not None)
+        ):
+            msg = "Incomplete metric output descriptions or scope"
+            raise DamagedDataError(msg)
+        if (
+            header.output_rows is None
+            or registration.output_name not in header.output_rows
+        ):
+            msg = "Incomplete metric output descriptions"
+            raise DamagedDataError(msg)
+        data = self.table(header)
+        counts = header.output_rows[registration.output_name]
+        if isinstance(counts, dict):
+            partitions = self.store.layout.partitions
+            retained = {
+                row["location_id"]
+                for row in _read(
+                    connection,
+                    sa.select(partitions.c.location_id).where(
+                        partitions.c.value_key == header.value_key
+                    ),
+                )
+            }
+            if set(counts) != retained or (
+                groups is not None and not set(groups) <= retained
+            ):
+                msg = "Incomplete or missing metric partitions"
+                raise DamagedDataError(msg)
+        selection = ComputationRows(registration, data, header.value_key, groups)
+        selection.validate(connection, counts)
+        return selection
 
 
 @dataclass(frozen=True)
@@ -170,10 +201,7 @@ class OutputSelection:
                 computation.data.table.c[col.name].label(col.name)
                 for col in self.registration.columns
             ]
-            # A columnless table still needs a projection to yield its rows.
-            query = computation.select(*(columns or [sa.null()])).order_by(
-                *computation.keys
-            )
+            query = computation.select(*columns).order_by(*computation.keys)
             with closing(self.connection.execute(query)) as cursor:
                 for rows in cursor.mappings().partitions(batch_size):
                     yield tuple(

@@ -95,7 +95,7 @@ def test_owned_tables_and_captured_completion(
         "a",
         "b",
     }
-    header = saved_header.model_copy(update={"output_rows": None})
+    header = saved_header.computation_identity()
     tables = MetricTables(store)
     result.metadata.outputs["a"].table_schema.columns.clear()
     result.tables["a"]["value"] = 99

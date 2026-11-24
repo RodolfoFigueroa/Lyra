@@ -21,7 +21,7 @@ from lyra.runtime.location_inputs import (
     _input_traversal,
     _InputTraversal,
 )
-from lyra.runtime.output_selection import OutputSelection, prepare_computation
+from lyra.runtime.output_selection import ComputationReader, OutputSelection
 from lyra.runtime.sqlite_store import (
     DamagedDataError,
     MissingValueError,
@@ -214,15 +214,12 @@ class ResultDescriptions:
         registration = self._registration(description, name, output)
         claimed: set[str] = set()
         computations = []
+        reader = ComputationReader(self.store, connection, registration)
         for selection in output.computations:
             header = self._header(
                 connection, description, output, registration, selection
             )
-            computations.append(
-                prepare_computation(
-                    self.store, connection, registration, header, selection.groups
-                )
-            )
+            computations.append(reader.prepare(header, selection.groups))
             if check_overlap and header.output_scope == "location":
                 counts = (header.output_rows or {})[name]
                 if isinstance(counts, dict):
@@ -345,10 +342,12 @@ class ResultDescriptions:
     ) -> None:
         output = description.outputs[name]
         registration = self._registration(description, name, output)
+        reader = ComputationReader(self.store, connection, registration)
         for selection in output.computations:
             header = self._header(
                 connection, description, output, registration, selection
             )
+            reader.table(header)
             counts = (header.output_rows or {}).get(name)
             if counts is None or (
                 selection.groups is not None
@@ -525,7 +524,10 @@ class _ResultPublication(ResultDescriptions):
     """Private final-result transaction returning owned publication metadata."""
 
     def publish_metadata(
-        self, description: ResultDescription, report: ExecutionReport
+        self,
+        description: ResultDescription,
+        report: ExecutionReport,
+        registrations: tuple["Registration", ...] = (),
     ) -> PublicResultDescription:
         """Publish the final selections and report under their job ID.
 
@@ -537,7 +539,15 @@ class _ResultPublication(ResultDescriptions):
         """
         job_id = report.job_id
         root = self._check_pair(description, report)
-        with self.store.transaction() as connection:
+        missing = tuple(
+            r for r in registrations if r.key not in self.store.layout.descriptions
+        )
+        transaction = (
+            self.store.schema_transaction() if missing else self.store.transaction()
+        )
+        with transaction as connection:
+            if missing:
+                self.store.register(connection, missing)
             for name, output in description.outputs.items():
                 self.store.read_registration(connection, output.registration_key)
                 self._selection(connection, description, name, check_overlap=True)

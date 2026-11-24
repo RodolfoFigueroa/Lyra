@@ -15,6 +15,7 @@ from lyra.contracts.units import ColumnUnit
 from lyra.contracts.value_identity import value_key
 from lyra.data.arrow_tables import base_schema
 from lyra.data.relational import StorageDescription, logical_dtype
+from lyra.runtime.planning.computation import executable_contract
 
 
 class StoredColumn(BaseModel):
@@ -44,7 +45,22 @@ class Registration(BaseModel):
     @property
     def key(self) -> str:
         """Stable registration address independent of value keys."""
+        if self.kind == "metric":
+            return value_key(self.model_dump(mode="json"))
         return value_key([self.kind, self.node_id, self.output_name])
+
+    @property
+    def table_key(self) -> str:
+        """Address compatible metric rows independently of descriptive wording."""
+        if self.kind != "metric":
+            return self.key
+        layout = self.model_dump(
+            mode="json",
+            exclude={"table_schema": True, "columns": {"__all__": {"description"}}},
+        )
+        if self.table_schema is not None:
+            layout["table_schema"] = executable_contract(self.table_schema)
+        return value_key(layout)
 
     @classmethod
     def from_description(
@@ -240,6 +256,7 @@ class Layout:
             sa.Column("owner_scope", sa.Text),
             sa.Column("target_scope", sa.Text),
             sa.Column("output_rows", sa.Text),
+            sa.Column("output_registrations", sa.Text),
             sa.CheckConstraint(
                 "(output_scope = 'location' AND owner_scope IS NOT NULL) OR "
                 "(output_scope = 'unpartitioned' AND owner_scope IS NULL "
@@ -278,6 +295,7 @@ class Layout:
             ),
             sa.Column("bindings", sa.Text, nullable=False),
         )
+        self._physical_tables: dict[str, DataTable] = {}
         self.tables: dict[str, DataTable] = {}
         self.descriptions: dict[str, Registration] = {}
 
@@ -293,6 +311,12 @@ class Layout:
                 msg = "Registration conflicts with retained schema"
                 raise ValueError(msg)
             return self.tables[key]
+        table_key = registration.table_key
+        if table_key in self._physical_tables:
+            data = self._physical_tables[table_key]
+            self.tables[key] = data
+            self.descriptions[key] = registration
+            return data
         names = [column.name for column in registration.columns]
         structural = registration.structural_columns()
         physical, value_column, row_column = _column_names(names)
@@ -316,7 +340,9 @@ class Layout:
         )
         if registration.output_scope == "unpartitioned":
             columns.append(sa.Column(row_column, sa.Integer, primary_key=True))
-        table = sa.Table("data_" + key, self.metadata, *columns, sqlite_strict=True)
+        table = sa.Table(
+            "data_" + table_key, self.metadata, *columns, sqlite_strict=True
+        )
         for column in registration.columns:
             field = table.c[column.name]
             if column.dtype == "boolean":
@@ -340,7 +366,7 @@ class Layout:
                 )
             )
             sa.Index(
-                "groups_" + key,
+                "groups_" + table_key,
                 table.c[value_column],
                 table.c[owner],
                 *((table.c.location_id,) if registration.kind == "operation" else ()),
@@ -353,6 +379,7 @@ class Layout:
                 )
             )
         result = DataTable(table, value_column, row_column)
+        self._physical_tables[table_key] = result
         self.tables[key] = result
         self.descriptions[key] = registration
         return result

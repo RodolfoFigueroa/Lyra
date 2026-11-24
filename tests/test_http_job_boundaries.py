@@ -9,6 +9,8 @@ from urllib.parse import quote
 
 import geopandas as gpd
 import httpx
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 from fastapi import FastAPI
 from rq.exceptions import NoSuchJobError
@@ -38,6 +40,7 @@ from lyra.server.mcp.tools import (
 from tests.config_helpers import api_credentials, load_test_config
 from tests.job_id_helpers import TEST_JOB_ID
 from tests.retained_job_helpers import retain
+from tests.retained_table_helpers import retained_service
 from tests.runtime_helpers import make_runtime
 from tests.sqlite_helpers import Database, database, schema_database
 
@@ -572,3 +575,47 @@ async def test_unprojectable_retained_geometry_returns_job_error(
             assert response.status_code == 500
             assert response.json()["detail"]["code"] == "invalid_job_result"
             assert response.json()["detail"]["retryable"] is False
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("database")
+async def test_retained_json_preserves_numeric_values(
+    app: FastAPI, tmp_path: Path
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "ratio": pd.array([1e-14, 1.2345678901234567, None], dtype="Float64"),
+            "count": pd.array([2**60 + 1, -(2**60) - 1, None], dtype="Int64"),
+            "flag": pd.array([True, False, None], dtype="boolean"),
+        }
+    )
+    schema = pa.DataFrameSchema(
+        {
+            name: pa.Column(
+                series.dtype,
+                description=str(name),
+                metadata={"unit": None},
+                nullable=True,
+            )
+            for name, series in frame.items()
+        },
+        strict=True,
+    )
+    service, job_id = retained_service(tmp_path / "values", schema, frame)
+    app.state.runtime.results = service
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=headers(app, PATHS[0]),
+    ) as http:
+        for suffix in ("result", "result/download"):
+            response = await http.get(f"/jobs/{job_id}/{suffix}")
+            assert response.status_code == 200
+            rows = response.json()["outputs"]["rows"]
+            assert rows == [
+                {"ratio": 1e-14, "count": 2**60 + 1, "flag": True},
+                {"ratio": 1.2345678901234567, "count": -(2**60) - 1, "flag": False},
+                {"ratio": None, "count": None, "flag": None},
+            ]
+            assert rows[0]["flag"] is True
+            assert rows[1]["flag"] is False

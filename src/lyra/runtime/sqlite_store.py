@@ -51,6 +51,7 @@ class Header(BaseModel):
     owner_scope: DatasetScope | None = None
     target_scope: DatasetScope | None = None
     output_rows: dict[str, RowCount | dict[str, RowCount]] | None = None
+    output_registrations: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def validate_scope(self) -> Header:
@@ -78,6 +79,16 @@ class Header(BaseModel):
         ):
             msg = "Invalid metric output row counts"
             raise ValueError(msg)
+        if (
+            self.output_rows is not None
+            and self.target_scope is None
+            and (
+                self.output_registrations is None
+                or self.output_registrations.keys() != self.output_rows.keys()
+            )
+        ):
+            msg = "Incomplete metric output registrations"
+            raise ValueError(msg)
         return self
 
     @classmethod
@@ -90,6 +101,12 @@ class Header(BaseModel):
             owner_scope=record.scope,
         )
 
+    def computation_identity(self) -> Self:
+        """Return the requested computation without its published inventory."""
+        return self.model_copy(
+            update={"output_rows": None, "output_registrations": None}
+        )
+
     def record(self) -> dict:
         """Return native SQL cells with deterministic provider-scope metadata."""
         return {
@@ -98,6 +115,11 @@ class Header(BaseModel):
             "output_scope": self.output_scope,
             "owner_scope": _scope_json(self.owner_scope),
             "target_scope": _scope_json(self.target_scope),
+            "output_registrations": json.dumps(
+                self.output_registrations, sort_keys=True
+            )
+            if self.output_registrations is not None
+            else None,
             "output_rows": None
             if self.output_rows is None
             else json.dumps(self.output_rows, sort_keys=True),
@@ -364,4 +386,6 @@ class SQLiteStore:
                 data[name] = _DATASET_SCOPE.validate_json(data[name])
         if data.get("output_rows") is not None:
             data["output_rows"] = json.loads(data["output_rows"])
+        if data.get("output_registrations") is not None:
+            data["output_registrations"] = json.loads(data["output_registrations"])
         return Header.model_validate(data)

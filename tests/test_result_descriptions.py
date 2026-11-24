@@ -1,5 +1,6 @@
 """Final selections are durable independently of jobs and cache reuse."""
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock
@@ -179,7 +180,17 @@ def test_reopen_assembly(
 
 
 @pytest.mark.parametrize(
-    "failure", ["insert", "commit", "missing", "group", "input", "partition", "rows"]
+    "failure",
+    [
+        "insert",
+        "commit",
+        "missing",
+        "group",
+        "input",
+        "partition",
+        "rows",
+        "wrong_registration",
+    ],
 )
 def test_failed_description_keeps_values(
     database: Database, tmp_path: Path, failure: str
@@ -198,6 +209,11 @@ def test_failed_description_keeps_values(
     elif failure == "rows":
         data = store.layout.tables[description.outputs["a"].registration_key]
         database.rows[data.table.name].clear()
+    elif failure == "wrong_registration":
+        header = database.rows["stored_results"][0]
+        inventory = json.loads(header["output_registrations"])
+        inventory["b"] = inventory["a"]
+        header["output_registrations"] = json.dumps(inventory)
     values = deepcopy({name: rows for name, rows in database.rows.items() if rows})
     if failure == "input":
         description = description.model_copy(
@@ -233,7 +249,7 @@ def test_failed_description_keeps_values(
     assert not database.in_transaction
     database.connection.execute.side_effect = execute
     database.fail_commit = False
-    if failure in {"partition", "rows"}:
+    if failure in {"partition", "rows", "wrong_registration"}:
         database.rows = undamaged
     reference = publish_result(writer, valid)
     assert writer.describe(reference).location_inputs == location_descriptions()
