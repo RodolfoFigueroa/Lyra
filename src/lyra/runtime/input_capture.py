@@ -202,7 +202,12 @@ def capture_skipped_inputs(
         source = value.source
         if source is None and value.upstream is not None:
             source = next(iter(value.upstream.locations.values()))
-        derived = source is not None
+        source_contract = (
+            value.supplied.source_scope
+            if value.supplied is not None
+            else (source.provider if source is not None else None)
+        )
+        derived = source_contract is not None
         if derived:
             if registration.key not in store.layout.descriptions:
                 store.initialize((registration,))
@@ -231,7 +236,7 @@ def capture_skipped_inputs(
         description = LocationInputDescription(
             kind="correspondence" if derived else "provider",
             provider_scope=value.provider.provider_scope,
-            source_scope=source.provider.provider_scope if source else None,
+            source_scope=source_contract.provider_scope if source_contract else None,
             table_schema=schema,
             availability="available" if available else "not_materialized",
         )

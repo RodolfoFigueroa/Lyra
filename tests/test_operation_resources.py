@@ -122,7 +122,7 @@ def test_shared_transitive_resource_lives_until_last_consumer(
                     {"source": LocationSelection(provider="source", ids=["a"])}
                 )
                 invocation = plugin.prepare_resolved_invocation("select", source)
-                result = executor.dispatch(invocation, state, Mock())
+                result = executor.dispatch(invocation, state)
                 retained[-1].loc[0, "count"] = 999
                 assert result.targets.frame["count"].tolist() == [4]
                 plugin.invoke(

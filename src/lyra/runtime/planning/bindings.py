@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import cached_property
-from hashlib import sha256
 from types import MappingProxyType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from lyra.contracts.dependencies import Input
 from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.value_identity import (
     ComputationIdentity,
-    check_json_value,
     value_key,
 )
 from lyra.runtime.lineage import Membership, Selection
@@ -33,45 +32,11 @@ if TYPE_CHECKING:
     from lyra.contracts.locations import LocationContractReference
     from lyra.contracts.origins import Origin
     from lyra.contracts.plugins import NodeManifest
+    from lyra.runtime.native_inputs import NativeLocationInput
     from lyra.runtime.planning.catalog import CompiledCatalog
     from lyra.runtime.planning.graph import (
         ResolvedLocationDependency,
     )
-
-
-class _IdentityComponents:
-    """Checked canonical JSON fragments owned by one invocation snapshot."""
-
-    def __init__(self, descriptor: ComputationIdentity, *, per_location: bool) -> None:
-        payload = descriptor.payload
-        self.original_key = value_key(payload)
-        self.partitions: dict[
-            frozenset[str] | None, tuple[tuple[str | None, str], ...]
-        ] = {}
-        payload["computation_scope"] = "per_location" if per_location else "complete"
-        self.parts = tuple(
-            (
-                name,
-                json.dumps(
-                    value, sort_keys=True, separators=(",", ":"), allow_nan=False
-                ),
-            )
-            for name, value in sorted(payload.items())
-            if name != "inputs"
-        )
-
-    def key(self, inputs: dict) -> str:
-        check_json_value(inputs, "identity.inputs")
-        encoded = json.dumps(
-            inputs, sort_keys=True, separators=(",", ":"), allow_nan=False
-        )
-        parts = sorted((*self.parts, ("inputs", encoded)))
-        payload = (
-            "{"
-            + ",".join(json.dumps(name) + ":" + value for name, value in parts)
-            + "}"
-        )
-        return sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -87,6 +52,10 @@ class BoundLocation:
     pairs: tuple[tuple[str, str], ...] = ()
     source: BoundLocation | None = None
     lineage: object = field(default_factory=object, compare=False)
+    supplied: NativeLocationInput | None = field(
+        default=None, compare=False, repr=False
+    )
+    declared_identity: str | None = None
 
     def __post_init__(self) -> None:
         """Own membership containers and capture a strictly checked identity."""
@@ -107,7 +76,11 @@ class BoundLocation:
             self.ids,
             self.pairs,
             self.computations,
-            self.source.membership if self.source is not None else None,
+            self.supplied.source
+            if self.supplied is not None
+            else self.source.membership
+            if self.source is not None
+            else None,
         )
 
     def _apply(self, selection: Selection) -> BoundLocation:
@@ -123,7 +96,11 @@ class BoundLocation:
             else tuple(self.pairs[i] for i in selection.positions)
         )
         return replace(
-            self, ids=selection.ids, pairs=pairs, computations=selection.computations
+            self,
+            ids=selection.ids,
+            pairs=pairs,
+            computations=selection.computations,
+            declared_identity=None,
         )
 
     def select(self, ids: frozenset[str]) -> BoundLocation:
@@ -138,6 +115,8 @@ class BoundLocation:
     @cached_property
     def identity(self) -> str:
         """Canonical unordered selection, or the operation discovering target IDs."""
+        if self.declared_identity is not None:
+            return self.declared_identity
         return value_key(
             {
                 "provider": self.provider.provider_scope.identity_payload,
@@ -175,13 +154,61 @@ class BoundInvocation:
 
     report_token: object = field(default_factory=object, compare=False, repr=False)
 
+    _key_descriptor: ComputationIdentity = field(init=False, compare=False, repr=False)
+    original_key: str = field(init=False, compare=False, repr=False)
+    _keys: dict[frozenset[str] | None, str] = field(
+        default_factory=dict, init=False, compare=False, repr=False
+    )
+
     def __post_init__(self) -> None:
         """Detach maps and capture descriptor values before memoizing demand keys."""
         for name in ("locations", "dependencies", "bindings", "outputs"):
             object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
-        vars(self)["_identity_components"] = _IdentityComponents(
-            self.descriptor, per_location=self.per_location
+        descriptor = deepcopy(self.descriptor)
+        object.__setattr__(self, "_key_descriptor", descriptor)
+        object.__setattr__(self, "original_key", descriptor.key)
+
+    def computation_key(self, groups: frozenset[str] | None = None) -> str:
+        """Return a canonical key using compact references to named inputs."""
+        if groups in self._keys:
+            return self._keys[groups]
+        primary = self.locations.get(self.primary_input or "")
+        selected_primary = (
+            primary.select(groups)
+            if primary is not None and groups is not None
+            else primary
         )
+        inputs: dict = {}
+        for name, value in self.locations.items():
+            selected = (
+                value.related(selected_primary)
+                if selected_primary is not None
+                else None
+            )
+            inputs[name] = (selected or value).identity
+        for name, dependency in self.dependencies.items():
+            producer_primary = dependency.locations.get(dependency.primary_input or "")
+            selected = (
+                producer_primary.related(selected_primary)
+                if producer_primary is not None and selected_primary is not None
+                else None
+            )
+            inputs[name] = dependency.demand(
+                frozenset(selected.ids)
+                if selected is not None and selected.ids is not None
+                else None
+            ).reference(self.outputs[name])
+        key = self.key_for_inputs(inputs)
+        self._keys[groups] = key
+        return key
+
+    def key_for_inputs(self, inputs: dict) -> str:
+        """Return the canonical key for resolved inputs of this invocation."""
+        return replace(
+            self._key_descriptor,
+            inputs=inputs,
+            computation_scope="per_location" if self.per_location else "complete",
+        ).key
 
     def parameter_values(self) -> dict:
         """Return detached complete values for a handler or inspection."""
@@ -190,11 +217,6 @@ class BoundInvocation:
     def demand(self, groups: frozenset[str] | None = None) -> BoundDemand:
         """Return requested work separate from this use's original binding."""
         return BoundDemand(self, groups)
-
-
-def _identity_components(bound: BoundInvocation) -> _IdentityComponents:
-    # Stored outside dataclass fields so replacements cannot inherit cached state.
-    return cast("_IdentityComponents", vars(bound)["_identity_components"])
 
 
 @dataclass(frozen=True)
@@ -226,35 +248,8 @@ class BoundDemand:
             raise ValueError(message)
 
     def computation_key(self, groups: frozenset[str] | None = None) -> str:
-        """Return a canonical key using compact references to named inputs."""
-        bound = self.invocation
-        primary = bound.locations.get(bound.primary_input or "")
-        selected_primary = (
-            primary.select(groups)
-            if primary is not None and groups is not None
-            else primary
-        )
-        inputs: dict = {}
-        for name, value in bound.locations.items():
-            selected = (
-                value.related(selected_primary)
-                if selected_primary is not None
-                else None
-            )
-            inputs[name] = (selected or value).identity
-        for name, dependency in bound.dependencies.items():
-            producer_primary = dependency.locations.get(dependency.primary_input or "")
-            selected = (
-                producer_primary.related(selected_primary)
-                if producer_primary is not None and selected_primary is not None
-                else None
-            )
-            inputs[name] = dependency.demand(
-                frozenset(selected.ids)
-                if selected is not None and selected.ids is not None
-                else None
-            ).reference(bound.outputs[name])
-        return _identity_components(bound).key(inputs)
+        """Return the invocation's memoized key for this selection."""
+        return self.invocation.computation_key(groups)
 
     @property
     def computation_keys(self) -> dict[str | None, str] | None:
@@ -270,18 +265,11 @@ class BoundDemand:
             if bound.per_location and primary is not None
             else None
         )
-        memo = _identity_components(bound).partitions
-        if groups not in memo:
-            keys = (
-                {
-                    group: self.computation_key(frozenset({group}))
-                    for group in sorted(groups)
-                }
-                if groups is not None
-                else {None: self.computation_key()}
-            )
-            memo[groups] = tuple(keys.items())
-        return dict(memo[groups])
+        if groups is None:
+            return {None: self.computation_key()}
+        return {
+            group: self.computation_key(frozenset({group})) for group in sorted(groups)
+        }
 
     def reference(self, output: str) -> dict:
         """Return complete producer or independent partition references."""
@@ -303,7 +291,7 @@ class BoundDemand:
         """Use the same logical computations for execution-local memoization."""
         keys = self.computation_keys
         if keys is None:
-            return _identity_components(self.invocation).original_key
+            return self.invocation.original_key
         if not self.invocation.per_location:
             return keys[None]
         return value_key(

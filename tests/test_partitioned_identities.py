@@ -736,6 +736,23 @@ def test_partition_snapshot_matches_canonical_contract(
         assert location.identity == canonical_location(location)
 
 
+def test_prepared_identity_reuses_completed_partition_keys() -> None:
+    invocation = bound_invocation(("A", "B"))
+    expected = invocation.computation_keys
+    returned = invocation.computation_keys
+    returned.clear()
+    # Repeated consumption of a completed key must avoid canonical re-encoding.
+    with patch.object(
+        BoundInvocation,
+        "key_for_inputs",
+        side_effect=AssertionError("re-encoded a completed key"),
+    ):
+        assert invocation.identity == canonical_hash({"partitions": expected})
+        assert invocation.reference("data")["partitions"] == expected
+    selected = invocation.select_primary("main", frozenset({"B"}))
+    assert selected.computation_keys == {"B": expected["B"]}
+
+
 def test_identity_snapshot_owns_nested_values_and_returned_maps() -> None:
     original = bound_invocation(("A", "B")).bound_use
     assert original is not None

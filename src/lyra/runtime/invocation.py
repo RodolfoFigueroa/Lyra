@@ -93,29 +93,6 @@ class BoundPlugin:
         """Return compiled storage layouts for trusted execution writes."""
         return self._get(name).storage
 
-    def validate_retained_outputs(
-        self, name: str, outputs: NativeOutputs
-    ) -> NativeOutputs:
-        """Validate cached logical values with canonical reconstruction dtypes.
-
-        Returns:
-            Detached tables satisfying current executable checks.
-
-        Raises:
-            MetricResultError: If retained names differ from the declaration.
-        """
-        definition = self._get(name)
-        if outputs.keys() != definition.schemas.keys():
-            raise MetricResultError(name, "outputs", "Retained output names differ")
-        schemas = deepcopy(dict(definition.schemas))
-        for output, schema in schemas.items():
-            layout = definition.storage[output]
-            for column, dtype in zip(layout.columns, layout.pandas_dtypes, strict=True):
-                if dtype != "geometry":
-                    schema.columns[column].dtype = dtype
-        value = next(iter(outputs.values())) if len(outputs) == 1 else outputs
-        return validate_registered_result(name, schemas, value)
-
     def normalize_result(
         self, name: str, value: object, *, lazy: bool = False
     ) -> NativeOutputs:

@@ -226,7 +226,7 @@ def test_cache_policy_and_trusted_write_validation(
     assert checks == [True]  # A trusted write must not rerun producer checks.
     runner.run("total", inputs={})
     assert len(calls) == (1 if cache_policy == "full" else 2)
-    assert len(checks) == 2  # Restored values have an independent validation boundary.
+    assert len(checks) == len(calls)  # Each fresh output runs the check exactly once.
 
 
 @pytest.mark.parametrize("policy", ["off", "full"])

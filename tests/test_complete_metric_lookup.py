@@ -13,7 +13,9 @@ from lyra.contracts.resources import IOConfig
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.locations import LocationResolver
+from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.results import RunResult
+from lyra.runtime.sqlite_store import DamagedDataError, Header
 from lyra.sdk import Dependency, LocationDependency, PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
 from lyra.sdk.storage_schema import empty_frame
@@ -165,3 +167,70 @@ def test_downstream_hit_bypasses_uncached_dependency(
     assert calls == (["source", (), ()] if intermediate else ["source", ()])
     with pytest.raises(GraphExecutionError, match=failure):
         runner.run("complete", inputs={"places": {"provider": "target", "ids": ["a"]}})
+
+
+@pytest.mark.parametrize("root", ["source", "consumer"])
+def test_publication_race_uses_fresh_output_in_current_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root: str
+) -> None:
+    values = iter([1, 2])
+
+    @metric(
+        name="source",
+        description="Concurrent producer",
+        outputs={"value": RESULT},
+        cache="full",
+    )
+    def source() -> pd.DataFrame:
+        return pd.DataFrame({"total": [next(values)]})
+
+    @metric(
+        name="consumer",
+        description="Observe producer value",
+        outputs={"value": RESULT},
+        inputs={"value": Dependency("value", producer="source")},
+    )
+    def consumer(value: pd.DataFrame) -> pd.DataFrame:
+        return value
+
+    runner = LocalRunner.from_definitions(
+        {"race": PluginDefinition(metrics=[source, consumer])},
+        result_store_path=tmp_path / "race.sqlite",
+    )
+    lookup = MetricTables.lookup
+
+    def interleave(
+        tables: MetricTables, header: Header, *, expected_partitions: tuple[str, ...]
+    ) -> dict | None:
+        result = lookup(tables, header, expected_partitions=expected_partitions)
+        if header.node_id == "source" and result is None:
+            # Another run commits after this run decided to compute this key.
+            monkeypatch.setattr(MetricTables, "lookup", lookup)
+            assert runner.run("source").tables["value"].total.tolist() == [1]
+        return result
+
+    monkeypatch.setattr(MetricTables, "lookup", interleave)
+    assert runner.run(root).tables["value"].total.tolist() == [2]
+    assert runner.run("source").tables["value"].total.tolist() == [1]
+
+
+def test_hit_checks_output_names_against_current_declaration(tmp_path: Path) -> None:
+    calls = []
+
+    def run(name: str) -> RunResult:
+        @metric(name="count", description="Count", cache="full", outputs={name: RESULT})
+        def count() -> pd.DataFrame:
+            calls.append(name)
+            return pd.DataFrame({"total": [1]})
+
+        runner = LocalRunner.from_definitions(
+            {"test": PluginDefinition(metrics=[count])},
+            result_store_path=tmp_path / "names.sqlite",
+        )
+        return runner.run("count")
+
+    assert set(run("first").tables) == {"first"}
+    with pytest.raises(GraphExecutionError) as error:
+        run("second")
+    assert isinstance(error.value.__cause__, DamagedDataError)
+    assert calls == ["first"]

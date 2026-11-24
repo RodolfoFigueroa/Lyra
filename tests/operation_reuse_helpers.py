@@ -138,7 +138,10 @@ def configured_workload(
     executor.provider_records = ProviderRecords(executor.store)
 
     def run(
-        ids: tuple[str, ...] = ("a", "b"), parameters: dict | None = None
+        ids: tuple[str, ...] = ("a", "b"),
+        parameters: dict | None = None,
+        *,
+        prepared: bool = False,
     ) -> ExecutionOutcome:
         request = {
             "metric": "derived" if derived else "consumer",
@@ -151,6 +154,15 @@ def configured_workload(
         }
         if parameters is not None:
             request["parameters"] = parameters
-        return executor.execute(prepare_execution(runner.catalog, request))
+        plan = prepare_execution(runner.catalog, request)
+        if prepared:
+            plugin = runner.catalog.implementations["test"]
+            inputs = dict(
+                executor.acquire_sources(plan), parameters=plan.request.parameters
+            )
+            return executor.execute(
+                plugin.prepare_resolved_invocation(plan.node, inputs)
+            )
+        return executor.execute(plan)
 
     return run, events, seen, mapping

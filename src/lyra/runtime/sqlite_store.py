@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 import sqlalchemy as sa
@@ -269,7 +269,11 @@ class SQLiteStore:
         return self.layout.descriptions[key]
 
     def load_registrations(
-        self, keys: tuple[str, ...] | None = None, *, allow_uninitialized: bool = False
+        self,
+        keys: tuple[str, ...] | None = None,
+        *,
+        allow_uninitialized: bool = False,
+        connection: sa.Connection | None = None,
     ) -> tuple[Registration, ...]:
         """Read logical schemas without plugins, directory creation, or DDL.
 
@@ -280,9 +284,11 @@ class SQLiteStore:
             DamagedDataError: If required schema metadata is missing or invalid.
         """
         try:
-            with self.engine.connect() as connection:
+            with (
+                self.engine.connect() if connection is None else nullcontext(connection)
+            ) as reader:
                 self._load_registrations(
-                    connection, keys, allow_uninitialized=allow_uninitialized
+                    reader, keys, allow_uninitialized=allow_uninitialized
                 )
         except (exc.DatabaseError, ValueError) as error:
             msg = "Cannot read retained schema registrations"

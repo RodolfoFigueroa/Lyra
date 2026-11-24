@@ -53,7 +53,7 @@ Choose a cache policy on each declaration. Lyra accepts these settings and valid
 
 Mark exactly one metric location input `primary=True` to assign output rows to its locations. The marker doesn’t enable caching or promise independent computation. An operation’s sole source is automatically primary.
 
-Each primary partition contains the output rows for one primary location. Choose `per_location` only if adding or removing other primary locations cannot change that partition’s result. This promise includes dependencies and complete shared context. Lyra trusts your declaration without running independence proofs.
+Each primary partition contains the output rows for one primary location. Choose `per_location` only if adding or removing other primary locations cannot change that partition’s result. The handler’s miss batch must pass every declared check on its own, and its rows must still satisfy those checks when combined with retained partitions. Uniqueness of `(location_id, row_key)` meets this requirement. Use `full` when a code must be unique across all selected locations. This promise includes dependencies and complete shared context. Lyra trusts your declaration without running independence proofs.
 
 Set a provider’s `cache = True` to reuse immutable records by exact ID. Providers reject strings and integers, and metrics and operations reject booleans.
 
@@ -109,7 +109,7 @@ When reading stored values, Lyra restores declared types and geometry CRS, inclu
 
 Damaged required data causes an integrity error. Lookup doesn’t fabricate an empty result or rerun a handler to repair it.
 
-Writing the same key again preserves its existing value. An invoked `off` node executes even when its value is retained. Disabling caching preserves stored values, while repeated references within one graph can share that run’s validated results.
+The first successful publication owns the stored rows for a key. Downstream metrics and the local caller receive the validated rows their invocation computed. If concurrent handlers produce different values for the same identity, a later retained read returns the first committed rows. An invoked `off` node executes even when its value is retained. Disabling caching preserves stored values, while repeated references within one graph can share that run’s validated results.
 
 Metric publication commits all newly computed partitions from one successful
 invocation together, including every named output, completion record, and retained

@@ -130,6 +130,69 @@ def test_full_reuses_mapping_retained_for_downstream_cache(
     assert keys <= {r["value_key"] for r in database.rows["stored_results"]}
 
 
+@pytest.mark.parametrize("prepared_seed", [False, True])
+@pytest.mark.parametrize("policy", ["off", "per_location"])
+def test_prepared_metric_hit_needs_only_supplied_records(
+    tmp_path: Path, policy: "CachePolicy", *, prepared_seed: bool
+) -> None:
+    run, events, seen, mapping = configured_workload(
+        tmp_path,
+        WorkloadOptions(
+            policy=policy, derived=True, independent=True, metric_cache="full"
+        ),
+    )
+    mapping.update(a=("t",), b=())
+    first = run(prepared=prepared_seed)
+    assert ("mapping", frozenset({"a", "b"})) in events
+    events.clear()
+    seen.clear()
+    warm = run(prepared=True)
+    # The fixture acquires the caller-supplied sources before invoking the executor.
+    assert events == ["source setup", ("sources", frozenset({"a", "b"}))]
+    assert not seen
+    pd.testing.assert_frame_equal(
+        warm.outputs["result"], first.outputs["result"], check_dtype=False
+    )
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_metric_hit_resolves_only_the_missing_correspondence(
+    tmp_path: Path, database: Database, *, prepared: bool
+) -> None:
+    run, events, seen, mapping = configured_workload(
+        tmp_path,
+        WorkloadOptions(
+            policy="per_location",
+            independent=True,
+            metric_cache="full",
+            derived=prepared,
+        ),
+    )
+    mapping.update(a=("t",), b=())
+    first = run()
+    # Keep the completed metric and A's mapping. B's mapping has no pair rows.
+    headers = database.rows["stored_results"]
+    partitions = database.rows["stored_partitions"]
+    keys = {row["value_key"] for row in headers if row["node_id"] == "mapping"}
+    missing = next(
+        row["value_key"]
+        for row in partitions
+        if row["value_key"] in keys and row["location_id"] == "b"
+    )
+    for rows in (headers, partitions):
+        rows[:] = [row for row in rows if row["value_key"] != missing]
+    events.clear()
+    seen.clear()
+    again = run(prepared=prepared)
+    assert [
+        event for event in events if isinstance(event, tuple) and event[0] == "mapping"
+    ] == [("mapping", frozenset({"b"}))]
+    assert not seen
+    assert (
+        again.outputs["result"].value.tolist() == first.outputs["result"].value.tolist()
+    )
+
+
 @pytest.mark.parametrize("distinct_binding", [False, True])
 def test_shared_mapping_retention_upgrades_without_execution(
     tmp_path: Path, database: Database, *, distinct_binding: bool

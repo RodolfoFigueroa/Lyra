@@ -1,6 +1,8 @@
 """Whole-table publication and reconstruction at an isolated SQL boundary."""
 
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import geopandas as gpd
 import pandas as pd
@@ -23,6 +25,7 @@ from lyra.runtime.sqlite_store import (
 from lyra.sdk.storage_schema import describe, prepare_native
 from test_support.table_fixtures import value_schema
 from tests.metric_execution_helpers import schema as scoped_schema
+from tests.result_description_helpers import publish_values
 from tests.sqlite_helpers import Database, database, schema_database
 
 __all__ = ["database", "schema_database"]
@@ -30,6 +33,52 @@ __all__ = ["database", "schema_database"]
 
 def header(key: str = "whole") -> Header:
     return Header(value_key=key, node_id="summary", output_scope="unpartitioned")
+
+
+def test_first_publication_during_lookup(database: Database, tmp_path: Path) -> None:
+    path = tmp_path / "race.sqlite"
+    writer = MetricTables(SQLiteStore(path))
+    reader = MetricTables(SQLiteStore(path))
+    writer.store.initialize()
+    value, layout = prepare_native(pd.DataFrame({"value": [1]}), value_schema())
+    selection = ((header(), ()),)
+    bindings = {"whole": InputBindings()}
+
+    def publish(frame: pd.DataFrame) -> None:
+        writer.publish(
+            selection, {"out": frame}, {"out": layout}, location_inputs=bindings
+        )
+
+    published = False
+
+    def connect() -> MagicMock:
+        view = Database()
+        view.rows = database.rows
+
+        def begin(_statement: str) -> None:
+            view.rows = deepcopy(database.rows)
+
+        def execute(statement: object) -> MagicMock:
+            nonlocal published
+            result = view.execute(statement)
+            # Commit on the independent writer after the reader's first SELECT.
+            if not published:
+                published = True
+                publish(value)
+            return result
+
+        view.connection.exec_driver_sql.side_effect = begin
+        view.connection.execute.side_effect = execute
+        return view.connection
+
+    reader.store.engine = MagicMock()
+    reader.store.engine.connect.side_effect = connect
+    assert reader.lookup(header()) is None
+    assert published
+    publish(value.assign(value=2))
+    saved = reader.lookup(header(), required=True)
+    assert saved is not None
+    assert saved["out"].value.tolist() == [1]
 
 
 @pytest.mark.parametrize("kind", ["duplicates", "empty", "null", "boundaries"])
@@ -219,6 +268,22 @@ def test_optional_lookup_rejects_partial_schema(
         tables.lookup(header())
 
 
+def test_cache_lookup_rejects_damaged_wkb(database: Database, tmp_path: Path) -> None:
+    tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
+    description = publish_values(tables.store, ("one",), spatial=True)
+    output = description.outputs["a"]
+    data = tables.store.layout.tables[output.registration_key]
+    database.rows[data.table.name][0]["geometry"] += b"trailing bytes"
+    requested = Header(
+        value_key="one",
+        node_id=description.metric_name,
+        output_scope="location",
+        owner_scope=output.owner_scope,
+    )
+    with pytest.raises(DamagedDataError):
+        tables.lookup(requested, expected_partitions=("one", "empty"))
+
+
 @pytest.mark.parametrize("names", [(), ("a", "extra")])
 def test_exact_output_names(
     database: Database, tmp_path: Path, names: tuple[str, ...]
@@ -307,6 +372,9 @@ def test_scoped_groups(
             {"one": layout, "two": layout},
             location_inputs={h.value_key: InputBindings()},
         )
+        # A complete cache decision checks even owners with no output rows.
+        with pytest.raises(DamagedDataError, match="partitions"):
+            tables.lookup(h, expected_partitions=("a", "b"))
         selected = tables.lookup(h, partitions=("a", "empty"), required=True)
         assert selected is not None
         assert set(selected) == {"one", "two"}

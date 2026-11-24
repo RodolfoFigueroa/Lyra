@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import InitVar, dataclass, field, replace
+from functools import cached_property
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
@@ -57,6 +58,9 @@ class PreparedResolvedInvocation:
             self,
             "_parameters",
             parameters.model_copy(deep=True) if parameters is not None else None,
+        )
+        object.__setattr__(
+            self, "dependencies", MappingProxyType(dict(self.dependencies))
         )
         object.__setattr__(
             self,
@@ -147,7 +151,7 @@ class PreparedResolvedInvocation:
             parameter_values(self._parameters) if self._parameters is not None else {}
         )
 
-    @property
+    @cached_property
     def identity(self) -> str:
         """The scoped identity used for job reuse and persistent caching."""
         if self.bound_use is not None:
@@ -170,16 +174,24 @@ class PreparedResolvedInvocation:
 
     @property
     def computation_keys(self) -> dict[str | None, str]:
-        """Logical values computed independently of batching.
+        """A detached map of the logical values for this invocation."""
+        return dict(self._partition_keys)
+
+    @cached_property
+    def _partition_keys(self) -> tuple[tuple[str | None, str], ...]:
+        """Memoize completed partition keys for this immutable selection.
 
         Raises:
             ValueError: If a partitioned computation has no primary input.
         """
         bound = self.bound_use
         if bound is None:
-            return {
-                None: _identity(self.kind, self.node, self._parameters, self.locations)
-            }
+            return (
+                (
+                    None,
+                    _identity(self.kind, self.node, self._parameters, self.locations),
+                ),
+            )
         if self.bound_identity:
             groups = (
                 frozenset(self.locations[bound.primary_input].ids)
@@ -188,19 +200,22 @@ class PreparedResolvedInvocation:
             )
             keys = bound.demand(groups).computation_keys
             if keys is not None:
-                return keys
+                return tuple(keys.items())
         if not bound.per_location:
-            return {None: self.original().computation_key()}
+            return ((None, self.original().computation_key()),)
         primary = bound.primary_input
         if primary is None:
             message = "Partitioned computations require a primary input"
             raise ValueError(message)
-        return {
-            location_id: self.select_primary(
-                primary, frozenset({location_id})
-            ).computation_key()
+        return tuple(
+            (
+                location_id,
+                self.select_primary(
+                    primary, frozenset({location_id})
+                ).computation_key(),
+            )
             for location_id in sorted(set(self.locations[primary].ids))
-        }
+        )
 
     def computation_key(self, *, empty_context: bool = False) -> str:
         """Return the key for the current applicable inputs.
@@ -263,11 +278,7 @@ class PreparedResolvedInvocation:
                 bound.outputs[name],
                 frozenset(selected.ids) if selected is not None else None,
             )
-        return replace(
-            bound.descriptor,
-            inputs=inputs,
-            computation_scope="per_location" if bound.per_location else "complete",
-        ).key
+        return bound.key_for_inputs(inputs)
 
     def reference(self, output: str, groups: frozenset[str] | None = None) -> dict:
         """Return compact named-output references with complete producer context.
@@ -295,13 +306,21 @@ class PreparedResolvedInvocation:
             "partitions": partitions,
         }
         if not partitions:
-            primary = bound.primary_input
-            if primary is None:
-                message = "Partitioned references require a primary input"
-                raise ValueError(message)
-            selected = self.select_primary(primary, frozenset())
-            result["empty_context"] = selected.computation_key(empty_context=True)
+            result["empty_context"] = self._empty_partition_key
         return result
+
+    @cached_property
+    def _empty_partition_key(self) -> str:
+        """The computation reference for the empty primary selection.
+
+        Raises:
+            ValueError: If the invocation has no primary input.
+        """
+        if self.bound_use is None or self.bound_use.primary_input is None:
+            message = "Partitioned references require a primary input"
+            raise ValueError(message)
+        selected = self.select_primary(self.bound_use.primary_input, frozenset())
+        return selected.computation_key(empty_context=True)
 
     def location_contract(self, name: str) -> LocationContractReference:
         """Return the dataset binding that owns this computation input."""
@@ -339,9 +358,7 @@ def _empty_bound_identity(bound: BoundInvocation) -> str:
         )
         for name, location in bound.locations.items()
     }
-    return replace(
-        bound.descriptor, inputs=inputs, computation_scope="per_location"
-    ).key
+    return bound.key_for_inputs(inputs)
 
 
 def _location_identity(value: NativeLocationInput) -> dict:

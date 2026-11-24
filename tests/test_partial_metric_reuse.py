@@ -1,7 +1,7 @@
 """Partition reuse preserves requested owners, shared context, and completion."""
 
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import geopandas as gpd
 import pandas as pd
@@ -9,16 +9,27 @@ import pandera.pandas as pa
 import pytest
 from shapely.geometry import Point
 
-from lyra.runtime.execution import GraphExecutionError
+from lyra.contracts.metric_scope import CachePolicy
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.locations import LocationResolver
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.results import RunResult
-from lyra.sdk import LocationDependency, LocationProvider, PluginDefinition, metric
+from lyra.runtime.sqlite_store import SQLiteStore
+from lyra.sdk import (
+    Input,
+    LocationDependency,
+    LocationProvider,
+    PluginDefinition,
+    location_operation,
+    metric,
+)
 from lyra.sdk.storage_schema import empty_frame
 from tests.frame_assertions import assert_logical_equal
 from tests.metric_execution_helpers import schema
 from tests.provider_execution_helpers import provider_execution_definitions
+from tests.report_helpers import outcomes
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
@@ -187,13 +198,15 @@ def _assert_inputs(result: RunResult, owners: set[str]) -> None:
         )
 
 
-def test_each_fresh_miss_batch_is_validated_once(tmp_path: Path) -> None:
+@pytest.mark.parametrize("prepared", [False, True])
+def test_each_fresh_miss_batch_is_validated_once(
+    tmp_path: Path, *, prepared: bool
+) -> None:
     checked = []
     declaration = schema()
 
     def check_batch(data: pd.DataFrame) -> bool:
-        if data.attrs.get("fresh"):
-            checked.append(set(data.location_id))
+        checked.append(set(data.location_id))
         return True
 
     declaration.checks = [pa.Check(check_batch, name="check_batch")]
@@ -202,24 +215,168 @@ def test_each_fresh_miss_batch_is_validated_once(tmp_path: Path) -> None:
         name="sample",
         description="Sample requested owners",
         cache="per_location",
-        inputs={"places": LocationDependency(provider="target", primary=True)},
+        inputs={
+            "places": LocationDependency(provider="target", primary=True),
+            "reference": LocationDependency(provider="source"),
+        },
         outputs={"rows": declaration},
     )
-    def sample(places: gpd.GeoDataFrame) -> pd.DataFrame:
-        data = pd.DataFrame(
+    def sample(places: gpd.GeoDataFrame, reference: gpd.GeoDataFrame) -> pd.DataFrame:
+        assert set(reference.location_id) == {"x", "y"}
+        return pd.DataFrame(
             {"location_id": places.location_id, "row_key": "r", "value": 1}
         )
-        data.attrs["fresh"] = True
-        return data
 
     definitions = provider_execution_definitions([])
     definitions["sample"] = PluginDefinition(metrics=[sample])
     runner = LocalRunner.from_definitions(
         definitions, result_store_path=tmp_path / "sample.sqlite"
     )
-    for ids in (["a", "b"], ["b", "c"]):
-        result = runner.run(
-            "sample", inputs={"places": {"provider": "target", "ids": ids}}
+    executor = GraphExecutor(
+        runner.catalog, Mock(), store=SQLiteStore(tmp_path / "sample.sqlite")
+    )
+    for ids, outcome in (
+        (["a", "b"], "executed"),
+        (["b", "c"], "mixed"),
+        (["c", "b"], "reused"),
+    ):
+        inputs = {
+            "places": {"provider": "target", "ids": ids},
+            "reference": {"provider": "source", "ids": ["x", "y"]},
+        }
+        request = prepare_execution(
+            runner.catalog, {"metric": "sample", "inputs": inputs}
         )
-        assert set(result.tables["rows"].location_id) == set(ids)
+        invocation = (
+            runner.catalog.implementations["sample"].prepare_resolved_invocation(
+                "sample", dict(executor.acquire_sources(request))
+            )
+            if prepared
+            else request
+        )
+        result = executor.execute(invocation)
+        assert outcomes(result)["sample"] == [outcome]
+        assert set(result.outputs["rows"].location_id) == set(ids)
     assert checked == [{"a", "b"}, {"c"}]
+
+
+def test_prepared_partial_hit_materializes_only_missing_route_targets(
+    tmp_path: Path,
+) -> None:
+    acquired = []
+    mapped = []
+    computed = []
+    definitions = provider_execution_definitions([])
+    base = definitions["providers"].resources["target_binding"]
+    assert issubclass(base, LocationProvider)
+
+    @location_operation(
+        name="map_places",
+        description="Map each source",
+        cache="per_location",
+        inputs={"source": LocationDependency(provider="source")},
+        target_provider="target",
+    )
+    def map_places(source: gpd.GeoDataFrame) -> dict:
+        mapped.append(set(source.location_id))
+        return {owner: (owner.upper(),) for owner in source.location_id}
+
+    @metric(
+        name="sample",
+        description="Compute routed partitions",
+        cache="per_location",
+        inputs={
+            "places": LocationDependency(provider="source", primary=True),
+            "targets": LocationDependency(operation="map_places").bind(
+                source=Input("places")
+            ),
+            "reference": LocationDependency(provider="source"),
+        },
+        outputs={"rows": schema()},
+    )
+    def sample(
+        places: gpd.GeoDataFrame, targets: gpd.GeoDataFrame, reference: gpd.GeoDataFrame
+    ) -> pd.DataFrame:
+        assert set(reference.location_id) == {"x", "y"}
+        assert set(targets.location_id) == {
+            owner.upper() for owner in places.location_id
+        }
+        computed.append(set(places.location_id))
+        return pd.DataFrame(
+            {"location_id": places.location_id, "row_key": "r", "value": 1}
+        )
+
+    definitions["sample"] = PluginDefinition(
+        metrics=[sample], location_operations=[map_places]
+    )
+    runner = LocalRunner.from_definitions(definitions)
+    executor = GraphExecutor(
+        runner.catalog, Mock(), store=SQLiteStore(tmp_path / "partial.sqlite")
+    )
+    plugin = runner.catalog.implementations["sample"]
+    resolve = base.resolve
+
+    def traced(provider: LocationProvider, ids: list[str]) -> gpd.GeoDataFrame:
+        acquired.append(set(ids))
+        return resolve(provider, ids)
+
+    with patch.object(base, "resolve", traced):
+        for ids in (["a", "b"], ["b", "c"], ["c", "b"]):
+            plan = prepare_execution(
+                runner.catalog,
+                {
+                    "metric": "sample",
+                    "inputs": {
+                        "places": {"provider": "source", "ids": ids},
+                        "reference": {"provider": "source", "ids": ["x", "y"]},
+                    },
+                },
+            )
+            invocation = plugin.prepare_resolved_invocation(
+                "sample", dict(executor.acquire_sources(plan))
+            )
+            result = executor.execute(invocation)
+            assert set(result.outputs["rows"].location_id) == set(ids)
+    assert mapped == computed == [{"a", "b"}, {"c"}]
+    assert acquired == [{"A", "B"}, {"C"}]
+
+
+@pytest.mark.parametrize("policy", ["full", "per_location"])
+def test_prepared_subset_keeps_complete_and_partitioned_compute_scopes(
+    tmp_path: Path, policy: CachePolicy
+) -> None:
+    computed = []
+
+    @metric(
+        name="findings",
+        description="Emit one row per supplied owner",
+        inputs={"main": LocationDependency(provider="target", primary=True)},
+        cache=policy,
+        outputs={"rows": schema()},
+    )
+    def findings(main: gpd.GeoDataFrame) -> pd.DataFrame:
+        computed.append(set(main.location_id))
+        return pd.DataFrame(
+            {"location_id": main.location_id, "row_key": "one", "value": 1}
+        )
+
+    definitions = provider_execution_definitions([])
+    definitions["subset"] = PluginDefinition(metrics=[findings])
+    runner = LocalRunner.from_definitions(definitions)
+    executor = GraphExecutor(
+        runner.catalog, Mock(), store=SQLiteStore(tmp_path / "subset.sqlite")
+    )
+    request = prepare_execution(
+        runner.catalog,
+        {
+            "metric": "findings",
+            "inputs": {"main": {"provider": "target", "ids": ["a", "b"]}},
+        },
+    )
+    original = runner.catalog.implementations["subset"].prepare_resolved_invocation(
+        "findings", dict(executor.acquire_sources(request))
+    )
+    reduced = original.select_primary("main", frozenset({"b"}))
+    assert executor.execute(reduced).outputs["rows"].location_id.tolist() == ["b"]
+    assert set(executor.execute(original).outputs["rows"].location_id) == {"a", "b"}
+    assert computed == ([{"a", "b"}] if policy == "full" else [{"b"}, {"a"}])

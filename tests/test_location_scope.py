@@ -50,7 +50,7 @@ class Execution:
     state: RunState
 
     def run(self) -> OperationResult:
-        return self.executor.dispatch(self.invocation, self.state, Mock())
+        return self.executor.dispatch(self.invocation, self.state)
 
 
 @contextmanager

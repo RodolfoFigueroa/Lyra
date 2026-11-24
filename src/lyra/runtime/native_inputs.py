@@ -80,6 +80,14 @@ class NativeLocationInput:
         """Return selected owners with their applicable correspondence references."""
         return self._apply(self.membership.targets(ids))
 
+    def for_membership(self, selected: Membership) -> "NativeLocationInput":
+        """Return the supplied records for a bound selection, in pair order."""
+        positions = None
+        if selected.pairs != self.membership.pairs:
+            by_pair = {pair: index for index, pair in enumerate(self.membership.pairs)}
+            positions = tuple(by_pair[pair] for pair in selected.pairs)
+        return self._apply(Selection(selected.ids, positions, selected.computations))
+
     def __post_init__(self) -> None:
         """Capture records and identity before any handler receives working data.
 

@@ -262,7 +262,7 @@ def schema_database(database: Database, monkeypatch: pytest.MonkeyPatch) -> Data
         if statement == "SELECT 1 FROM sqlite_schema LIMIT 1":
             result.scalar.return_value = 1 if database.rows else None
         else:
-            assert statement == "BEGIN IMMEDIATE"
+            assert statement in {"BEGIN", "BEGIN IMMEDIATE"}
         return result
 
     monkeypatch.setattr(sa.MetaData, "create_all", create_all)

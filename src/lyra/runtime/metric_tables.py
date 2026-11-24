@@ -135,6 +135,7 @@ class MetricTables:
             ):
                 msg = "Retained metric input bindings differ"
                 raise DamagedDataError(msg)
+            _check_partitions(saved, publication.partitions)
             for registration in registrations:
                 prepare_computation(self.store, connection, registration, saved, None)
         return pending
@@ -146,53 +147,49 @@ class MetricTables:
         *,
         required: bool = False,
         partitions: tuple[str, ...] | None = None,
+        expected_partitions: tuple[str, ...] | None = None,
     ) -> NativeOutputs | None:
         """Reconstruct detached native tables using only retained descriptions.
 
+        Cache decisions supply the exact expected partition set, including empty
+        owners. Retrieval may separately restrict a complete value to a subset.
+
         Returns:
             Named tables, or None for an optional absent computation.
-        """
-        try:
-            self.store.load_registrations(allow_uninitialized=not required)
-        except MissingValueError:
-            return None
-        with self.store.engine.connect() as connection:
-            return self._lookup_connection(
-                connection,
-                header,
-                output_name,
-                required=required,
-                partitions=partitions,
-            )
 
-    def _lookup_connection(
-        self,
-        connection: sa.Connection,
-        header: Header,
-        output_name: str | None = None,
-        *,
-        required: bool = False,
-        partitions: tuple[str, ...] | None = None,
-    ) -> NativeOutputs | None:
-        try:
-            saved = self.store.header(connection, header.value_key, required=required)
-        except MissingValueError:
-            return None
-        if saved.model_copy(update={"output_rows": None}) != header:
-            msg = "Metric header differs from required computation"
-            raise DamagedDataError(msg)
-        LocationInputs(self.store).bindings(connection, header.value_key)
-        try:
-            return self.read_connection(connection, saved, output_name, partitions)
-        except (
-            exc.DatabaseError,
-            ValueError,
-            KeyError,
-            TypeError,
-            GEOSException,
-        ) as error:
-            msg = "Damaged metric output data"
-            raise DamagedDataError(msg) from error
+        Raises:
+            DamagedDataError: If the computation disagrees with its inventory.
+        """
+        with self.store.engine.connect() as connection:
+            # sqlite3 does not begin a read transaction on the first SELECT.
+            # Connection close releases the snapshot before computation or publication.
+            connection.exec_driver_sql("BEGIN")
+            try:
+                self.store.load_registrations(
+                    allow_uninitialized=not required, connection=connection
+                )
+                saved = self.store.header(
+                    connection, header.value_key, required=required
+                )
+            except MissingValueError:
+                return None
+            if saved.model_copy(update={"output_rows": None}) != header:
+                msg = "Metric header differs from required computation"
+                raise DamagedDataError(msg)
+            if expected_partitions is not None:
+                _check_partitions(saved, expected_partitions)
+            LocationInputs(self.store).bindings(connection, header.value_key)
+            try:
+                return self.read_connection(connection, saved, output_name, partitions)
+            except (
+                exc.DatabaseError,
+                ValueError,
+                KeyError,
+                TypeError,
+                GEOSException,
+            ) as error:
+                msg = "Damaged metric output data"
+                raise DamagedDataError(msg) from error
 
     def read_connection(
         self,
@@ -242,6 +239,22 @@ class MetricTables:
             for name, registration in registrations.items()
             if output_name is None or name == output_name
         }
+
+
+def _check_partitions(header: Header, partitions: tuple[str, ...]) -> None:
+    """Match every location output's completion, including zero-row owners.
+
+    Raises:
+        DamagedDataError: If the stored partition set differs from the demand.
+    """
+    if header.output_scope == "location":
+        expected = set(partitions)
+        if header.output_rows is None or any(
+            not isinstance(counts, dict) or counts.keys() != expected
+            for counts in header.output_rows.values()
+        ):
+            msg = "Retained metric partitions differ from the requested owners"
+            raise DamagedDataError(msg)
 
 
 @dataclass

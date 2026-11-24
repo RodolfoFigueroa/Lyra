@@ -15,7 +15,6 @@ from lyra.contracts.jobs import TableJobResult
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.sqlite_store import DamagedDataError
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
@@ -238,10 +237,7 @@ def test_typed_mixed_graph(
         assert isinstance(error.value.__cause__, KeyError)
         calls.clear()
         accepted[0] = False
-        with pytest.raises(GraphExecutionError) as error:
-            run("changed_check")
-        assert error.value.node == "source"
-        assert isinstance(error.value.__cause__, DamagedDataError)
-        assert calls == []
+        assert run("changed_check") == fresh
+        assert calls == ["root"]
     finally:
         worker.set_runner_temp_base(None)

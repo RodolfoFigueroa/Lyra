@@ -84,7 +84,7 @@ def test_diamond_shared_execution_and_run_cleanup(*, fail: bool) -> None:
     assert calls == {"root": 2, "branch": 2, "leaf": 2}
     assert len(states) == 2
     assert states[0] is not states[1]
-    assert all(not state and not state.prepared for state in states)
+    assert all(not state and state.bound_root is None for state in states)
 
 
 @pytest.mark.parametrize("grouped", [False, True])
