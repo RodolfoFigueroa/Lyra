@@ -201,7 +201,7 @@ PARAMETERS = [(suite, name) for suite in SUITES for name in suite.params]
 
 
 def test_catalog_and_selectors() -> None:
-    assert sum(len(s.params) for s in SUITES if hasattr(s, "time_operation")) == 46
+    assert sum(len(s.params) for s in SUITES if hasattr(s, "time_operation")) == 40
     assert sum(len(s.params) for s in SUITES if hasattr(s, "peakmem_operation")) == 18
     assert (
         2

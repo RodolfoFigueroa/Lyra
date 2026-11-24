@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from lyra.contracts.errors import (
+    MetricResultError,
     ReportNotFoundError,
     ResultAccessError,
     ResultNotFoundError,
@@ -29,19 +30,17 @@ from lyra.contracts.results import (
     ResultDescription,
     ResultDescriptionInspection,
     ResultDescriptionPreview,
-    ResultRowPage,
 )
 from lyra.contracts.retrieval_paths import (
     absolute_api_url,
     report_download_path,
-    result_description_download_path,
+    result_description_path,
 )
 from lyra.data.inspection import summarize_outputs
 from lyra.data.results import serialize_outputs
 from lyra.runtime.results import ResultStore
 from lyra.server.job_store import InvalidJobResultError
 from lyra.server.result_projection import project_observation
-from lyra.server.result_rows import RowPageBuilder, RowPageContext
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -50,6 +49,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from lyra.contracts.inspection import ResultInspection
+    from lyra.contracts.outputs import OutputMetadata
+    from lyra.data.results import NativeOutputs
     from lyra.server.job_store import JobObservation, JobStore
     from lyra.server.response_budget import ResponseBudget
 
@@ -66,7 +67,7 @@ def inspect_description(
         job_id=description.job_id,
         download_url=absolute_api_url(
             public_api_base_url,
-            result_description_download_path(description.job_id),
+            result_description_path(description.job_id),
         ),
     )
     return cast("ResultDescriptionInspection", budget.choose(complete, preview))
@@ -99,55 +100,6 @@ class ResultService:
         self.jobs = jobs
         self.result_store_path = result_store_path
 
-    def read_rows(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        """Read a bounded SQL page independently of jobs and complete tables.
-
-        Returns:
-            Encoded rows and an optional continuation cursor.
-
-        Raises:
-            ResultNotFoundError: If the configured store does not exist yet.
-        """
-        validate_job_id(job_id)
-        try:
-            with ResultStore.open(self.result_store_path) as store:
-                return RowPageBuilder(
-                    store, context.public_api_base_url, context.budget
-                ).build(job_id, output_name, limit, cursor)
-        except FileNotFoundError as error:
-            raise ResultNotFoundError(job_id, output_name) from error
-
-    async def rows(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        """Select and encode a page without blocking the event loop.
-
-        Returns:
-            Encoded rows and an optional continuation cursor.
-        """
-        return await asyncio.to_thread(
-            self.read_rows,
-            job_id,
-            output_name,
-            limit,
-            cursor,
-            context=context,
-        )
-
     def validate_table(self, job_id: str, output_name: str) -> None:
         """Validate the selected output metadata before issuing its link.
 
@@ -176,55 +128,6 @@ class ResultService:
                 yield from stream
         except FileNotFoundError as error:
             raise ResultNotFoundError(job_id, output_name) from error
-
-    def read_location_input_rows(
-        self,
-        job_id: str,
-        input_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        """Read an input page with the transport's complete encoded-response budget.
-
-        Returns:
-            Complete encoded rows and the continuation after the last returned row.
-
-        Raises:
-            ResultNotFoundError: If the configured store does not exist yet.
-        """
-        validate_job_id(job_id)
-        try:
-            with ResultStore.open(self.result_store_path) as store:
-                return RowPageBuilder(
-                    store, context.public_api_base_url, context.budget
-                ).build_location_input(job_id, input_name, limit, cursor)
-        except FileNotFoundError as error:
-            raise ResultNotFoundError(job_id, input_name=input_name) from error
-
-    async def location_input_rows(
-        self,
-        job_id: str,
-        input_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        """Select and encode an input page without blocking the event loop.
-
-        Returns:
-            Complete encoded rows and an optional continuation cursor.
-        """
-        return await asyncio.to_thread(
-            self.read_location_input_rows,
-            job_id,
-            input_name,
-            limit,
-            cursor,
-            context=context,
-        )
 
     def validate_location_input(self, job_id: str, input_name: str) -> None:
         """Validate input lookup and availability before issuing a download link.
@@ -290,7 +193,7 @@ class ResultService:
         return await asyncio.to_thread(self.read_report, job_id)
 
     def read_observation(self, job_id: str) -> JobObservation | None:
-        """Return retained metadata and a bounded inspection of native outputs.
+        """Return the queue record after verifying its identity.
 
         Raises:
             InvalidJobResultError: If required retained data is missing or invalid.
@@ -300,42 +203,55 @@ class ResultService:
         if observation is not None and observation.snapshot.job_id != job_id:
             message = "Queue identity differs from requested job"
             raise InvalidJobResultError(message)
-        if observation is None or observation.snapshot.status != "succeeded":
-            return observation
+        return observation
+
+    def _outputs(
+        self, observation: JobObservation
+    ) -> tuple[str, NativeOutputs, dict[str, OutputMetadata]]:
+        snapshot = observation.snapshot
+        metric = (
+            observation.provenance.accepted.plan.metric
+            if observation.provenance
+            else snapshot.metric
+        )
+        if snapshot.status != "succeeded" or metric is None:
+            msg = "Missing accepted metric or successful completion"
+            raise InvalidJobResultError(msg)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                result = store.read_result(job_id)
-            inspection = summarize_outputs(result.tables)
+                tables, declarations = store.job_outputs(snapshot.job_id, metric)
+                return metric, tables, declarations
         except (ResultAccessError, OSError, ValueError) as error:
             message = "Invalid retained job result"
             raise InvalidJobResultError(message) from error
-        if job_id != result.metadata.job_id:
-            message = "Retained execution differs from job result"
-            raise InvalidJobResultError(message)
-        provenance = observation.provenance
-        if (
-            provenance is not None
-            and result.metadata.metric_name != provenance.accepted.plan.metric
-        ):
-            message = "Retained result differs from accepted metric"
-            raise InvalidJobResultError(message)
-        return replace(observation, retained_result=result, inspection=inspection)
 
     async def observe_job(self, job_id: str) -> JobObservation | None:
         """Return a retained observation without blocking the event loop."""
         return await asyncio.to_thread(self.read_observation, job_id)
 
-    @staticmethod
-    def inspect(observation: JobObservation) -> ResultInspection:
-        """Return the shared bounded HTTP/MCP result projection."""
+    def inspect(self, observation: JobObservation) -> ResultInspection:
+        """Return the shared bounded HTTP/MCP result projection.
+
+        Raises:
+            InvalidJobResultError: If required retained values cannot be summarized.
+        """
+        if observation.snapshot.status == "succeeded":
+            _, tables, declarations = self._outputs(observation)
+            try:
+                summaries = summarize_outputs(tables, declarations)
+            except ValueError as error:
+                msg = "Invalid retained job inspection"
+                raise InvalidJobResultError(msg) from error
+            observation = replace(
+                observation, inspection=summaries, declarations=declarations
+            )
         return project_observation(observation.snapshot.job_id, observation)
 
-    @staticmethod
-    def read_result(observation: JobObservation) -> TerminalJobResult:
+    def read_result(self, observation: JobObservation) -> TerminalJobResult:
         """Return public JSON data from a retained result or structured failure.
 
         Raises:
-            InvalidJobResultError: If required retained data is missing or invalid.
+            InvalidJobResultError: If the retained outputs cannot be encoded.
         """
         snapshot = observation.snapshot
         if snapshot.status == "failed":
@@ -344,20 +260,17 @@ class ResultService:
                 error=snapshot.error or {},
                 provenance=observation.provenance,
             )
-        retained = observation.retained_result
-        if snapshot.status != "succeeded" or retained is None:
-            message = "Missing retained job result"
-            raise InvalidJobResultError(message)
+        metric, tables, declarations = self._outputs(observation)
+        try:
+            outputs = serialize_outputs(metric, tables)
+        except MetricResultError as error:
+            msg = "Invalid retained job result"
+            raise InvalidJobResultError(msg) from error
         return TableJobResult.model_validate(
             {
                 "job_id": snapshot.job_id,
-                "outputs": serialize_outputs(
-                    retained.metadata.metric_name, retained.tables
-                ),
-                "output_metadata": {
-                    name: output.table_schema.model_copy(deep=True)
-                    for name, output in retained.metadata.outputs.items()
-                },
+                "outputs": outputs,
+                "output_metadata": declarations,
                 "provenance": observation.provenance.model_copy(deep=True)
                 if observation.provenance
                 else None,

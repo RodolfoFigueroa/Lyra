@@ -32,8 +32,6 @@ from sqlalchemy import event
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.location_inputs import InputSelection, LocationInputs
 from lyra.runtime.result_store import ResultStore
-from lyra.server.response_budget import http_json_response, http_response_budget
-from lyra.server.result_rows import RowPageBuilder
 from test_support.retained_input_workloads import retained_inputs, retained_workload
 
 if TYPE_CHECKING:
@@ -70,13 +68,13 @@ def cases() -> list[Case]:
     fixtures = [("direct", n, r) for n in (10, 100, 1000) for r in (100, 10000)]
     fixtures += [(g, n, 0) for g in ("full", "per_location") for n in (100, 1000)]
     for graph, partitions, references in fixtures:
-        operations = ["cached", "description", "candidates"]
+        operations = ["cached", "description"]
         if (graph == "direct" and partitions in {10, 1000} and references == 10000) or (
             graph != "direct" and partitions == 1000
         ):
             operations += ["cold", "mixed"]
         if partitions == 1000 and references in {0, 10000}:
-            operations += ["native", "stream", "page"]
+            operations += ["native", "stream"]
         result.extend(Case(graph, partitions, references, op) for op in operations)
     return result
 
@@ -85,7 +83,7 @@ def modes(case: Case, requested: str) -> list[str]:
     """Return eligible, independent measurement passes."""
     eligible = ["baseline"]
     if case.largest:
-        if case.operation in {"cached", "description", "page", "cold", "mixed"}:
+        if case.operation in {"cached", "description", "cold", "mixed"}:
             eligible += ["cpu", "sql"]
         if case.graph != "full" and case.operation in {
             "cached",
@@ -154,15 +152,8 @@ def operation(case: Case, path: Path, reference: str) -> tuple[Callable, list]:
                 return sum(
                     len(chunk) for chunk in store.stream_location_input(reference, name)
                 )
-            if case.operation == "page":
-                page = RowPageBuilder(
-                    store, "http://profiling.invalid", http_response_budget()
-                ).build_location_input(reference, name, limit=100)
-                return http_json_response(page).body
-            with store.location_input_page_candidates(
-                reference, name, limit=100
-            ) as page:
-                return list(page.rows)
+            msg = f"Unknown operation {case.operation!r}"
+            raise ValueError(msg)
 
     return execute, work.calls
 
@@ -322,13 +313,6 @@ def validate(case: Case, value: Sized | int | bytes, calls: list) -> None:
                 },
                 "Dense correspondence pairs differ",
             )
-    if case.operation == "page":
-        check(
-            len(json.loads(cast("bytes", value))["rows"]) == 100,
-            "Incomplete encoded page",
-        )
-    if case.operation == "candidates":
-        check(len(cast("Sized", value)) == 100, "Incomplete SQL candidates")
 
 
 def explain(path: Path, details: dict) -> None:

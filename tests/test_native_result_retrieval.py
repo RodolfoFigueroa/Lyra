@@ -17,6 +17,7 @@ from lyra.api.exceptions import DownloadError
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import TableJobResult
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.provider_scope import ProviderScope
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_descriptions import (
     ResultDescriptions,
@@ -84,8 +85,11 @@ def test_declared_types_and_independent_reads(
     assert isinstance(result, TableJobResult)
     inspection = service.inspect(observation)
     assert isinstance(inspection, TerminalResultOutput)
-    assert inspection.outputs["rows"].metadata is not None
-    assert inspection.outputs["rows"].metadata.row_count == len(frame)
+    check_inspection(
+        inspection, len(frame), populated=state in {"populated", "duplicates"}
+    )
+    if state in {"populated", "duplicates"}:
+        check_json_cells(result, spatial=spatial)
     with ResultStore.open(path) as store:
         stored_tables = store.read_result(key).tables
     original = result.model_dump_json()
@@ -103,13 +107,11 @@ def test_declared_types_and_independent_reads(
     with ResultStore.open(path) as store:
         pd.testing.assert_frame_equal(store.read_table(key, "rows"), frame)
     assert result.model_dump_json() == original
-    assert observation.retained_result is not None
-    observation.retained_result.metadata.outputs["rows"].table_schema.columns.clear()
-    repeated = service.read_observation(key)
-    assert repeated is not None
-    assert repeated.retained_result is not None
-    assert repeated.retained_result.metadata.outputs["rows"].table_schema == description
-    assert_retrieved_frame(decode_tables(service.read_result(repeated))["rows"], frame)
+    result.output_metadata["rows"].columns.clear()
+    repeated = service.read_result(observation)
+    assert isinstance(repeated, TableJobResult)
+    assert repeated.output_metadata["rows"] == description
+    assert_retrieved_frame(decode_tables(repeated)["rows"], frame)
 
 
 @pytest.mark.usefixtures("database")
@@ -147,9 +149,7 @@ def test_reopened_string_schema_is_independent_of_pandas_storage(
 def assert_batched_frame(path: Path, key: str, frame: pd.DataFrame) -> None:
     with ResultDescriptions(SQLiteStore(path)).select(key, "rows") as selected:
         batches = list(selected.batches(1))
-        addresses = [address for batch in batches for address in batch.addresses]
-        assert len(addresses) == len(frame)
-        assert len(set(addresses)) == len(frame)
+        assert sum(map(len, batches)) == len(frame)
         assert selected.owner_scope is None
         assert [column.name for column in selected.registration.columns] == list(frame)
         assert_retrieved_frame(selected.frame(), frame)
@@ -238,8 +238,7 @@ def test_private_storage_names_do_not_replace_declared_columns(tmp_path: Path) -
     _, reference = retained_service(path, schema, frame)
     with ResultDescriptions(SQLiteStore(path)).select(reference, "rows") as selected:
         batches = list(selected.batches(1))
-        assert len({batch.addresses[0] for batch in batches}) == 3
-        assert [batch.rows[0] for batch in batches] == [("equal",) * 4] * 3
+        assert [batch[0] for batch in batches] == [("equal",) * 4] * 3
         pd.testing.assert_frame_equal(selected.frame(), frame)
     with ResultStore.open(path) as store:
         pd.testing.assert_frame_equal(store.read_table(reference, "rows"), frame)
@@ -291,3 +290,62 @@ def test_geometry_only_native_and_arrow_after_reopen(
             assert list(native) == ["geometry"]
             assert native.crs == frame.crs
             assert native.geometry.to_wkb().tolist() == frame.geometry.to_wkb().tolist()
+
+
+@pytest.mark.usefixtures("database")
+def test_case_colliding_structural_columns_round_trip(
+    tmp_path: Path,
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "ROW_KEY": ["x", "y", "z"],
+            "row_key": ["1", "2", "1"],
+            "LOCATION_ID": ["north", "south", "east"],
+            "location_id": ["a", "a", "b"],
+        },
+        dtype="string",
+    )
+    declaration = pa.DataFrameSchema(
+        {
+            name: pa.Column("string", description=name, metadata={"unit": None})
+            for name in frame.columns
+        },
+        strict=True,
+        unique=["location_id", "row_key"],
+    )
+    service, reference = retained_service(
+        tmp_path / "tables.sqlite",
+        declaration,
+        frame,
+        owner=ProviderScope(provider_id="places"),
+    )
+    with ResultStore.open(service.result_store_path) as store:
+        restored = store.read_table(reference, "rows")
+        pd.testing.assert_frame_equal(restored, frame)
+
+
+def check_inspection(
+    inspection: TerminalResultOutput, rows: int, *, populated: bool
+) -> None:
+    assert inspection.outputs["rows"].metadata is not None
+    assert inspection.outputs["rows"].metadata.row_count == rows
+    summary = inspection.outputs["rows"].metadata.summary
+    assert (
+        summary["count"].minimum
+        == summary["count"].maximum
+        == (2**60 + 1 if populated else None)
+    )
+    assert summary["flag"].minimum is summary["flag"].maximum is None
+
+
+def check_json_cells(result: TableJobResult, *, spatial: bool) -> None:
+    encoded = result.model_dump(mode="json")["outputs"]["rows"]
+    records = (
+        [feature["properties"] for feature in encoded["features"]]
+        if spatial
+        else encoded
+    )
+    assert type(records[0]["count"]) is int
+    assert records[0]["count"] == 2**60 + 1
+    assert records[0]["flag"] is True
+    assert records[1]["count"] is records[1]["flag"] is None

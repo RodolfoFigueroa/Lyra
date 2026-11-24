@@ -47,7 +47,7 @@ class CancellationHarness:
                 stream=CancellableStream(self),
                 headers={"Content-Type": "application/vnd.apache.arrow.stream"},
             )
-        if self.stage in {"request", "rows"}:
+        if self.stage in {"request", "describe"}:
             await self.pause()
         return httpx.Response(
             200,

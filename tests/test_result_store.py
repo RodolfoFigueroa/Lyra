@@ -23,8 +23,6 @@ from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.results import ResultStore, RunResult
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import PluginDefinition, loading, metric
-from lyra.server.response_budget import http_response_budget
-from lyra.server.result_rows import RowPageBuilder
 from test_support.publication import publish_result
 from test_support.table_fixtures import value_frame, value_schema
 from tests.result_description_helpers import publish_values
@@ -51,11 +49,6 @@ def test_damaged_geometry_is_an_integrity_error(
     reference = publish_result(ResultDescriptions(writer), description)
     path.touch()
     with ResultStore.open(path) as store:
-        pages = RowPageBuilder(store, "https://lyra.test", http_response_budget())
-        first = pages.build(reference, "a", limit=1)
-        assert first.next_cursor
-        with pytest.raises(ResultIntegrityError):
-            pages.build(reference, "a", limit=1, cursor=first.next_cursor)
         with pytest.raises(ResultIntegrityError):
             b"".join(store.stream_table(reference, "a"))
         with pytest.raises(ResultIntegrityError) as named:

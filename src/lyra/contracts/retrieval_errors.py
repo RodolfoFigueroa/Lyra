@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from lyra.contracts import errors
 from lyra.contracts.references import JobId
@@ -43,7 +43,7 @@ class ResultErrorPayload(StrictBaseModel):
     message: str
     job_id: JobId
     output_name: str | None
-    input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    input_name: str | None
 
 
 class LocationInputUnavailableErrorPayload(StrictBaseModel):
@@ -67,38 +67,8 @@ class ReportErrorPayload(StrictBaseModel):
     job_id: JobId
 
 
-class PaginationErrorPayload(StrictBaseModel):
-    """Invalid pagination scoped to the requested result, output and parameter."""
-
-    model_config = ConfigDict(strict=True)
-
-    code: Literal["invalid_pagination"]
-    message: str
-    job_id: JobId
-    output_name: str | None
-    input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
-    parameter: Literal["cursor", "limit"]
-
-
-class RowTooLargeErrorPayload(StrictBaseModel):
-    """Bounded oversized-row failure with a complete-table download link."""
-
-    model_config = ConfigDict(strict=True)
-
-    code: Literal["row_too_large"]
-    message: str
-    job_id: JobId
-    output_name: str | None
-    input_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
-    download_url: str
-
-
 RetrievalErrorPayload = (
-    ResultErrorPayload
-    | ReportErrorPayload
-    | PaginationErrorPayload
-    | RowTooLargeErrorPayload
-    | LocationInputUnavailableErrorPayload
+    ResultErrorPayload | ReportErrorPayload | LocationInputUnavailableErrorPayload
 )
 _PAYLOAD = TypeAdapter(RetrievalErrorPayload)
 
@@ -119,28 +89,6 @@ def error_payload(error: errors.ResultAccessError) -> RetrievalErrorPayload:
                 "message": "The location input was not materialized for this result.",
                 "job_id": error.job_id,
                 "input_name": error.input_name,
-            }
-        )
-    if isinstance(error, errors.RowTooLargeError):
-        return RowTooLargeErrorPayload.model_validate(
-            {
-                "code": "row_too_large",
-                "message": "The next row exceeds the JSON page size limit.",
-                "job_id": error.job_id,
-                "output_name": error.output_name,
-                "input_name": error.input_name,
-                "download_url": error.download_url,
-            }
-        )
-    if isinstance(error, errors.InvalidPaginationError):
-        return PaginationErrorPayload.model_validate(
-            {
-                "code": "invalid_pagination",
-                "message": "Invalid pagination for this output.",
-                "job_id": error.job_id,
-                "output_name": error.output_name,
-                "input_name": error.input_name,
-                "parameter": error.parameter,
             }
         )
     for code, (error_type, _, message) in _RESULT_ERRORS.items():
@@ -171,8 +119,6 @@ def error_status(payload: RetrievalErrorPayload) -> int:
     """Return the HTTP status associated with a validated domain payload."""
     if isinstance(payload, LocationInputUnavailableErrorPayload):
         return 409
-    if isinstance(payload, PaginationErrorPayload | RowTooLargeErrorPayload):
-        return 422
     if isinstance(payload, ResultErrorPayload):
         return _RESULT_ERRORS[payload.code][1]
     return _REPORT_ERRORS[payload.code][1]
@@ -196,20 +142,6 @@ def decode_error(payload: object, *, status: int) -> errors.ResultAccessError | 
 def _decode_validated_error(parsed: RetrievalErrorPayload) -> errors.ResultAccessError:
     if isinstance(parsed, LocationInputUnavailableErrorPayload):
         return errors.LocationInputUnavailableError(parsed.job_id, parsed.input_name)
-    if isinstance(parsed, RowTooLargeErrorPayload):
-        return errors.RowTooLargeError(
-            parsed.job_id,
-            parsed.output_name,
-            parsed.download_url,
-            input_name=parsed.input_name,
-        )
-    if isinstance(parsed, PaginationErrorPayload):
-        return errors.InvalidPaginationError(
-            parsed.job_id,
-            parsed.output_name,
-            parsed.parameter,
-            input_name=parsed.input_name,
-        )
     if isinstance(parsed, ResultErrorPayload):
         return _RESULT_ERRORS[parsed.code][0](
             parsed.job_id, parsed.output_name, input_name=parsed.input_name

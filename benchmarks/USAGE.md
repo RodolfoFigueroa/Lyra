@@ -244,7 +244,7 @@ The partial, hybrid, assembly, and grouped-read memory cases start new measureme
 
 ## Measure retained location inputs
 
-The permanent retained-input suite contains 94 cases: 46 timings, 18 process
+The permanent retained-input suite contains 88 cases: 40 timings, 18 process
 memory peaks, and 30 database-file size measurements. Direct fixtures share
 independent references. Dense fixtures map each source to the same 100 targets,
 with full and per-location operation policies and zero independent references.
@@ -256,8 +256,7 @@ independent references. All providers are deterministic and in process.
 | Cached execution and description | 100/1,000 sources; direct 100/10,000 references and both dense policies | 16 |
 | Cold execution | All four 1,000-source fixtures | 4 |
 | 90%-warm execution | Direct 100/10,000 and both dense 100-source fixtures; direct 1,000/100 | 4 |
-| SQL candidates and encoded 100-row pages | Direct 1,000/10,000 and both dense 1,000-source fixtures | 6 |
-| Complete native and Arrow retrieval | The same three retrieval fixtures | 6 |
+| Complete native and Arrow retrieval | Direct 1,000/10,000 and both dense 1,000-source fixtures | 6 |
 | Provider revision and reference selection invalidation | Direct 100/10,000 and both dense 100-source fixtures; revision changes or one reference is added | 6 |
 | Combined cached and mixed execution | Both policies, 100 sources, 10,000 references | 4 |
 | Peak memory | Three largest retrieval fixtures: cached, description, native, stream; three small representative fixtures: cold, mixed | 18 |
@@ -281,9 +280,7 @@ Every measured sample receives a disposable copy of a closed seed. Completed
 seeds retain their single-publication history; mixed seeds retain their separate
 90%-warm history. Seeds are never reused across runs or revisions. Copying,
 correctness checks, and cleanup are outside timing. Execution measures the whole
-runner call; reads include store opening and closing. SQL candidates consume rows;
-encoded pages additionally construct and serialize the production HTTP response
-without network transport. Arrow streaming consumes and discards every chunk.
+runner call; reads include store opening and closing. Arrow streaming consumes and discards every chunk.
 
 Timing uses two independent rounds, one operation per sample, no warmup, and
 one to five samples per round with a two-second budget for additional sampling.
@@ -308,7 +305,7 @@ uv run asv run -E existing --dry-run --durations all \
 ```
 
 `RETAINED_INPUT_BENCH` selects both modules. `RETAINED_INPUT_SCALING_BENCH` selects
-the 39 scaling cases. Select `retained_input_scaling.SmallInputSuite` for a small
+the 33 scaling cases. Select `retained_input_scaling.SmallInputSuite` for a small
 sampling check. The fast selector is unchanged. Use `--quick --dry-run` only for
 execution checks, and normal runs with `--record-samples` from a clean checkpoint
 for saved comparisons. Run without concurrent tests or benchmarks and retain

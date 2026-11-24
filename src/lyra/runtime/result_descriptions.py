@@ -1,6 +1,6 @@
 """Immutable execution descriptions selecting shared metric computations."""
 
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
@@ -22,12 +22,6 @@ from lyra.runtime.location_inputs import (
     _InputTraversal,
 )
 from lyra.runtime.output_selection import OutputSelection, prepare_computation
-from lyra.runtime.pagination import (
-    CandidatePage,
-    candidates,
-    validate_pagination,
-    validate_position,
-)
 from lyra.runtime.sqlite_store import (
     DamagedDataError,
     MissingValueError,
@@ -151,6 +145,31 @@ class ResultDescriptions:
         cls._check_pair(description, report)
         return description, report
 
+    def job_outputs(
+        self, job_id: str, metric: str
+    ) -> tuple["NativeOutputs", dict[str, OutputMetadata]]:
+        """Return the accepted metric's declarations and native tables in one traversal.
+
+        Raises:
+            DamagedDataError: If the retained identity differs from the queue record.
+        """
+        with self.store.engine.connect() as connection:
+            row = self._result_record(connection, job_id)
+            description = ResultDescription.model_validate_json(row["description"])
+            if row["job_id"] != job_id or description.metric_name != metric:
+                msg = "Retained result differs from the accepted job"
+                raise DamagedDataError(msg)
+            self._load_outputs(description, None)
+            tables = {}
+            declarations = {}
+            for name in description.outputs:
+                selected = self._selection(connection, description, name)
+                declarations[name] = OutputMetadata.model_validate(
+                    selected.registration.table_schema
+                ).model_copy(deep=True)
+                tables[name] = selected.frame()
+            return tables, declarations
+
     def read_report(self, job_id: str) -> ExecutionReport:
         """Return the retained report without reading output values."""
         with self.store.engine.connect() as connection:
@@ -182,27 +201,6 @@ class ResultDescriptions:
             description = ResultDescription.model_validate_json(row["description"])
             self._load_outputs(description, output_name)
             yield self._selection(connection, description, output_name)
-
-    @contextmanager
-    def page_candidates(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-    ) -> "Generator[CandidatePage]":
-        """Yield internal SQL candidates with continuations and retained schema.
-
-        Consumers must keep this context open while iterating. Early exits close
-        the iterator and connection, including when a byte budget rejects a row.
-        """
-        after = validate_pagination(job_id, output_name, limit, cursor)
-        with self.select(job_id, output_name) as selected:
-            validate_position(selected, job_id, output_name, after)
-            with closing(
-                candidates(selected, job_id, output_name, limit, after)
-            ) as rows:
-                yield CandidatePage(selected.registration, selected.owner_scope, rows)
 
     def _selection(
         self,

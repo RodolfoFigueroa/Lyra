@@ -23,7 +23,6 @@ from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import metric
 from lyra.server import job_store, job_submission, worker
 from lyra.server.agent_auth import require_agent_key
-from lyra.server.result_projection import project_observation
 from lyra.server.results import ResultService
 from lyra.server.routes.jobs import router
 from lyra.server.runtime import get_jobs, get_results
@@ -209,7 +208,7 @@ def verify_public_consumers(
         descriptor = http.get(f"/jobs/{TEST_JOB_ID}/result/inspection").json()
     observation = service.read_observation(TEST_JOB_ID)
     assert observation is not None
-    inspection = project_observation(TEST_JOB_ID, observation)
+    inspection = service.inspect(observation)
     assert isinstance(inspection, TerminalResultOutput)
     assert set(inspection.outputs) == {"parcels", "summary"}
     for name, output in inspection.outputs.items():

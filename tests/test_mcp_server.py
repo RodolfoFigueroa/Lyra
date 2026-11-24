@@ -29,7 +29,7 @@ from starlette.routing import Mount
 from docs.scripts.mcp_tools import advertised_tools
 from lyra.api import AsyncLyraClient, LyraClient
 from lyra.contracts.errors import ReportNotFoundError, ResultNotFoundError
-from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.inspection import ResultInspection, TerminalResultOutput
 from lyra.contracts.jobs import (
     FailedJobResult,
     JobCreateRequest,
@@ -69,6 +69,7 @@ from lyra.server.mcp.models import (
 )
 from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError
 from lyra.server.plugins import InstalledPlugin
+from lyra.server.result_projection import project_observation
 from lyra.server.results import ResultService
 from lyra.server.runtime import get_runtime
 from test_support.location_operations import Places
@@ -108,8 +109,7 @@ if TYPE_CHECKING:
 
     from lyra.contracts.config import LyraConfig
     from lyra.contracts.reports import ExecutionReport
-    from lyra.contracts.results import ResultDescription, ResultRowPage
-    from lyra.server.result_rows import RowPageContext
+    from lyra.contracts.results import ResultDescription
 
 
 def _initialize_payload() -> JsonObject:
@@ -150,31 +150,9 @@ def _app_with_mcp(
 
 
 class FakeMCPBackend:
-    async def rows(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        del limit, cursor, context
-        self.observed.append(job_id)
-        raise ResultNotFoundError(job_id, output_name)
-
-    async def location_input_rows(
-        self,
-        job_id: str,
-        input_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        del limit, cursor, context
-        self.observed.append(job_id)
-        raise ResultNotFoundError(job_id, input_name=input_name)
+    @staticmethod
+    async def inspect_result(observation: JobObservation) -> ResultInspection:
+        return project_observation(observation.snapshot.job_id, observation)
 
     async def validate_location_input(self, job_id: str, input_name: str) -> None:
         self.observed.append(job_id)
@@ -466,8 +444,6 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
         "lyra_download_result",
         "lyra_download_table",
         "lyra_download_location_input",
-        "lyra_get_location_input_rows",
-        "lyra_get_result_rows",
         "lyra_describe_result",
         "lyra_inspect_report",
         "lyra_get_job_result",
@@ -1513,6 +1489,65 @@ def test_active_download_polling_guidance() -> None:
     assert payload["error"]["details"]["poll_after_seconds"] == 2
 
 
+@pytest.mark.parametrize("request_id", [10, "request-雪"])
+def test_inspection_accounts_for_jsonrpc_envelope(request_id: int | str) -> None:
+    backend = FakeMCPBackend([])
+    observation = result_observation(
+        snapshot=backend.job_status(FIRST_JOB_ID, "succeeded", "metric"),
+        result=TableJobResult(
+            job_id=FIRST_JOB_ID,
+            outputs={"rows": [{"x": 4}]},
+            output_metadata={
+                "rows": OutputMetadata(
+                    columns=[
+                        ColumnMetadata(
+                            name="x", dtype="int64", description="x", unit=None
+                        )
+                    ]
+                )
+            },
+        ),
+    )
+    backend.observations[FIRST_JOB_ID] = observation
+    client = managed_client(
+        create_mcp_app(agent_api_key="agent-secret", backend=backend)
+    )
+
+    def inspect(identifier: int | str) -> httpx.Response:
+        return client.post(
+            "/",
+            json=tool_call_payload(
+                "lyra_get_job_result", {"job_id": FIRST_JOB_ID}, request_id=identifier
+            ),
+            headers=mcp_headers(),
+        )
+
+    # ASCII declaration text occurs twice on the wire. The ID occurs once.
+    remaining = 65536 - len(inspect(request_id).content)
+    observation.declarations["rows"].columns[0].description += "x" * (remaining // 2)
+
+    def longer(identifier: int | str) -> int | str:
+        return identifier * 10 if isinstance(identifier, int) else identifier + "x"
+
+    exact_id = longer(request_id) if remaining % 2 else request_id
+    exact = inspect(exact_id)
+    assert len(exact.content) == 65536
+    assert tool_payload(exact)["result"]["outputs"]["rows"]["preview"] == [{"x": 4}]
+    over = inspect(longer(exact_id))
+    assert len(over.content) <= 65536
+    entry = tool_payload(over)["result"]["outputs"]["rows"]
+    assert entry["preview"] is None
+    assert "preview" in entry["truncation"]["omitted_sections"]
+
+    backend.observations[FIRST_JOB_ID] = JobObservation(
+        snapshot=backend.job_status(FIRST_JOB_ID, "queued", "m" * 40000)
+    )
+    mandatory = inspect(exact_id)
+    assert len(mandatory.content) <= 65536
+    assert mandatory.json()["result"]["isError"]
+    assert tool_payload(mandatory)["error"]["code"] == "result_response_too_large"
+
+
 def test_wide_multibyte_output_inspection_is_bounded() -> None:
     backend = FakeMCPBackend([])
     columns = [f"column_{i}" for i in range(40)]
@@ -1750,7 +1785,18 @@ def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
                         dict(zip(["x" * 1000], row, strict=True)) for row in [[2]]
                     ]
                 },
-                "output_metadata": {"result": {"columns": []}},
+                "output_metadata": {
+                    "result": {
+                        "columns": [
+                            {
+                                "name": "x" * 1000,
+                                "dtype": "int64",
+                                "description": "Value",
+                                "unit": None,
+                            }
+                        ]
+                    }
+                },
             }
         ),
     )
@@ -1777,7 +1823,7 @@ def test_backend_errors_are_retryable_without_retry(
     observe.assert_awaited_once()
 
 
-@pytest.mark.parametrize("value", [10**400, 1e308])
+@pytest.mark.parametrize("value", [2**63 - 1, 1e308])
 def test_large_numeric_values_remain_exact(value: float) -> None:
     backend = FakeMCPBackend([])
     backend.observations[FIRST_JOB_ID] = result_observation(
@@ -1791,7 +1837,20 @@ def test_large_numeric_values_remain_exact(value: float) -> None:
                         for row in [[value], [value]]
                     ]
                 },
-                "output_metadata": {"result": {"columns": []}},
+                "output_metadata": {
+                    "result": {
+                        "columns": [
+                            {
+                                "name": "value",
+                                "dtype": "int64"
+                                if isinstance(value, int)
+                                else "float64",
+                                "description": "Value",
+                                "unit": None,
+                            }
+                        ]
+                    }
+                },
             }
         ),
     )

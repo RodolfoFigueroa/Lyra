@@ -306,7 +306,7 @@ def test_empty_selected_groups_keep_scope_and_schema(
             assert selection.owner_scope == description.outputs[name].owner_scope
             batches = list(selection.batches(1))
             frame = selection.frame()
-            assert sum(len(batch.rows) for batch in batches) == (
+            assert sum(len(batch) for batch in batches) == (
                 1 if groups is None and name == "a" else 0
             )
             assert str(frame.value.dtype) == "Int64"

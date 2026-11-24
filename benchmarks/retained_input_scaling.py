@@ -1,4 +1,4 @@
-"""Permanent shared-input, correspondence, page and read-memory comparisons."""
+"""Shared-input, correspondence, and read-memory comparisons."""
 
 from typing import ClassVar
 
@@ -32,7 +32,7 @@ class SmallInputSuite(Sample):
 
 
 class LargeInputSuite(Sample):
-    """Scale shared inputs, correspondences, and bounded pages at one thousand."""
+    """Measure shared inputs and correspondences at one thousand partitions."""
 
     params: ClassVar[list[str]] = [case.name for case in LARGE_CASES]
     setup_cache = staticmethod(large_seeds)

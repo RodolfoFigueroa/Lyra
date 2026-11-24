@@ -8,9 +8,8 @@ from unittest.mock import Mock
 import pytest
 from rq.job import JobStatus
 
-from lyra.contracts.jobs import JobRunProvenance, TableJobResult
-from lyra.contracts.reports import ExecutionReport, ReportNode
-from lyra.runtime.results import ResultStore, RunMetadata, RunOutputMetadata, RunResult
+from lyra.contracts.jobs import TableJobResult
+from lyra.runtime.results import ResultStore
 from lyra.server import job_store
 from tests.job_id_helpers import TEST_JOB_ID
 from tests.provenance_helpers import result_provenance
@@ -19,8 +18,8 @@ from tests.result_helpers import observed_tables
 NOW = datetime(2026, 10, 27, tzinfo=UTC)
 
 
-def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
-    store_path: Path,
+def retain(
+    _store_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     payload: dict,
     *,
@@ -45,57 +44,11 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
         else:
             tables = observed_tables(result)
             reference = result.job_id
-            metric = JobRunProvenance.model_validate(provenance).accepted.plan.metric
-            retained = RunResult(
-                tables=tables,
-                report=ExecutionReport(
-                    job_id=reference,
-                    status="succeeded",
-                    request={"metric": metric, "inputs": {}, "parameters": {}},
-                    root_use_id="root",
-                    nodes=[
-                        ReportNode(
-                            use_id="root",
-                            node_id=metric,
-                            kind="metric",
-                            outcome="executed",
-                            parameters={},
-                            primary_input=None,
-                            inputs={},
-                            outputs={
-                                name: RunOutputMetadata(
-                                    scope="unpartitioned",
-                                    table_schema=metadata,
-                                    owner_scope=None,
-                                )
-                                for name, metadata in result.output_metadata.items()
-                            },
-                            code_revision=None,
-                            origins=[],
-                        )
-                    ],
-                    parameter_bindings=[],
-                    build_revision=None,
-                ),
-                metadata=RunMetadata(
-                    metric_name=JobRunProvenance.model_validate(
-                        provenance
-                    ).accepted.plan.metric,
-                    parameters={},
-                    outputs={
-                        name: RunOutputMetadata(
-                            scope="unpartitioned",
-                            table_schema=metadata,
-                            owner_scope=None,
-                        )
-                        for name, metadata in result.output_metadata.items()
-                    },
-                    store_path=store_path,
-                    job_id=reference,
-                ),
-            )
             reader = Mock()
-            reader.read_result.side_effect = lambda _ref: deepcopy(retained)
+            reader.job_outputs.side_effect = lambda _ref, _metric: (
+                deepcopy(tables),
+                deepcopy(result.output_metadata),
+            )
             context = Mock(
                 __enter__=Mock(return_value=reader), __exit__=Mock(return_value=False)
             )

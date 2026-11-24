@@ -127,7 +127,7 @@ Result endpoints return `202` while the job is queued or running. Choose a route
 | `GET /jobs/{job_id}/result` | Read the complete terminal JSON result |
 | `GET /jobs/{job_id}/result/download` | Download the complete terminal JSON result |
 
-Both `/result` and `/result/download` return the complete job result as JSON. A successful job includes every named output of the requested metric. A failed job includes failure details. Download the job result before its queue record expires.
+Both `/result` and `/result/download` return the complete job result as JSON. Integers are JSON numbers, Booleans are booleans, and missing cells are null. Spatial outputs use WGS84 GeoJSON, where empty and missing geometries can both appear as null. A successful job includes every named output of the requested metric. A failed job includes failure details. Download the job result before its queue record expires.
 
 To read the complete report, send an authenticated `GET /executions/{job_id}/report/download` request. This route accepts the submission’s job ID even after queue expiry.
 
@@ -135,7 +135,7 @@ To read the complete report, send an authenticated `GET /executions/{job_id}/rep
 
 Download one saved output using its `job_id` and `output_name`, even after the job expires. Choose the output name from the [result description](../results/#read-a-retained-description).
 
-Send `GET /results/{job_id}/tables/{output_name}/download` with your agent Bearer credential, percent-encoding each path segment. Lyra returns `200` with content type `application/vnd.apache.arrow.stream` when the lookup succeeds.
+Send `GET /results/{job_id}/tables/download?output_name=maintenance` with your agent Bearer credential. Encode the exact output name as a query value, for example with `urllib.parse.urlencode({"output_name": name})`. A successful response uses `application/vnd.apache.arrow.stream`.
 
 Save the response bytes unchanged as `output.arrow`. The download uses Arrow’s IPC stream format regardless of the filename. Open the saved stream with PyArrow:
 
@@ -175,7 +175,7 @@ Lyra generates the download from saved rows without rerunning the metric. If the
 | `404` | `result_not_found` | The result or output name doesn’t exist |
 | `500` | `result_integrity_error` | Required stored data is missing or damaged |
 
-Each lookup error includes `job_id` and the requested `output_name`. If the download stops midstream, discard the partial file.
+Lookup errors include `job_id`, the requested `output_name`, and `input_name=null`. Omitting the name returns HTTP 422. An empty query value looks up the empty name and returns HTTP 404 for an output. Lyra checks stored rows and geometry before sending the Arrow file.
 
 Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.
 
@@ -185,22 +185,7 @@ Use the job ID to read the location inputs saved for the requested metric. Choos
 
 Inspect each input’s schema and `availability` before reading its rows. Its [provider scope](../../concepts/caching/#reuse-tables-across-executions) identifies the dataset and revisions. Correspondences map immediate source records to target records, so their descriptions also identify the source scope.
 
-Descriptions include empty and `not_materialized` inputs without loading their rows. If the description exceeds the inspection limit, Lyra omits it entirely and returns `omitted=["description"]`. Follow the preview’s authenticated `download_url` to retrieve every output and input description.
-
-Send your agent Bearer credential to either GET endpoint, percent-encoding each path segment:
-
-| Read | Endpoint |
-| --- | --- |
-| JSON page | `/results/{job_id}/location-inputs/{input_name}/rows` |
-| Arrow stream | `/results/{job_id}/location-inputs/{input_name}/download` |
-
-Successful requests return `200`. For pages, set a positive integer `limit` to change the default of 100 rows. Pass `next_cursor` unchanged as `cursor` with the same result and input until it returns `null`. Continue after short pages when a cursor remains; output-table cursors aren’t valid for input rows.
-
-Lyra returns complete rows within the response size limit. Interpret cells using these encodings:
-
-- **Integers**: decimal strings
-- **Geometry**: WKT in the saved CRS
-- **Missing cells**: `null`
+Authenticated `GET /results/{job_id}` returns the complete description, including empty and unavailable inputs. To download an available selection, request `GET /results/{job_id}/location-inputs/download?input_name=streets`. Encode the exact input name as a query value. Omitting the parameter returns HTTP 422.
 
 Downloads use `application/vnd.apache.arrow.stream`, preserving the declared schema and CRS even for empty selections. Open the stream with [PyArrow or GeoPandas](#download-a-retained-table). You can retrieve these inputs after job expiry or plugin registration changes while the retained store remains available.
 
@@ -213,9 +198,5 @@ If a request fails, inspect `detail.code`:
 | `404` | `result_not_found` | Missing result or undeclared location input |
 | `409` | `location_input_unavailable` | Lyra didn’t materialize this input for the result |
 | `500` | `result_integrity_error` | Required retained data or relationships are missing or damaged |
-| `422` | `invalid_pagination` | Invalid limit or cursor; see `parameter` |
-| `422` | `row_too_large` | Next row cannot fit; use the Arrow `download_url` |
 
 Each lookup error includes `job_id` and `input_name`. All except `location_input_unavailable` also include `output_name=null`. Retrying an unavailable input leaves its saved selection unchanged.
-
-For `row_too_large`, fetch `download_url` with your agent Bearer credential to retrieve the complete Arrow stream. The failed page request leaves the cursor at the oversized row. If generation fails after streaming starts, discard the partial download.

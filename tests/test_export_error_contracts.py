@@ -79,13 +79,10 @@ def test_remote_lookup_errors(
         httpx.Response(
             200,
             json={
-                "kind": "complete",
-                "description": {
-                    "job_id": reference,
-                    "metric_name": "metric",
-                    "parameters": {},
-                    "outputs": {},
-                },
+                "job_id": reference,
+                "metric_name": "metric",
+                "parameters": {},
+                "outputs": {},
             },
         )
     )

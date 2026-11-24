@@ -41,11 +41,12 @@ def test_captured_owners_and_expired_jobs(
     before = deepcopy(database.rows)
     retained = service.read_observation(reference)
     assert retained is not None
-    assert retained.retained_result is not None
-    metadata = retained.retained_result.metadata
+    with ResultStore.open(path) as reader:
+        local = reader.read_result(reference)
+    metadata = local.metadata
     assert metadata.outputs["a"].owner_scope == description.outputs["a"].owner_scope
     assert metadata.outputs["b"].scope == "location"
-    assert retained.retained_result.tables["b"].crs.to_epsg() == 4326
+    assert local.tables["b"].crs.to_epsg() == 4326
     result = service.read_result(retained)
     assert isinstance(result, TableJobResult)
     assert result.job_id == metadata.job_id == reference
@@ -57,12 +58,12 @@ def test_captured_owners_and_expired_jobs(
     assert service.read_observation(reference) is None
     with ResultStore.open(path) as reader:
         assert reader.read_result(reference).metadata == metadata
-        for name, frame in retained.retained_result.tables.items():
+        for name, frame in local.tables.items():
             pd.testing.assert_frame_equal(reader.read_table(reference, name), frame)
     assert database.rows == before
 
 
-@pytest.mark.parametrize("damage", ["missing", "backing", "file"])
+@pytest.mark.parametrize("damage", ["missing", "backing", "file", "metric"])
 def test_broken_retained_reference_is_integrity_failure(
     database: Database, tmp_path: Path, damage: str
 ) -> None:
@@ -76,15 +77,18 @@ def test_broken_retained_reference_is_integrity_failure(
         reference = "f" * 32
     elif damage == "backing":
         database.rows[writer.layout.results.name].clear()
-    else:
+    elif damage == "file":
         path.unlink()
     before = deepcopy(database.rows)
-    service = ResultService(
-        Mock(read_job=Mock(return_value=observation(reference))),
-        path,
-    )
-    with pytest.raises(InvalidJobResultError):
-        service.read_observation(reference)
+    record = observation(reference)
+    if damage == "metric":
+        record.snapshot.metric = "another"
+    service = ResultService(Mock(read_job=Mock(return_value=record)), path)
+    observed = service.read_observation(reference)
+    assert observed is not None
+    for read in (service.read_result, service.inspect):
+        with pytest.raises(InvalidJobResultError):
+            read(observed)
     assert database.rows == before
     assert path.exists() is (damage != "file")
 
@@ -95,6 +99,7 @@ def observation(job_id: str) -> JobObservation:
         snapshot=JobStatusInfo(
             job_id=job_id,
             status="succeeded",
+            metric="metric",
             created_at=now,
             updated_at=now,
         ),
@@ -157,7 +162,7 @@ def test_public_tables_keep_retained_provider_scopes(
             [
                 httpx.Response(
                     200,
-                    json={"kind": "complete", "description": description.model_dump()},
+                    json=description.model_dump(),
                 ),
                 arrow_response(body),
                 arrow_response(body),

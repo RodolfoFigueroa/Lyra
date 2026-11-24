@@ -78,12 +78,13 @@ def publish_inputs(
     selections: dict[str, InputSelection],
     *,
     output_keys: tuple[str, ...] = ("one",),
+    output_name: str = "a",
 ) -> str:
     references = {
         name: (LocationInputs(store).publish(selection),)
         for name, selection in selections.items()
     }
-    description = publish_values(store, output_keys)
+    description = publish_values(store, output_keys, output_name=output_name)
     description = description.model_copy(
         update={
             "location_inputs": InputBindings(

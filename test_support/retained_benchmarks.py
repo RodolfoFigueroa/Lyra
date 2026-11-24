@@ -14,8 +14,6 @@ import sqlalchemy as sa
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
-from lyra.server.response_budget import http_json_response, http_response_budget
-from lyra.server.result_rows import RowPageBuilder
 from test_support.retained_input_workloads import retained_inputs, retained_workload
 
 if TYPE_CHECKING:
@@ -67,9 +65,7 @@ SMALL = fixtures(100)
 LARGE = fixtures(1000)
 RETRIEVAL = LARGE[1:]
 SMALL_CASES = tuple(Case(f, op) for f in SMALL for op in ("cached", "description"))
-LARGE_CASES = tuple(
-    Case(f, op) for f in LARGE for op in ("cached", "description")
-) + tuple(Case(f, op) for f in RETRIEVAL for op in ("candidates", "page"))
+LARGE_CASES = tuple(Case(f, op) for f in LARGE for op in ("cached", "description"))
 COLD_CASES = tuple(Case(f, "cold") for f in LARGE)
 MIXED_CASES = (Case(LARGE[0], "mixed"),)
 SMALL_MIXED_CASES = tuple(Case(f, "mixed") for f in SMALL[1:])
@@ -266,15 +262,8 @@ class Sample:
                     len(chunk)
                     for chunk in store.stream_location_input(self.reference, name)
                 )
-            if op == "page":
-                page = RowPageBuilder(
-                    store, "http://benchmark.invalid", http_response_budget()
-                ).build_location_input(self.reference, name, limit=100)
-                return http_json_response(page).body
-            with store.location_input_page_candidates(
-                self.reference, name, limit=100
-            ) as page:
-                return list(page.rows)
+            msg = f"Unknown retrieval operation {op!r}"
+            raise ValueError(msg)
 
     def validate(self) -> None:
         fixture, op = self.case.fixture, self.case.operation
@@ -306,15 +295,6 @@ class Sample:
         elif op == "stream":
             assert isinstance(self.value, int)
             assert self.value > 0
-        elif op == "page":
-            rows = json.loads(cast("bytes", self.value))["rows"]
-            assert len(rows) == 100
-            required = {"location_id", "original", "geometry"}
-            if fixture.graph != "direct":
-                required.add("source_location_id")
-            assert all(required <= row.keys() for row in rows)
-        else:
-            assert len(cast("list", self.value)) == 100
 
     def validate_execution(self) -> None:
         fixture, op = self.case.fixture, self.case.operation

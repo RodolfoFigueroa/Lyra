@@ -77,13 +77,18 @@ def location_descriptions() -> dict[str, LocationInputDescription]:
 
 
 def publish_values(
-    store: SQLiteStore, keys: tuple[str, ...], *, spatial: bool = False
+    store: SQLiteStore,
+    keys: tuple[str, ...],
+    *,
+    spatial: bool = False,
+    output_name: str = "a",
 ) -> ResultDescription:
     declaration = schema(spatial=spatial)
     layout = describe(declaration, metadata=compile_output(declaration)[1])
     owner = ProviderScope(provider_id="places", code_revision="survey")
     registrations = tuple(
-        Registration.from_description("metric", name, layout) for name in ("a", "b")
+        Registration.from_description("metric", name, layout)
+        for name in (output_name, "b")
     )
     store.initialize(registrations)
     for key in keys:
@@ -110,8 +115,8 @@ def publish_values(
                     (key, "empty"),
                 ),
             ),
-            {"a": frame, "b": empty_frame(declaration)},
-            {"a": layout, "b": layout},
+            {output_name: frame, "b": empty_frame(declaration)},
+            {output_name: layout, "b": layout},
             location_inputs={
                 Header(
                     value_key=key,
@@ -123,7 +128,7 @@ def publish_values(
         )
     return ResultDescription(
         metric_name="metric",
-        output_names=("a", "b"),
+        output_names=(output_name, "b"),
         code_revision="v1",
         parameters={"default": None, "nested": {"list": [1, 2]}},
         outputs={

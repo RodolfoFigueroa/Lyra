@@ -1,41 +1,23 @@
 """Authenticated retained descriptions independent of job lifetimes."""
 
-from typing import Annotated
+from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse, JSONResponse
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
-from starlette.convertors import PathConvertor, register_url_convertor
-
-from lyra.contracts.errors import InvalidPaginationError, ResultAccessError
+from lyra.contracts.errors import ResultAccessError
 from lyra.contracts.references import JobId
-from lyra.contracts.results import (
-    ResultDescription,
-    ResultDescriptionInspection,
-    ResultRowPage,
-)
+from lyra.contracts.results import ResultDescription
 from lyra.server.agent_auth import require_agent_key
-from lyra.server.response_budget import http_json_response, http_response_budget
-from lyra.server.result_rows import RowPageContext
-from lyra.server.results import inspect_description
+from lyra.server.response_budget import http_json_response
 from lyra.server.routes.retrieval_errors import retrieval_error_response
-from lyra.server.runtime import ConfigDependency, ResultServiceDependency
+from lyra.server.runtime import ResultServiceDependency
 from lyra.server.table_response import TableResponse
 
-
-class RetrievalNameConvertor(PathConvertor):
-    """Capture the decoded name, including empty strings, slashes and newlines."""
-
-    regex = "(?s:.*)"
-
-
-register_url_convertor("lyra_retrieval_name", RetrievalNameConvertor())
 router = APIRouter(tags=["Results"], dependencies=[Depends(require_agent_key)])
 
 
 @router.get(
-    "/results/{job_id}/tables/{output_name:lyra_retrieval_name}/download",
-    response_class=StreamingResponse,
+    "/results/{job_id}/tables/download",
+    response_class=FileResponse,
     responses={200: {"content": {"application/vnd.apache.arrow.stream": {}}}},
 )
 async def download_table(
@@ -45,26 +27,8 @@ async def download_table(
     return TableResponse(results.stream_table(job_id, output_name))
 
 
-@router.get("/results/{job_id}", response_model=ResultDescriptionInspection)
+@router.get("/results/{job_id}", response_model=ResultDescription)
 async def describe_result(
-    job_id: JobId, results: ResultServiceDependency, config: ConfigDependency
-) -> JSONResponse:
-    """Return complete metadata or a bounded authenticated download link."""
-    try:
-        description = await results.describe(job_id)
-    except ResultAccessError as error:
-        return retrieval_error_response(error)
-    return http_json_response(
-        inspect_description(
-            description,
-            public_api_base_url=config.api.public_base_url,
-            budget=http_response_budget(),
-        )
-    )
-
-
-@router.get("/results/{job_id}/description/download", response_model=ResultDescription)
-async def download_description(
     job_id: JobId, results: ResultServiceDependency
 ) -> JSONResponse:
     """Return generated complete description JSON without an inspection size limit."""
@@ -75,49 +39,9 @@ async def download_description(
     return http_json_response(description)
 
 
-class RowQuery(BaseModel):
-    """Raw query values, with domain-owned pagination validation."""
-
-    limit: str = "100"
-    cursor: str | None = None
-
-
 @router.get(
-    "/results/{job_id}/tables/{output_name:lyra_retrieval_name}/rows",
-    response_model=ResultRowPage,
-)
-async def result_rows(
-    job_id: JobId,
-    output_name: str,
-    results: ResultServiceDependency,
-    config: ConfigDependency,
-    query: Annotated[RowQuery, Query()],
-) -> JSONResponse:
-    """Return a SQL-selected page with shared pagination errors and byte bounds.
-
-    Raises:
-        InvalidPaginationError: Converted to the shared domain response.
-    """
-    try:
-        try:
-            parsed_limit = int(query.limit)
-        except ValueError as error:
-            raise InvalidPaginationError(job_id, output_name, "limit") from error
-        page = await results.rows(
-            job_id,
-            output_name,
-            parsed_limit,
-            query.cursor,
-            context=RowPageContext(config.api.public_base_url, http_response_budget()),
-        )
-    except ResultAccessError as error:
-        return retrieval_error_response(error)
-    return http_json_response(page)
-
-
-@router.get(
-    "/results/{job_id}/location-inputs/{input_name:lyra_retrieval_name}/download",
-    response_class=StreamingResponse,
+    "/results/{job_id}/location-inputs/download",
+    response_class=FileResponse,
     responses={200: {"content": {"application/vnd.apache.arrow.stream": {}}}},
 )
 async def download_location_input(
@@ -125,38 +49,3 @@ async def download_location_input(
 ) -> TableResponse:
     """Return a retained location input as a generated Arrow stream."""
     return TableResponse(results.stream_location_input(job_id, input_name))
-
-
-@router.get(
-    "/results/{job_id}/location-inputs/{input_name:lyra_retrieval_name}/rows",
-    response_model=ResultRowPage,
-)
-async def location_input_rows(
-    job_id: JobId,
-    input_name: str,
-    results: ResultServiceDependency,
-    config: ConfigDependency,
-    query: Annotated[RowQuery, Query()],
-) -> JSONResponse:
-    """Return bounded retained input rows with shared domain errors.
-
-    Raises:
-        InvalidPaginationError: Converted to the shared domain response.
-    """
-    try:
-        try:
-            parsed_limit = int(query.limit)
-        except ValueError as error:
-            raise InvalidPaginationError(
-                job_id, None, "limit", input_name=input_name
-            ) from error
-        page = await results.location_input_rows(
-            job_id,
-            input_name,
-            parsed_limit,
-            query.cursor,
-            context=RowPageContext(config.api.public_base_url, http_response_budget()),
-        )
-    except ResultAccessError as error:
-        return retrieval_error_response(error)
-    return http_json_response(page)

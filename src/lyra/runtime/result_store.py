@@ -26,12 +26,6 @@ from lyra.data.arrow_tables import table_batch, table_schema
 from lyra.data.geoparquet import export_retained_geoparquet
 from lyra.runtime.input_selection import InputRows
 from lyra.runtime.location_inputs import _input_traversal
-from lyra.runtime.pagination import (
-    CandidatePage,
-    candidates,
-    validate_pagination,
-    validate_position,
-)
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.results import RunMetadata, RunResult
 from lyra.runtime.sqlite_store import DamagedDataError, MissingValueError, SQLiteStore
@@ -43,7 +37,9 @@ if TYPE_CHECKING:
     import pandas as pd
     from sqlalchemy import Connection
 
+    from lyra.contracts.outputs import OutputMetadata
     from lyra.contracts.provider_scope import DatasetScope
+    from lyra.data.results import NativeOutputs
     from lyra.runtime.location_inputs import InputSelection
     from lyra.runtime.output_selection import OutputSelection
 
@@ -132,6 +128,13 @@ class ResultStore:
                 ),
                 report=report,
             )
+
+    def job_outputs(
+        self, job_id: str, metric: str
+    ) -> tuple["NativeOutputs", dict[str, "OutputMetadata"]]:
+        """Return metric outputs and their declarations for a verified job."""
+        with self._lookup(job_id, None) as lookup:
+            return lookup.job_outputs(job_id, metric)
 
     def read_report(self, job_id: str) -> ExecutionReport:
         """Return a detached complete report without loading stored output tables.
@@ -232,34 +235,6 @@ class ResultStore:
         with self._location_input_metadata(job_id, input_name):
             pass
 
-    @contextmanager
-    def location_input_page_candidates(
-        self,
-        job_id: str,
-        input_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-    ) -> "Generator[CandidatePage]":
-        """Yield bounded candidates with an input-specific opaque continuation.
-
-        The context owns the connection and iterator, including on early exit.
-        """
-        validate_retrieval_name(input_name)
-        validate_job_id(job_id)
-        after = validate_pagination(job_id, None, limit, cursor, input_name=input_name)
-        with self._select_location_input(job_id, input_name) as selected:
-            validate_position(selected, job_id, None, after, input_name=input_name)
-            with closing(
-                candidates(
-                    selected,
-                    job_id,
-                    input_name,
-                    limit,
-                    after,
-                )
-            ) as rows:
-                yield CandidatePage(selected.registration, None, rows)
-
     def stream_location_input(self, job_id: str, input_name: str) -> "Generator[bytes]":
         """Generate Arrow with lookup/availability preflight before the first chunk.
 
@@ -282,22 +257,6 @@ class ResultStore:
         validate_retrieval_name(output_name)
         with self._lookup(job_id, output_name) as lookup:
             lookup.validate_output_metadata(job_id, output_name)
-
-    @contextmanager
-    def page_candidates(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-    ) -> "Generator[CandidatePage]":
-        """Yield internal SQL page candidates with shared lookup error handling."""
-        validate_retrieval_name(output_name)
-        with (
-            self._lookup(job_id, output_name) as lookup,
-            lookup.page_candidates(job_id, output_name, limit, cursor) as page,
-        ):
-            yield page
 
     def stream_table(self, job_id: str, output_name: str) -> "Generator[bytes]":
         """Yield a complete Arrow IPC stream, owning resources until closed.
@@ -339,7 +298,7 @@ class ResultStore:
                 sink.seek(0)
                 sink.truncate()
                 for batch in batches:
-                    writer.write_batch(table_batch(batch.rows, description, schema))
+                    writer.write_batch(table_batch(batch, description, schema))
                     yield sink.getvalue()
                     sink.seek(0)
                     sink.truncate()

@@ -5,9 +5,9 @@ import json
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
+from functools import partial
 from pathlib import Path
-from tempfile import TemporaryFile
-from typing import BinaryIO
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -15,18 +15,14 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 import sqlalchemy as sa
-from starlette.requests import ClientDisconnect
 from starlette.types import Message
 
 from lyra.contracts.errors import (
     ResultIntegrityError,
     ResultNotFoundError,
-    RowTooLargeError,
 )
 from lyra.runtime.result_store import ResultStore
 from lyra.server import table_response
-from lyra.server.response_budget import http_response_budget
-from lyra.server.result_rows import RowPageBuilder, RowPageContext
 from lyra.server.results import ResultService
 from lyra.server.table_response import TableResponse
 from tests.location_input_arrow_helpers import RetainedInput, retained_input
@@ -77,20 +73,6 @@ def test_arrow_types_geometry_and_multiple_batches(
         native,
         check_exact=True,
     )
-    if len(native) > 1024:
-        # Exercise continuation across both target fetch and Arrow batch boundaries.
-        builder = RowPageBuilder(reader, "https://lyra.test", http_response_budget())
-        rows = []
-        cursor = None
-        while True:
-            page = builder.build_location_input(
-                retained.reference, "places", 600, cursor
-            )
-            rows.extend(page.rows)
-            cursor = page.next_cursor
-            if cursor is None:
-                break
-        assert [row["location_id"] for row in rows] == native.location_id.tolist()
 
 
 @pytest.mark.parametrize(
@@ -103,10 +85,8 @@ def test_corrupt_input_geometry(
     table = retained.store.layout.tables[retained.selection.registration.key].table
     database.rows[table.name][0]["geometry"] = value
     reader = ResultStore(retained.store)
-    builder = RowPageBuilder(reader, "https://lyra.test", http_response_budget())
     for read in (
         lambda: reader.read_location_input(retained.reference, "places"),
-        lambda: builder.build_location_input(retained.reference, "places"),
         lambda: b"".join(retained.stream()),
     ):
         with pytest.raises(ResultIntegrityError) as error:
@@ -114,37 +94,11 @@ def test_corrupt_input_geometry(
         assert error.value.input_name == "places"
 
 
-def test_json_logical_encodings(retained_input: RetainedInput) -> None:
-    retained = retained_input
-    builder = RowPageBuilder(
-        ResultStore(retained.store), "https://lyra.test", http_response_budget()
-    )
-    rows = builder.build_location_input(retained.reference, "places").rows
-    assert [row["count"] for row in rows] == [str(-(2**63)), str(2**63 - 1), "12", None]
-    assert [row["flag"] for row in rows] == [True, False, True, None]
-    assert [row["ratio"] for row in rows] == [1.2345678901234567, -2.5, 0.0, None]
-    assert rows[0]["location_id"] == "0012"
-    assert rows[0]["geometry"] == "POINT (1234.123456789 -4567.987654321)"
-    assert all(set(row) == set(retained.frame.columns) for row in rows)
-
-
 @pytest.mark.parametrize(
     "retained_input", ["oversized-first", "oversized-later"], indirect=True
 )
 def test_oversized_input_remains_downloadable(retained_input: RetainedInput) -> None:
     retained = retained_input
-    builder = RowPageBuilder(
-        ResultStore(retained.store), "https://lyra.test", http_response_budget()
-    )
-    cursor = None
-    if len(retained.frame.label.iloc[0]) < 1000:
-        page = builder.build_location_input(retained.reference, "places")
-        assert len(page.rows) == 2
-        cursor = page.next_cursor
-        assert cursor is not None
-    for _ in range(2):
-        with pytest.raises(RowTooLargeError):
-            builder.build_location_input(retained.reference, "places", cursor=cursor)
     native = gpd.GeoDataFrame.from_arrow(
         pa.ipc.open_stream(b"".join(retained.stream())).read_all()
     )
@@ -207,82 +161,16 @@ def test_stream_cleanup(
     database.engine.dispose.assert_called()
 
 
-@pytest.mark.parametrize("stage", ["preflight", "batch"])
-def test_input_response_cancellation_joins_reader(
-    retained_input: RetainedInput, database: Database, stage: str
-) -> None:
-    response = TableResponse(retained_input.stream())
-    release = threading.Event()
-    database.connection.reset_mock()
-    database.engine.reset_mock()
-
-    async def run() -> None:
-        started = asyncio.Event()
-        loop = asyncio.get_running_loop()
-
-        def execute(statement: object, parameters: object = None) -> object:
-            if (stage == "batch" and "LIMIT" in str(statement)) or (
-                stage == "preflight" and "FROM final_results" in str(statement)
-            ):
-                loop.call_soon_threadsafe(started.set)
-                assert release.wait(timeout=5)
-            return database.execute(statement, parameters)
-
-        database.connection.execute.side_effect = execute
-
-        async def receive() -> Message:
-            await asyncio.Event().wait()
-            return {"type": "http.disconnect"}
-
-        async def send(_message: Message) -> None:
-            await asyncio.sleep(0)
-
-        task = asyncio.create_task(
-            response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
-        )
-        await asyncio.wait_for(started.wait(), timeout=5)
-        task.cancel()
-        await asyncio.sleep(0)
-        try:
-            assert not task.done()
-            database.engine.dispose.assert_not_called()
-        finally:
-            release.set()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    asyncio.run(run())
-    assert next(response.stream, None) is None
-    database.connection.__exit__.assert_called()
-    database.engine.dispose.assert_called()
-
-
-def test_shared_service_pages_and_missing_store(
+def test_input_lookup_and_missing_store(
     retained_input: RetainedInput, tmp_path: Path
 ) -> None:
     retained = retained_input
     jobs = Mock(spec=[])
     service = ResultService(jobs, retained.store.path)
-    context = RowPageContext("https://lyra.test", http_response_budget())
     service.validate_location_input(retained.reference, "places")
-    first = service.read_location_input_rows(
-        retained.reference, "places", 1, context=context
-    )
-    second = asyncio.run(
-        service.location_input_rows(
-            retained.reference, "places", 1, first.next_cursor, context=context
-        )
-    )
-    assert [first.rows[0]["location_id"], second.rows[0]["location_id"]] == [
-        "0012",
-        "002",
-    ]
     jobs.assert_not_called()
     missing = ResultService(jobs, tmp_path / "missing.sqlite")
     for call in (
-        lambda: missing.read_location_input_rows(
-            retained.reference, "places", context=context
-        ),
         lambda: missing.validate_location_input(retained.reference, "places"),
         lambda: next(missing.stream_location_input(retained.reference, "places")),
     ):
@@ -333,61 +221,59 @@ def test_damaged_record_returns_integrity_error_before_arrow(
     assert body["input_name"] == "places"
 
 
-@pytest.mark.parametrize("phase", ["preparation", "transmission"])
-def test_verified_download_disconnect_closes_temporary_file(
-    monkeypatch: pytest.MonkeyPatch, phase: str
+@pytest.mark.parametrize(
+    "phase", ["success", "staging-error", "transmission-disconnect"]
+)
+def test_staged_file_lifetime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
 ) -> None:
-    files = []
+    monkeypatch.setattr(
+        table_response, "TemporaryDirectory", partial(TemporaryDirectory, dir=tmp_path)
+    )
     closed = threading.Event()
-    disconnect = threading.Event()
-
-    @contextmanager
-    def temporary_file() -> Generator[BinaryIO]:
-        with TemporaryFile() as staged:
-            files.append(staged)
-            yield staged
+    messages = []
 
     def chunks() -> Generator[bytes]:
         try:
             yield b"schema"
-            if phase == "preparation":
-                assert disconnect.wait(timeout=5)
+            if phase == "staging-error":
+                raise ResultIntegrityError("a" * 32, "rows")
             yield b"batch"
         finally:
             closed.set()
 
-    monkeypatch.setattr(table_response, "TemporaryFile", temporary_file)
-    messages = []
-
     async def receive() -> Message:
-        if phase == "transmission":
-            await asyncio.Event().wait()
-        await asyncio.sleep(0)
-        disconnect.set()
+        await asyncio.Event().wait()
         return {"type": "http.disconnect"}
 
     async def send(message: Message) -> None:
         await asyncio.sleep(0)
-        messages.append(message["type"])
-        if message["type"] == "http.response.body":
-            message_text = "disconnected"
-            raise OSError(message_text)
-
-    async def run() -> None:
-        response = TableResponse(chunks())
-        with (
-            pytest.raises(ClientDisconnect)
-            if phase == "transmission"
-            else nullcontext()
+        assert closed.is_set()
+        if message["type"] == "http.response.start":
+            messages.append(message["status"])
+        if (
+            phase == "transmission-disconnect"
+            and message["type"] == "http.response.body"
         ):
-            await response(
-                {"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send
-            )
+            msg = "disconnect"
+            raise OSError(msg)
 
-    asyncio.run(run())
-    assert closed.is_set()
-    assert all(file.closed for file in files)
-    if phase == "preparation":
-        assert messages == []
-    else:
-        assert "http.response.start" in messages
+    with (
+        pytest.raises(OSError, match="disconnect")
+        if phase == "transmission-disconnect"
+        else nullcontext()
+    ):
+        asyncio.run(
+            TableResponse(chunks())(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "headers": [],
+                    "asgi": {"spec_version": "2.4"},
+                },
+                receive,
+                send,
+            )
+        )
+    assert messages == [500 if phase == "staging-error" else 200]
+    assert not list(tmp_path.iterdir())

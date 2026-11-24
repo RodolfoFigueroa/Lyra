@@ -73,6 +73,7 @@ def retained_service(
             return_value=JobObservation(
                 snapshot=JobStatusInfo(
                     job_id=key,
+                    metric="native",
                     status="succeeded",
                     created_at=now,
                     updated_at=now,

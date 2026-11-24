@@ -77,7 +77,11 @@ def test_native_results_without_authoring_or_execution() -> None:
         with patch(
             'lyra.data.inspection.serialize_outputs', side_effect=bounded_encode
         ):
-            summary = summarize_outputs(outputs)
+            from lyra.contracts.outputs import OutputMetadata, ColumnMetadata
+            column = ColumnMetadata(name="value", dtype="int64",
+                                    description="Value", unit=None)
+            schema = OutputMetadata(columns=[column])
+            summary = summarize_outputs(outputs, dict.fromkeys(outputs, schema))
         assert summary['ordinary']['metadata']['summary']['value']['maximum'] == 999
         assert summary['ordinary']['truncation']['omitted_rows'] == 995
         assert summary['ordinary']['truncation']['shortened_strings'] == 5

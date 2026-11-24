@@ -26,31 +26,24 @@ Read these fields on the returned [`ResultDescription`](../../api/lyra/contracts
 - `parameters`: records effective parameter values, including defaults
 - `outputs`: maps each output name to its scope, schema, and provider ownership
 
-With `AsyncLyraClient`, use `await client.results.describe(job_id)`. Both clients return complete metadata, automatically downloading descriptions that exceed the inspection limit.
+With `AsyncLyraClient`, use `await client.results.describe(job_id)`. Both clients fetch the complete metadata in one GET.
 
 You can still read the description after queue expiry or plugin changes while the store retains the result. Editing the returned model leaves the saved metadata intact.
 
 ### Inspect a description over HTTP
 
-Send `GET /results/{job_id}` with your agent Bearer credential to inspect the description as JSON. Both response variants return HTTP `200`:
+Send an authenticated `GET /results/{job_id}` to receive the complete description as JSON. The response includes the schema, availability, provider scope, and applicable source scope of each retained location input.
 
-| `kind` | Response contents |
-| --- | --- |
-| `complete` | The complete metadata in `description` |
-| `preview` | `job_id`, `omitted=["description"]`, and an absolute `download_url` |
+The MCP tool `lyra_describe_result` returns a preview when its response would exceed 64 KiB. Follow its `download_url` with the same agent Bearer credential to fetch this HTTP endpoint under the deployment’s public path prefix.
 
-Lyra returns a preview when the encoded complete response exceeds 65,536 bytes. The preview omits the entire description; Lyra never trims individual schemas, parameters, or outputs.
-
-Follow `download_url` with the same agent credential to retrieve the complete description. The URL preserves your deployment’s public path prefix and ends in `/results/{job_id}/description/download`. The download returns `application/json` without an inspection wrapper or inspection size limit.
-
-Use the response code to handle lookup failures on either endpoint:
+Handle lookup failures using the HTTP status and error code.
 
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `result_not_found` | `404` | No result exists for this job ID |
 | `result_integrity_error` | `500` | Required metadata or relationships are damaged |
 
-Python clients raise the corresponding [result lookup exceptions](#handle-lookup-failures). Each exception identifies the requested `job_id` and sets `output_name=None` for this whole-result lookup.
+Python clients raise the corresponding [result lookup exceptions](#handle-lookup-failures). Each exception identifies the requested `job_id` and sets `output_name=None` and `input_name=None` for this whole-result lookup.
 
 ## Read a retained table
 
@@ -289,13 +282,12 @@ Missing data for an available input raises `ResultIntegrityError`. An unknown in
 
 ### Read the same input remotely
 
-Choose an `input_name` from the saved description. With the same job ID, you can read the input as a GeoDataFrame, inspect a page, or download Arrow bytes.
+Choose an `input_name` from the saved description. With the same job ID, you can read the input as a GeoDataFrame or download Arrow bytes.
 
 ```python title="read_location_input.py"
 description = client.results.describe(job_id)
 input_description = description.location_inputs[input_name]
 frame = client.results.location_input(job_id, input_name)
-page = client.results.location_input_rows(job_id, input_name)
 client.results.download_location_input(job_id, input_name, "input.arrow")
 ```
 
@@ -303,19 +295,15 @@ With `AsyncLyraClient`, await each call. Downloads accept a string or `Path` and
 
 The Arrow stream preserves nullable types, CRS, and GeoArrow WKB geometry. Even an empty input retains the declared schema.
 
-Input pages use the same [JSON encodings and byte limits](#read-paginated-rows) as output pages. Pass each `next_cursor` with the same job ID and input name until it is `None`. Output cursors apply only to output tables. An oversized input row raises `RowTooLargeError` with an authenticated Arrow download URL.
 
 | Access | Description or input operation |
 | --- | --- |
 | HTTP description | `GET /results/{job_id}` |
-| HTTP description download | `GET /results/{job_id}/description/download` |
-| HTTP rows | `GET /results/{job_id}/location-inputs/{input_name}/rows` |
-| HTTP Arrow | `GET /results/{job_id}/location-inputs/{input_name}/download` |
+| HTTP Arrow | `GET /results/{job_id}/location-inputs/download?input_name={input_name}` |
 | MCP description | `lyra_describe_result(job_id)` |
-| MCP rows | `lyra_get_location_input_rows(job_id, input_name)` |
 | MCP Arrow link | `lyra_download_location_input(job_id, input_name)` |
 
-Use your agent Bearer credential for HTTP reads and downloads. Arrow responses use `application/vnd.apache.arrow.stream`. If a description exceeds the HTTP or MCP size limit, the preview includes `omitted=["description"]` and a download URL. Both Python clients fetch the complete JSON automatically.
+Use the agent Bearer credential for HTTP reads and downloads. Arrow responses use `application/vnd.apache.arrow.stream`.
 
 For error codes, see the [REST guide](../rest-api/) or [MCP guide](../mcp/).
 
@@ -405,74 +393,6 @@ A job-status lookup returns HTTP 404 for both unknown and expired jobs. A job-re
 Repeated downloads cannot recover missing retained data. A new submission creates another job, which may reuse cached calculations.
 
 MCP previews contain only a bounded sample. Use the authenticated [download handoff](../mcp/#4-download-the-complete-result) to obtain the full result.
-
-## Read paginated rows
-
-Use your saved `job_id` and an `output_name` from `description.outputs` to read rows in JSON pages. This loop prints every row from that output:
-
-```python title="iterate_rows.py" {3,6-8}
-cursor = None
-while True:
-    page = client.results.rows(job_id, output_name, cursor=cursor)
-    for row in page.rows:
-        print(row)
-    cursor = page.next_cursor
-    if cursor is None:
-        break
-```
-
-With `AsyncLyraClient`, await each call to `client.results.rows()`. Pass `next_cursor` back unchanged with the same job ID and output name. Continue after a short page and stop when `next_cursor` is `None`.
-
-Set `limit` to a positive integer to change the default of 100 rows per page. Each encoded response fits within 65,536 bytes, including the MCP response envelope. Duplicate rows remain separate entries across pages.
-
-Interpret cells using these JSON encodings:
-
-- **Integers**: decimal strings to preserve precision when you parse the response
-- **Floating-point values**: JSON numbers
-- **Booleans**: JSON booleans
-- **Missing cells**: `null`
-- **Strings**: unchanged text, including whitespace
-- **Geometry**: WKT in the saved CRS, including empty geometries
-
-Read schemas and provider ownership with [`results.describe()`](#read-a-retained-description); row pages contain only declared public columns. Use [`results.table()`](#read-a-retained-table) for native nullable scalar types and geometry objects.
-
-### Recover a row that exceeds the size limit
-
-If a row cannot fit in an empty page, the client raises `RowTooLargeError`. The exception identifies the result and output through `job_id` and `output_name`, and includes an absolute Arrow `download_url`.
-
-Lyra returns any preceding rows that fit in a page, along with a continuation cursor. Requesting that continuation raises the error without skipping the oversized row.
-
-Download the complete output, including the oversized row, as an [Arrow stream](#save-and-open-an-arrow-stream):
-
-```python title="recover_rows.py" {6,12-13}
-from lyra.contracts.errors import RowTooLargeError
-
-cursor = None
-try:
-    while True:
-        page = client.results.rows(job_id, output_name, cursor=cursor)
-        for row in page.rows:
-            print(row)
-        cursor = page.next_cursor
-        if cursor is None:
-            break
-except RowTooLargeError:
-    client.results.download_table(job_id, output_name, "complete.arrow")
-```
-
-Set `output_name` to a declared name and run this loop inside your client context. With the async client, await `rows()` and `download_table()`.
-
-The file `complete.arrow` contains the whole output, including rows you already printed. Process it separately to avoid counting those rows twice.
-
-You can also fetch the exception’s `download_url` with your agent Bearer credential. Both download methods remain available after job expiry.
-
-For invalid limits or cursors, the client raises `InvalidPaginationError`. Check its `parameter` attribute to identify whether you need to correct `limit` or `cursor`.
-
-### Read row pages over HTTP or MCP
-
-Send `GET /results/{job_id}/tables/{output_name}/rows` with your agent Bearer credential. Set `limit` to choose the page size. Omit `cursor` for the first page. On success, the API returns HTTP 200 with `rows` and `next_cursor`.
-
-With [MCP](../mcp/), call `lyra_get_result_rows` with `job_id` and `output_name`. Read `rows` and `next_cursor` from `structuredContent`. MCP uses the same pagination arguments and cell encodings as HTTP.
 
 ## Export retained spatial selections
 

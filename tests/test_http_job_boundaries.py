@@ -7,11 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.parse import quote
 
+import geopandas as gpd
 import httpx
 import pytest
 from fastapi import FastAPI
 from rq.exceptions import NoSuchJobError
 from rq.job import JobStatus
+from shapely import Point
 from starlette.types import Receive, Scope, Send
 
 from lyra.api import AsyncLyraClient, LyraClient
@@ -20,6 +22,7 @@ from lyra.api.client.results import validate_download
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
 from lyra.contracts.errors import ResultIntegrityError
 from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server import job_store
@@ -50,11 +53,8 @@ PATHS = [
 
 RETAINED_PATHS = [
     "/results/{job_id}",
-    "/results/{job_id}/description/download",
-    "/results/{job_id}/tables/answer/download",
-    "/results/{job_id}/tables/answer/rows",
-    "/results/{job_id}/location-inputs/places/download",
-    "/results/{job_id}/location-inputs/places/rows",
+    "/results/{job_id}/tables/download?output_name=answer",
+    "/results/{job_id}/location-inputs/download?input_name=places",
     "/executions/{job_id}/report/inspection",
     "/executions/{job_id}/report/download",
 ]
@@ -185,7 +185,7 @@ def damage_storage(app: FastAPI, monkeypatch: pytest.MonkeyPatch, damage: str) -
     elif damage == "table":
         with ResultStore.open(app.state.runtime.results.result_store_path) as reader:
             monkeypatch.setattr(
-                reader, "read_result", Mock(side_effect=ResultIntegrityError("a" * 32))
+                reader, "job_outputs", Mock(side_effect=ResultIntegrityError("a" * 32))
             )
     else:
         job.latest_result.return_value = None
@@ -483,3 +483,92 @@ async def test_native_lookup_preserves_absence_across_transports(
             "/" + endpoints.job_path(job_id), headers=headers(app, PATHS[0])
         )
         assert response.status_code == 404
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "record", [{"job_id": TEST_JOB_ID}, {}, {"job_id": "bad"}, {"job_id": "f" * 32}]
+)
+async def test_job_download_handoff_uses_only_queue_record(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, record: dict[str, str]
+) -> None:
+    job = stored(app, monkeypatch)
+    job.latest_result.return_value.return_value = record
+    monkeypatch.setattr(
+        ResultStore,
+        "open",
+        Mock(side_effect=AssertionError("handoff accessed retained storage")),
+    )
+    backend = InProcessLyraBackend(lambda: app.state.runtime)
+    handoff = download_result(
+        JobIdInput(job_id=TEST_JOB_ID),
+        backend,
+        public_api_base_url="https://example.test/api",
+    )
+    if record.get("job_id") == TEST_JOB_ID:
+        descriptor = await handoff
+        assert descriptor.lifetime.expires_in_seconds == 60
+        assert (
+            descriptor.lyra_api.url
+            == f"https://example.test/api/jobs/{TEST_JOB_ID}/result/download"
+        )
+    else:
+        with pytest.raises(ToolCallError) as failure:
+            await handoff
+        assert failure.value.code == "result_observation_error"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("suffix", ["result", "result/download"])
+async def test_json_reads_outputs_once_without_inspection(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch, suffix: str
+) -> None:
+    stored(app, monkeypatch)
+    with ResultStore.open(app.state.runtime.results.result_store_path) as reader:
+        read = Mock(wraps=reader.job_outputs)
+        monkeypatch.setattr(reader, "job_outputs", read)
+    monkeypatch.setattr(
+        "lyra.server.results.summarize_outputs",
+        Mock(side_effect=AssertionError("full JSON computed inspection")),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        response = await http.get(
+            f"/jobs/{TEST_JOB_ID}/{suffix}", headers=headers(app, PATHS[0])
+        )
+        assert response.status_code == 200
+        assert response.json()["outputs"] == {"result": [{"value": 1}]}
+    read.assert_called_once_with(TEST_JOB_ID, "root")
+
+
+@pytest.mark.anyio
+async def test_unprojectable_retained_geometry_returns_job_error(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored(app, monkeypatch)
+    frame = gpd.GeoDataFrame(geometry=[Point(20_000_000, 500_000)], crs=32633)
+    metadata = OutputMetadata(
+        geometry="geometry",
+        columns=[
+            ColumnMetadata(
+                name="geometry", dtype="geometry", description="UTM point", unit=None
+            )
+        ],
+    )
+    with ResultStore.open(app.state.runtime.results.result_store_path) as reader:
+        monkeypatch.setattr(
+            reader,
+            "job_outputs",
+            Mock(return_value=({"points": frame}, {"points": metadata})),
+        )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+        headers=headers(app, PATHS[0]),
+    ) as http:
+        for suffix in ("result", "result/download", "result/inspection"):
+            response = await http.get(f"/jobs/{TEST_JOB_ID}/{suffix}")
+            assert response.status_code == 500
+            assert response.json()["detail"]["code"] == "invalid_job_result"
+            assert response.json()["detail"]["retryable"] is False

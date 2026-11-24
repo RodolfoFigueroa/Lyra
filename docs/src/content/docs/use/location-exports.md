@@ -93,7 +93,7 @@ Check the selected table’s availability and schema before exporting:
 - Inputs with `availability="not_materialized"` raise `LocationInputUnavailableError` without triggering acquisition
 - Nonspatial outputs raise `ValueError`, even when empty; export doesn’t join provider geometry onto them
 
-Each export reads the retained values again, independently of your edits to previously retrieved frames or descriptions. Remote exports retrieve complete descriptions when inspection returns a preview. To save your edits, use the [GeoPandas writing example](#write-edited-frames-and-other-gis-formats).
+Each export reads the retained values again, independently of your edits to previously retrieved frames or descriptions. Remote exports fetch the complete description in one GET. To save your edits, use the [GeoPandas writing example](#write-edited-frames-and-other-gis-formats).
 
 ## Destination and failure behavior
 

@@ -27,7 +27,6 @@ from lyra.server.mcp.models import (
     SearchMetricsOutput,
 )
 from lyra.server.mcp.results import handoff
-from lyra.server.result_projection import project_observation
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -39,7 +38,7 @@ if TYPE_CHECKING:
         JobCreateResponse,
     )
     from lyra.contracts.reports import ExecutionReport
-    from lyra.contracts.results import ResultDescription, ResultRowPage
+    from lyra.contracts.results import ResultDescription
     from lyra.runtime.planning.discovery import Discovery
     from lyra.server.job_store import JobObservation
     from lyra.server.mcp.models import (
@@ -51,7 +50,6 @@ if TYPE_CHECKING:
         MetricDependenciesOutput,
         SearchMetricsInput,
     )
-    from lyra.server.result_rows import RowPageContext
     from lyra.server.runtime import ApplicationRuntime
 
 OPERATION_TIMEOUT_SECONDS = 30.0
@@ -79,6 +77,10 @@ class LyraMCPBackend(Protocol):
         """Read retained state, raising on broken required result relationships."""
         ...
 
+    async def inspect_result(self, observation: JobObservation) -> ResultInspection:
+        """Build the bounded projection for a queued or terminal job."""
+        ...
+
     async def describe_result(self, job_id: str) -> ResultDescription:
         """Return complete retained metadata without jobs, tables, or reports."""
         ...
@@ -87,32 +89,8 @@ class LyraMCPBackend(Protocol):
         """Return the complete retained report without jobs, tables, or plugins."""
         ...
 
-    async def rows(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        """Return a page bounded by the active transport envelope."""
-        ...
-
     async def validate_table(self, job_id: str, output_name: str) -> None:
         """Validate a retained output without materializing table values."""
-        ...
-
-    async def location_input_rows(
-        self,
-        job_id: str,
-        input_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        """Return input rows within the active transport envelope budget."""
         ...
 
     async def validate_location_input(self, job_id: str, input_name: str) -> None:
@@ -160,41 +138,9 @@ class InProcessLyraBackend(LyraMCPBackend):
         return await self.runtime().results.report(job_id)
 
     @override
-    async def rows(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        return await self.runtime().results.rows(
-            job_id,
-            output_name,
-            limit,
-            cursor,
-            context=context,
-        )
-
-    @override
     async def validate_table(self, job_id: str, output_name: str) -> None:
         await asyncio.to_thread(
             self.runtime().results.validate_table, job_id, output_name
-        )
-
-    @override
-    async def location_input_rows(
-        self,
-        job_id: str,
-        input_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-        *,
-        context: RowPageContext,
-    ) -> ResultRowPage:
-        return await self.runtime().results.location_input_rows(
-            job_id, input_name, limit, cursor, context=context
         )
 
     @override
@@ -225,6 +171,18 @@ class InProcessLyraBackend(LyraMCPBackend):
             ) from exc
         except SubmissionUnavailableError as exc:
             raise ToolCallError(_BACKEND_ERROR, str(exc), {"retryable": True}) from exc
+
+    @override
+    async def inspect_result(self, observation: JobObservation) -> ResultInspection:
+        try:
+            return await asyncio.to_thread(self.runtime().results.inspect, observation)
+        except (ValueError, TypeError) as exc:
+            code = "result_observation_error"
+            raise ToolCallError(
+                code,
+                "The retained result could not be decoded.",
+                {"job_id": observation.snapshot.job_id},
+            ) from exc
 
     @override
     async def observe_job(self, job_id: str) -> JobObservation | None:
@@ -352,9 +310,7 @@ async def run_metric(
         return RunMetricOutput(job_id=job.job_id)
 
 
-async def _observation_for_job(
-    job_id: str, backend: LyraMCPBackend
-) -> tuple[str, JobObservation]:
+async def _observation_for_job(job_id: str, backend: LyraMCPBackend) -> JobObservation:
     observation = await backend.observe_job(job_id)
     if observation is None:
         _raise_tool_error(
@@ -362,7 +318,7 @@ async def _observation_for_job(
             "This job is unknown or expired.",
             {"job_id": job_id},
         )
-    return job_id, observation
+    return observation
 
 
 async def get_job_result(
@@ -370,8 +326,8 @@ async def get_job_result(
 ) -> ResultInspection:
     """Return a detached inspection after observing retained state once."""
     async with _operation_boundary(timed=True):
-        job_id, observation = await _observation_for_job(arguments.job_id, backend)
-        return project_observation(job_id, observation).model_copy(deep=True)
+        observation = await _observation_for_job(arguments.job_id, backend)
+        return (await backend.inspect_result(observation)).model_copy(deep=True)
 
 
 async def download_result(
@@ -379,7 +335,8 @@ async def download_result(
 ) -> DownloadResultOutput:
     """Return an authenticated download handoff without running the job."""
     async with _operation_boundary(timed=True):
-        job_id, observation = await _observation_for_job(arguments.job_id, backend)
+        job_id = arguments.job_id
+        observation = await _observation_for_job(job_id, backend)
         status = observation.snapshot.status
         details: JsonObject = {"job_id": job_id}
         if status in {"queued", "running"}:

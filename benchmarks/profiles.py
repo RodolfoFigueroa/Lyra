@@ -22,4 +22,4 @@ RETAINED_INPUT_BENCH = r"^(retained_inputs|retained_input_scaling)\."
 """Retained geographic inputs: execution, storage growth, metadata and values."""
 
 RETAINED_INPUT_SCALING_BENCH = r"^retained_input_scaling\."
-"""Shared-input scaling, isolated correspondences, encoded pages and memory."""
+"""Shared-input scaling, isolated correspondences, reads and memory."""

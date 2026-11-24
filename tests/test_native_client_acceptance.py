@@ -416,39 +416,3 @@ def test_run_rejects_unknown_options_before_submission(
             client_runtime.run(client.aclose())
         else:
             client.close()
-
-
-def test_native_row_arguments_and_cells(
-    native_factory: Callable[
-        [Callable[[httpx.Request], httpx.Response]], type[LyraClient | AsyncLyraClient]
-    ],
-    client_runtime: ClientRuntime,
-) -> None:
-    requests = []
-    payload = {
-        "rows": [{"integer": "9007199254740993", "geometry": "POINT EMPTY"}],
-        "next_cursor": None,
-    }
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert request.headers["authorization"] == "Bearer consumer"
-        return httpx.Response(200, json=payload)
-
-    client = native_factory(respond)("example.test/base", agent_api_key="consumer")
-    try:
-        for cursor in (None, "opaque+/="):
-            operation = client.results.rows("a" * 32, "rows", limit=2, cursor=cursor)
-            page = (
-                client_runtime.run(operation)
-                if inspect.isawaitable(operation)
-                else operation
-            )
-            assert page.model_dump() == payload
-            assert requests[-1].url.params.get("cursor") == cursor
-            assert requests[-1].url.params["limit"] == "2"
-    finally:
-        if isinstance(client, AsyncLyraClient):
-            client_runtime.run(client.aclose())
-        else:
-            client.close()

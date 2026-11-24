@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from redis import Redis
 
     from lyra.contracts.config import JobsConfig
-    from lyra.runtime.results import RunResult
+    from lyra.contracts.outputs import OutputMetadata
 
 
 class StoredResult(StrictBaseModel):
@@ -45,7 +45,7 @@ class JobObservation:
 
     snapshot: JobStatusInfo
     inspection: dict[str, Any] | None = None
-    retained_result: "RunResult | None" = None
+    declarations: dict[str, "OutputMetadata"] = field(default_factory=dict)
     provenance: JobRunProvenance | None = None
     lifetime: ResultLifetime = field(default_factory=ResultLifetime)
 

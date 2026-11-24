@@ -22,7 +22,6 @@ from lyra.contracts.reports import ExecutionReportInspection
 from lyra.contracts.results import (
     LocationInputDownload,
     ResultDescriptionInspection,
-    ResultRowPage,
     TableDownload,
 )
 from lyra.contracts.retrieval_paths import (
@@ -39,10 +38,8 @@ from lyra.server.mcp.models import (
     DownloadResultOutput,
     DownloadTableInput,
     GetJobResultInput,
-    GetLocationInputRowsInput,
     GetMetricDependenciesInput,
     GetMetricInput,
-    GetResultRowsInput,
     InspectionOutput,
     InspectReportInput,
     JobIdInput,
@@ -55,12 +52,11 @@ from lyra.server.mcp.models import (
 )
 from lyra.server.mcp.serialization import (
     mcp_response_budget,
+    mcp_response_size,
     retrieval_error_result,
     serialize_result,
-    serialized_size,
 )
 from lyra.server.response_budget import ResponseBudget
-from lyra.server.result_rows import RowPageContext
 from lyra.server.results import inspect_description, inspect_report
 
 _RAW_ARGUMENTS: ContextVar[dict[str, Any]] = ContextVar("mcp_raw_arguments")
@@ -118,18 +114,17 @@ class LyraFastMCP(FastMCP):
         try:
             return await super().call_tool(name, arguments)
         except ToolError as exc:
+            request_id = self.get_context().request_context.request_id
             if isinstance(exc.__cause__, ResultAccessError):
-                return retrieval_error_result(
-                    exc.__cause__, self.get_context().request_context.request_id
-                )
+                return retrieval_error_result(exc.__cause__, request_id)
             if isinstance(exc.__cause__, tools.ToolCallError):
                 return serialize_result(
-                    exc.__cause__.to_payload(), is_error=True, bounded=True
+                    exc.__cause__.to_payload(), request_id, is_error=True
                 )
             error = CallToolResult(
                 content=[TextContent(type="text", text=str(exc))], isError=True
             )
-            if serialized_size(error) > MAX_INSPECTION_BYTES:
+            if mcp_response_size(error, request_id) > MAX_INSPECTION_BYTES:
                 return serialize_result(
                     {
                         "error": {
@@ -137,6 +132,7 @@ class LyraFastMCP(FastMCP):
                             "message": "The tool error exceeds the size limit.",
                         }
                     },
+                    request_id,
                     is_error=True,
                 )
             raise
@@ -191,8 +187,7 @@ SERVER_INSTRUCTIONS = (
     "Use lyra_download_table with job_id and output_name for an authenticated "
     "Arrow IPC stream download_url. Read the link from structuredContent; creating "
     "the link validates the retained output without materializing its rows. "
-    "Use lyra_get_location_input_rows with job_id and input_name for bounded "
-    "retained input pages, and lyra_download_location_input for an authenticated "
+    "Use lyra_download_location_input with job_id and input_name for an authenticated "
     "Arrow link. Descriptions include every location input and its availability. "
     "Unavailable inputs return location_input_unavailable; reads never acquire data. "
     "Administrative plugin, "
@@ -380,7 +375,8 @@ def create_mcp_app(
         del job_id
         result = await tools.get_job_result(_arguments(GetJobResultInput), backend)
         response = serialize_result(
-            {"result": result.model_dump(mode="json")}, bounded=True
+            {"result": result.model_dump(mode="json")},
+            server.get_context().request_context.request_id,
         )
         if response.isError:
             code = "result_response_too_large"
@@ -420,34 +416,6 @@ def _register_retained_tools(
     """Register typed durable inspections with SDK response sizing."""
 
     @server.tool(annotations=read_only)
-    async def lyra_get_result_rows(
-        job_id: JobId,
-        output_name: Annotated[str, GetResultRowsInput.model_fields["output_name"]],
-        limit: Annotated[int, GetResultRowsInput.model_fields["limit"]] = 100,
-        cursor: Annotated[str | None, GetResultRowsInput.model_fields["cursor"]] = None,
-    ) -> ResultRowPage:
-        """Read retained rows with opaque continuation and bounded response bytes.
-
-        Integer cells are decimal strings and geometry cells are WKT strings.
-        Continue with next_cursor until null, even after a short page. For
-        row_too_large, follow the authenticated Arrow download_url.
-
-        Returns:
-            Rows and next_cursor directly in structuredContent.
-        """
-        del job_id, output_name, limit, cursor
-        arguments = _arguments(GetResultRowsInput)
-        return await backend.rows(
-            arguments.job_id,
-            arguments.output_name,
-            arguments.limit,
-            arguments.cursor,
-            context=RowPageContext(
-                public_api_base_url, server.retrieval_budget("lyra_get_result_rows")
-            ),
-        )
-
-    @server.tool(annotations=read_only)
     async def lyra_download_table(
         job_id: JobId,
         output_name: Annotated[str, DownloadTableInput.model_fields["output_name"]],
@@ -474,35 +442,6 @@ def _register_retained_tools(
         )
         server.retrieval_budget("lyra_download_table").require_fits(link)
         return link
-
-    @server.tool(annotations=read_only)
-    async def lyra_get_location_input_rows(
-        job_id: JobId,
-        input_name: Annotated[
-            str, GetLocationInputRowsInput.model_fields["input_name"]
-        ],
-        limit: Annotated[int, GetLocationInputRowsInput.model_fields["limit"]] = 100,
-        cursor: Annotated[
-            str | None, GetLocationInputRowsInput.model_fields["cursor"]
-        ] = None,
-    ) -> ResultRowPage:
-        """Read retained root location-input rows within the complete response budget.
-
-        Returns:
-            Complete rows and next_cursor directly in structuredContent.
-        """
-        del job_id, input_name, limit, cursor
-        arguments = _arguments(GetLocationInputRowsInput)
-        return await backend.location_input_rows(
-            arguments.job_id,
-            arguments.input_name,
-            arguments.limit,
-            arguments.cursor,
-            context=RowPageContext(
-                public_api_base_url,
-                server.retrieval_budget("lyra_get_location_input_rows"),
-            ),
-        )
 
     @server.tool(annotations=read_only)
     async def lyra_download_location_input(

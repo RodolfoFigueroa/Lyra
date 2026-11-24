@@ -37,18 +37,14 @@ from lyra.contracts.observability import (
 from lyra.contracts.reports import ExecutionReport, ExecutionReportInspection
 from lyra.contracts.results import (
     ResultDescription,
-    ResultDescriptionInspection,
-    ResultRowPage,
 )
 from lyra.contracts.retrieval_errors import decode_error
 from lyra.contracts.retrieval_paths import (
     location_input_download_path,
-    location_input_rows_path,
     report_download_path,
     report_inspection_path,
     result_description_path,
     table_download_path,
-    table_rows_path,
 )
 
 if TYPE_CHECKING:
@@ -422,23 +418,12 @@ def get_result_inspection(job_id: str) -> RequestSpec[ResultInspection]:
     )
 
 
-def get_result_description(job_id: str) -> RequestSpec[ResultDescriptionInspection]:
-    """Return the bounded retained-description inspection request."""
+def get_result_description(job_id: str) -> RequestSpec[ResultDescription]:
+    """Return the complete retained-description request."""
     return RequestSpec(
         "GET",
         result_description_path(job_id),
         "describe result",
-        TypeAdapter(ResultDescriptionInspection),
-        require_json=True,
-    )
-
-
-def download_result_description(download_url: str) -> RequestSpec[ResultDescription]:
-    """Return a request that follows and validates the complete description URL."""
-    return RequestSpec(
-        "GET",
-        download_url,
-        "download result description",
         TypeAdapter(ResultDescription),
         require_json=True,
     )
@@ -498,45 +483,5 @@ def get_report_inspection(job_id: str) -> RequestSpec[ExecutionReportInspection]
         report_inspection_path(job_id),
         "inspect report",
         TypeAdapter(ExecutionReportInspection),
-        require_json=True,
-    )
-
-
-def get_result_rows(
-    job_id: str,
-    output_name: str,
-    limit: int = 100,
-    cursor: str | None = None,
-) -> RequestSpec[ResultRowPage]:
-    """Return the shared row request, omitting an absent continuation cursor."""
-    params: dict[str, Any] = {"limit": limit}
-    if cursor is not None:
-        params["cursor"] = cursor
-    return RequestSpec(
-        "GET",
-        table_rows_path(job_id, output_name),
-        "get result rows",
-        TypeAdapter(ResultRowPage),
-        params=params,
-        require_json=True,
-    )
-
-
-def get_location_input_rows(
-    job_id: str,
-    input_name: str,
-    limit: int = 100,
-    cursor: str | None = None,
-) -> RequestSpec[ResultRowPage]:
-    """Return a bounded input page request with an optional continuation cursor."""
-    params: dict[str, Any] = {"limit": limit}
-    if cursor is not None:
-        params["cursor"] = cursor
-    return RequestSpec(
-        "GET",
-        location_input_rows_path(job_id, input_name),
-        "get location input rows",
-        TypeAdapter(ResultRowPage),
-        params=params,
         require_json=True,
     )

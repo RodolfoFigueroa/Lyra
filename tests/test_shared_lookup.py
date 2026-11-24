@@ -152,10 +152,12 @@ def test_required_retained_relationships(
 ) -> None:
     service, _ = retained
     with ResultStore.open(service.result_store_path) as reader:
-        monkeypatch.setattr(reader, "read_result", Mock(side_effect=error("a" * 32)))
-    assert service.jobs.read_status(TEST_JOB_ID).status == "succeeded"
-    with pytest.raises(InvalidJobResultError):
-        service.read_observation(TEST_JOB_ID)
+        monkeypatch.setattr(reader, "job_outputs", Mock(side_effect=error("a" * 32)))
+    observation = service.read_observation(TEST_JOB_ID)
+    assert observation is not None
+    for read in (service.read_result, service.inspect):
+        with pytest.raises(InvalidJobResultError):
+            read(observation)
 
 
 @pytest.mark.parametrize("status", [None, JobStatus.CANCELED, JobStatus.STOPPED])

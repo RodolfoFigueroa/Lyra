@@ -404,7 +404,6 @@
         "Retained description preview",
         "Retained report preview",
         "Retained Arrow download",
-        "Retained row pages",
         "Retained location-input request, download fields, and unavailable-input payload"
       ],
       "openQuestions": []
@@ -545,7 +544,6 @@
         "Inspect a retained execution report",
         "Download a retained table and open it with PyArrow or GeoPandas",
         "Handle unavailable job results",
-        "Read retained row pages and recover oversized rows",
         "Inspect calculation relationships",
         "Read retained location inputs, download Arrow streams, and handle unavailable inputs"
       ],
@@ -563,7 +561,6 @@
         "Choose whether to submit, wait, or save",
         "Read retained metadata",
         "Reconnect with the job ID and save native tables",
-        "Iterate retained rows and recover oversized rows",
         "Read, page through, and save retained location inputs",
         "Retrieve execution reports",
         "Preview and retrieve results",
@@ -596,8 +593,7 @@
       "goal": "Retrieve results and reports through supported interfaces and handle lookup failures",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
-        "Read a retained description and handle complete or preview HTTP responses",
-        "Traverse row pages, interpret cell encodings, and recover oversized rows through Arrow downloads",
+        "Read a complete retained description over HTTP",
         "Read an execution report, choose an inspection or complete download, and handle lookup failures",
         "Inspect before downloading",
         "Reopen reports and results with the store path and job ID",

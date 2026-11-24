@@ -16,7 +16,7 @@ from lyra.contracts.errors import (
     ResultIntegrityError,
     ResultNotFoundError,
 )
-from lyra.contracts.results import ResultDescription, ResultDescriptionPreview
+from lyra.contracts.results import ResultDescription
 from lyra.contracts.retrieval_errors import error_payload, error_status
 from tests.result_description_helpers import location_descriptions
 
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _REFERENCE = "a" * 32
-_DOWNLOAD = f"https://example.test/api/results/{_REFERENCE}/description/download"
 
 
 @pytest.fixture(params=["sync", "async"])
@@ -63,17 +62,6 @@ def describe_client(
     return run
 
 
-def _preview() -> httpx.Response:
-    return httpx.Response(
-        200,
-        json=ResultDescriptionPreview(
-            job_id=_REFERENCE,
-            download_url=_DOWNLOAD,
-        ).model_dump(mode="json"),
-    )
-
-
-@pytest.mark.parametrize("preview", [False, True])
 @pytest.mark.parametrize(
     "error",
     [
@@ -84,11 +72,9 @@ def _preview() -> httpx.Response:
 def test_describe_preserves_whole_result_errors(
     describe_client: Callable[[list[httpx.Response]], ResultDescription],
     error: ResultAccessError,
-    *,
-    preview: bool,
 ) -> None:
     payload = error_payload(error)
-    responses = [_preview()] if preview else []
+    responses = []
     responses.append(
         httpx.Response(error_status(payload), json={"detail": payload.model_dump()})
     )
@@ -98,15 +84,12 @@ def test_describe_preserves_whole_result_errors(
     assert not responses
 
 
-@pytest.mark.parametrize("preview", [False, True])
 @pytest.mark.parametrize("failure", ["model", "json", "media_type"])
 def test_describe_validates_complete_model(
     describe_client: Callable[[list[httpx.Response]], ResultDescription],
     failure: str,
-    *,
-    preview: bool,
 ) -> None:
-    malformed = {"kind": "complete", "description": {}} if not preview else {}
+    malformed = {}
     response = (
         httpx.Response(200, json=malformed)
         if failure == "model"
@@ -116,17 +99,14 @@ def test_describe_validates_complete_model(
         if failure == "json"
         else httpx.Response(200, text="not JSON")
     )
-    responses = [_preview(), response] if preview else [response]
+    responses = [response]
     with pytest.raises(DownloadError):
         describe_client(responses)
     assert not responses
 
 
-@pytest.mark.parametrize("preview", [False, True])
 def test_describe_returns_complete_independent_location_metadata(
     describe_client: Callable[[list[httpx.Response]], ResultDescription],
-    *,
-    preview: bool,
 ) -> None:
     expected = ResultDescription(
         job_id=_REFERENCE,
@@ -138,13 +118,11 @@ def test_describe_returns_complete_independent_location_metadata(
 
     def read() -> ResultDescription:
         payload = expected.model_dump(mode="json")
-        responses = [_preview()] if preview else []
+        responses = []
         responses.append(
             httpx.Response(
                 200,
-                json=payload
-                if preview
-                else {"kind": "complete", "description": payload},
+                json=payload,
             )
         )
         description = describe_client(responses)

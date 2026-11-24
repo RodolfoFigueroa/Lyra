@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import heapq
-from bisect import bisect_right
 from contextlib import ExitStack, closing
 from dataclasses import dataclass
 from itertools import groupby, islice
@@ -14,7 +13,7 @@ import sqlalchemy as sa
 from lyra.contracts.provider_scope import RecordReferences
 from lyra.data.relational import frame_from_rows
 from lyra.runtime.operation_pairs import pair_completion, validate_pair_counts
-from lyra.runtime.output_selection import RowAddress, RowBatch, _read
+from lyra.runtime.output_selection import _read
 from lyra.runtime.sqlite_store import DamagedDataError, Header
 
 if TYPE_CHECKING:
@@ -22,6 +21,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from lyra.data.relational import Cell
     from lyra.runtime.location_inputs import InputSelection, OperationSelection
     from lyra.runtime.sqlite_schema import DataTable, Registration
     from lyra.runtime.sqlite_store import SQLiteStore
@@ -45,29 +45,17 @@ class PairRows:
             query = query.where(table.location_id.in_(self.operation.targets))
         return query
 
-    def pairs(
-        self, connection: sa.Connection, size: int, after: tuple[str | int, ...] | None
-    ) -> Generator[tuple[str, str]]:
-        """Yield bounded keyset batches; no SQL cursor survives a yield."""
+    def pairs(self, connection: sa.Connection, size: int) -> Generator[tuple[str, str]]:
+        """Yield ordered pairs from bounded cursor partitions."""
         source, target = (
             self.data.table.c.source_location_id,
             self.data.table.c.location_id,
         )
-        while True:
-            query = self.select(source, target).order_by(source, target).limit(size)
-            if after is not None:
-                query = query.where(
-                    sa.or_(
-                        source > after[0],
-                        sa.and_(source == after[0], target > after[1]),
-                    )
-                )
-            rows = _read(connection, query)
-            for row in rows:
-                yield row["source_location_id"], row["location_id"]
-            if len(rows) < size:
-                return
-            after = (rows[-1]["source_location_id"], rows[-1]["location_id"])
+        query = self.select(source, target).order_by(source, target)
+        with closing(connection.execute(query)) as cursor:
+            for rows in cursor.mappings().partitions(size):
+                for row in rows:
+                    yield row["source_location_id"], row["location_id"]
 
 
 def prepare_pairs(
@@ -76,7 +64,7 @@ def prepare_pairs(
     """Validate completion and selected pair counts without loading target values.
 
     Returns:
-        A restricted reader with an indexed private continuation.
+        An ordered reader for the selected pairs.
     """
     saved = store.header(connection, operation.header.value_key, required=True)
     data, counts = pair_completion(store, connection, operation.header, saved)
@@ -134,46 +122,14 @@ class InputRows:
         """Captured logical forwarding or provider schema."""
         return self.selections[0].registration
 
-    def contains(self, address: RowAddress) -> bool:
-        """Return whether a private cursor identifies a selected record or pair."""
-        if address.computation != 0 or any(type(key) is not str for key in address.key):
-            return False
+    def _members(self, size: int) -> Generator[tuple[str, ...]]:
         if self.selections[0].description.kind == "provider":
-            return len(address.key) == 1 and address.key[0] in self.records
-        if len(address.key) != 2:
-            return False
-        return any(
-            _read(
-                self.connection,
-                operation.select(operation.data.table.c.location_id)
-                .where(
-                    operation.data.table.c.source_location_id == address.key[0],
-                    operation.data.table.c.location_id == address.key[1],
-                )
-                .limit(1),
-            )
-            for operation in self.operations
-        )
-
-    def _members(
-        self, size: int, after: RowAddress | None
-    ) -> Generator[tuple[str, ...]]:
-        if self.selections[0].description.kind == "provider":
-            start = (
-                0 if after is None else bisect_right(self.records, str(after.key[0]))
-            )
-            for index in range(start, len(self.records)):
-                yield (self.records[index],)
+            for record in self.records:
+                yield (record,)
             return
         with ExitStack() as stack:
             streams = [
-                stack.enter_context(
-                    closing(
-                        operation.pairs(
-                            self.connection, size, None if after is None else after.key
-                        )
-                    )
-                )
+                stack.enter_context(closing(operation.pairs(self.connection, size)))
                 for operation in self.operations
             ]
             for pair, _ in groupby(heapq.merge(*streams)):
@@ -246,58 +202,38 @@ class InputRows:
 
     def validate_records(self) -> None:
         """Verify each selected provider row using only its retained identity."""
-        with closing(self._members(1024, None)) as members:
+        with closing(self._members(1024)) as members:
             while batch := list(islice(members, 1024)):
                 self._records(batch, identities_only=True)
 
     def batches(
-        self,
-        batch_size: int = 1024,
-        *,
-        after: RowAddress | None = None,
-        limit: int | None = None,
-    ) -> Generator[RowBatch]:
-        """Yield bounded joined cells, releasing readers on failure or early close.
+        self, batch_size: int = 1024
+    ) -> Generator[tuple[tuple[Cell, ...], ...]]:
+        """Yield bounded joined cells.
 
         Raises:
             ValueError: If the batch size is not a positive integer.
         """
-        if (
-            isinstance(batch_size, bool)
-            or not isinstance(batch_size, int)
-            or batch_size < 1
-        ):
+        if type(batch_size) is not int or batch_size < 1:
             msg = "Batch size must be a positive integer"
             raise ValueError(msg)
-        size = batch_size if limit is None else min(batch_size, limit)
-        remaining = limit
-        with closing(self._members(size, after)) as members:
-            while remaining is None or remaining > 0:
-                selected = list(
-                    islice(members, size if remaining is None else min(size, remaining))
-                )
-                if not selected:
-                    return
+        with closing(self._members(batch_size)) as members:
+            while selected := list(islice(members, batch_size)):
                 records = self._records(selected)
-                yield RowBatch(
+                yield tuple(
                     tuple(
-                        tuple(
-                            member[0]
-                            if column.name == "source_location_id"
-                            else records[member[-1]][column.name]
-                            for column in self.registration.columns
-                        )
-                        for member in selected
-                    ),
-                    tuple(RowAddress(0, member) for member in selected),
+                        member[0]
+                        if column.name == "source_location_id"
+                        else records[member[-1]][column.name]
+                        for column in self.registration.columns
+                    )
+                    for member in selected
                 )
-                if remaining is not None:
-                    remaining -= len(selected)
 
     def frame(self) -> pd.DataFrame:
         """Return a detached native frame using the same cells as Arrow streams."""
         with closing(self.batches()) as batches:
             return frame_from_rows(
-                (row for batch in batches for row in batch.rows),
+                (row for batch in batches for row in batch),
                 self.registration.storage_description(),
             )

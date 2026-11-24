@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    "stage", ["request", "rows", "download", "run_to_file", "callback", "sleep"]
+    "stage", ["request", "describe", "download", "run_to_file", "callback", "sleep"]
 )
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_cancellation_settles_in_caller(
@@ -42,8 +42,8 @@ def test_cancellation_settles_in_caller(
                 operation = client.jobs.run_to_file("metric", path=tmp_path / "result")
             else:
                 handle = await client.jobs.submit("metric")
-                if stage == "rows":
-                    operation = client.results.rows("a" * 32, "rows")
+                if stage == "describe":
+                    operation = client.results.describe("a" * 32)
                 elif stage == "download":
                     operation = client.results.download(
                         handle.job_id, tmp_path / "result"
@@ -172,9 +172,9 @@ def test_atomic_download_cancellation_preserves_destination(
             route = (
                 "/report/download"
                 if boundary == "transport"
-                else f"/results/{'a' * 32}/tables/rows/download"
+                else f"/results/{'a' * 32}/tables/download"
                 if boundary == "tables"
-                else f"/results/{'a' * 32}/location-inputs/rows/download"
+                else f"/results/{'a' * 32}/location-inputs/download"
                 if boundary == "inputs"
                 else f"/executions/{'a' * 32}/report/download"
             )
@@ -214,7 +214,7 @@ def test_table_read_cancellation_settles_in_caller(
             assert harness.cleaned
             assert harness.tasks == [task, task]
             assert harness.calls == [
-                ("GET", f"/results/{'a' * 32}/{interface}/rows/download")
+                ("GET", f"/results/{'a' * 32}/{interface}/download")
             ]
 
     asyncio.run(exercise())

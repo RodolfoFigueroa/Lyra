@@ -86,6 +86,10 @@ class Database:
         elif isinstance(statement, sa.sql.Select):
             rows = select_rows(statement, self.rows)
             result.mappings.return_value.__iter__.return_value = iter(deepcopy(rows))
+            result.mappings.return_value.partitions.side_effect = lambda size: (
+                deepcopy(rows[start : start + size])
+                for start in range(0, len(rows), size)
+            )
             result.mappings.return_value.one_or_none.return_value = (
                 deepcopy(rows[0]) if rows else None
             )

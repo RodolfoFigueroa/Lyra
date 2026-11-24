@@ -280,7 +280,7 @@ When the complete description exceeds the inspection limit, the tool returns a p
     "omitted": [
       "description"
     ],
-    "download_url": "https://lyra.example/api/results/12345678901234567890123456789012/description/download"
+    "download_url": "https://lyra.example/api/results/12345678901234567890123456789012"
   }
 }
 ```
@@ -339,69 +339,19 @@ The tool returns a link, with no Arrow data in the MCP envelope:
 {
   "job_id": "12345678901234567890123456789012",
   "output_name": "maintenance",
-  "download_url": "https://lyra.example/api/results/12345678901234567890123456789012/tables/maintenance/download"
+  "download_url": "https://lyra.example/api/results/12345678901234567890123456789012/tables/download?output_name=maintenance"
 }
 ```
 
 Fetch it with your agent Bearer credential. The content type is `application/vnd.apache.arrow.stream`; use ordinary PyArrow or GeoPandas readers for the saved stream.
 
-## Retained row pages
-
-To request the first page, omit `cursor`:
-
-```json
-{
-  "name": "lyra_get_result_rows",
-  "arguments": {
-    "job_id": "12345678901234567890123456789012",
-    "output_name": "maintenance"
-  }
-}
-```
-
-The last page sets `next_cursor` to `null`:
-
-```json
-{
-  "rows": [
-    {
-      "location_id": "street-1",
-      "row_key": "street-1",
-      "length_m": 100.0,
-      "maintenance_length_m": 100.0
-    }
-  ],
-  "next_cursor": null
-}
-```
-
-For a continuing page, pass its opaque `next_cursor` unchanged with the same result and output. Every declared column is present, including null cells. Integers are decimal strings even when small; geometry uses WKT in the saved CRS.
-
-An oversized row produces `isError: true` with this structured error. The request cursor remains at that row:
-
-```json
-{
-  "error": {
-    "code": "row_too_large",
-    "message": "The next row exceeds the response size limit.",
-    "job_id": "12345678901234567890123456789012",
-    "output_name": "maintenance",
-    "download_url": "https://lyra.example/api/results/12345678901234567890123456789012/tables/maintenance/download"
-  }
-}
-```
-
-Download the complete Arrow table with the same credential. It includes rows already returned in previous pages. Missing or wrongly typed arguments instead produce SDK validation errors in text content.
-
 ## Retained location inputs
 
-Location-input tools return saved rows or authenticated Arrow download URLs for a completed result. Choose `input_name` from the result description’s `location_inputs`.
-
-Pass the job ID and input name to read the first page of saved records. The default page limit is 100 rows.
+Choose an available `input_name` from the result description and request its Arrow download link.
 
 ```json {2,4-5}
 {
-  "name": "lyra_get_location_input_rows",
+  "name": "lyra_download_location_input",
   "arguments": {
     "job_id": "12345678901234567890123456789012",
     "input_name": "streets"
@@ -409,9 +359,7 @@ Pass the job ID and input name to read the first page of saved records. The defa
 }
 ```
 
-The response includes `rows` and `next_cursor` directly in `structuredContent`. Input rows contain provider attributes and geometry, with no metric `row_key`. Correspondence rows map immediate source records to target records through `source_location_id` and `location_id`.
-
-`lyra_download_location_input` accepts the same `job_id` and `input_name` without pagination arguments. Its response contains these fields directly in `structuredContent`:
+The response includes these fields in `structuredContent`.
 
 | Field | Value |
 | --- | --- |
@@ -434,7 +382,4 @@ For an unavailable input, the tool sets `isError` to `true` and returns this pay
 }
 ```
 
-Branch on the code and identifiers, independently of message wording. Other input lookup errors include `output_name=null`, with additional fields for these failures:
-
-- `invalid_pagination`: `parameter` identifies the invalid limit or cursor
-- `row_too_large`: `download_url` identifies the complete authenticated Arrow stream
+For `result_not_found` and `result_integrity_error`, the error includes the requested input name and `output_name=null`.

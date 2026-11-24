@@ -1,7 +1,6 @@
 """Errors raised while defining, preparing, and validating plugin computations."""
 
 from collections.abc import Sequence
-from typing import Literal
 
 from lyra.contracts.types import JsonObject
 
@@ -160,38 +159,6 @@ class ResultNotFoundError(_ResultLookupError):
 
 class ResultIntegrityError(_ResultLookupError):
     """Required retained data or relationships are damaged."""
-
-
-class InvalidPaginationError(_ResultLookupError):
-    """The cursor or limit is invalid for the requested retained table."""
-
-    def __init__(
-        self,
-        job_id: object,
-        output_name: str | None,
-        parameter: Literal["cursor", "limit"],
-        *,
-        input_name: str | None = None,
-    ) -> None:
-        """Capture the requested output and invalid pagination parameter."""
-        self.parameter = parameter
-        super().__init__(job_id, output_name, input_name=input_name)
-
-
-class RowTooLargeError(_ResultLookupError):
-    """The next complete row exceeds the JSON response budget."""
-
-    def __init__(
-        self,
-        job_id: object,
-        output_name: str | None,
-        download_url: str,
-        *,
-        input_name: str | None = None,
-    ) -> None:
-        """Capture the output and authenticated complete-table fallback."""
-        self.download_url = download_url
-        super().__init__(job_id, output_name, input_name=input_name)
 
 
 class LocationInputUnavailableError(ResultAccessError):

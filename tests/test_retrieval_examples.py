@@ -23,7 +23,6 @@ from lyra.server.main import create_app
 from lyra.server.results import ResultService
 from lyra.server.runtime import ApplicationRuntime
 from test_support.publication import publish_result
-from tests.arrow_download_helpers import Retained, retained
 from tests.cache_helpers import SCHEMA
 from tests.config_helpers import api_credentials, load_test_config
 from tests.location_input_arrow_helpers import RetainedInput, retained_input
@@ -37,7 +36,7 @@ from tests.tutorial_helpers import published_python
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["database", "native_api", "retained", "retained_input"]
+__all__ = ["database", "native_api", "retained_input"]
 pytestmark = pytest.mark.usefixtures("database")
 
 
@@ -81,44 +80,6 @@ def test_reconnect_example(
 
 
 @pytest.mark.parametrize("native_api", ["sync"], indirect=True)
-@pytest.mark.parametrize(
-    ("retained", "filename"),
-    [
-        ((False, "populated"), "iterate_rows.py"),
-        ((False, "empty"), "iterate_rows.py"),
-        ((False, "oversized-first"), "recover_rows.py"),
-        ((False, "oversized-after"), "recover_rows.py"),
-    ],
-    indirect=["retained"],
-)
-def test_row_examples(
-    retained: Retained,
-    native_api: NativeAPI,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    filename: str,
-) -> None:
-    path = tmp_path / filename
-    path.write_text(published_python("use/results.md", filename))
-    monkeypatch.chdir(tmp_path)
-    with native_api.serve(retained.public, monkeypatch), native_api.connect() as client:
-        values = runpy.run_path(
-            str(path),
-            init_globals={
-                "client": client,
-                "job_id": retained.reference,
-                "output_name": "rows",
-            },
-        )
-    if filename == "recover_rows.py":
-        with pa.ipc.open_stream(tmp_path / "complete.arrow") as reader:
-            pd.testing.assert_frame_equal(reader.read_all().to_pandas(), retained.frame)
-    else:
-        assert values["cursor"] is None
-        assert len(values["page"].rows) == len(retained.frame)
-
-
-@pytest.mark.parametrize("native_api", ["sync"], indirect=True)
 @pytest.mark.parametrize("retained_input", ["populated", "empty"], indirect=True)
 def test_location_input_example(
     retained_input: RetainedInput,
@@ -149,7 +110,6 @@ def test_location_input_example(
             },
         )
     pd.testing.assert_frame_equal(values["frame"], retained_input.frame)
-    assert len(values["page"].rows) == len(retained_input.frame)
     with pa.ipc.open_stream(tmp_path / "input.arrow") as reader:
         assert reader.read_all().num_rows == len(retained_input.frame)
 

@@ -34,24 +34,10 @@ class DownloadTableInput(DescribeResultInput):
     output_name: RetrievalName
 
 
-class GetResultRowsInput(DownloadTableInput):
-    """Typed pagination arguments; semantic validation belongs to the pager."""
-
-    limit: int = Field(default=100, strict=True)
-    cursor: str | None = Field(default=None, strict=True)
-
-
 class DownloadLocationInputInput(DescribeResultInput):
     """Exact retained root location-input name."""
 
     input_name: RetrievalName
-
-
-class GetLocationInputRowsInput(DownloadLocationInputInput):
-    """Typed input pagination arguments with domain-owned semantic validation."""
-
-    limit: int = Field(default=100, strict=True)
-    cursor: str | None = Field(default=None, strict=True)
 
 
 class MCPContractModel(BaseModel):

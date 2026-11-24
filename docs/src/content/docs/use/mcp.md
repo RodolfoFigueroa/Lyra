@@ -81,9 +81,9 @@ The tool call succeeds (`isError: false`) even when it reports a failed job. Che
 
 Unknown IDs fail the job during execution. The job also fails if a provider cannot supply the data revision captured when Lyra accepted it. A conversion that returns no locations produces a valid empty selection, and execution continues.
 
-Inspection groups declarations, column summaries, and previews by output name. Across all outputs, the preview includes up to five rows and twenty columns. Use the same `job_id` to retrieve saved tables, pages, and the report.
+Inspection groups declarations, column summaries, and previews by output name. Across all outputs, the preview includes up to five rows and twenty columns. Use the same `job_id` to retrieve saved tables and the report.
 
-Submit the baseline and the proposal as separate jobs. For each job ID, inspect the submitted changes with `lyra_inspect_report`. Then compare the [output rows](#read-retained-row-pages) and [selected input records](#read-retained-location-inputs).
+Submit the baseline and the proposal as separate jobs. For each job ID, inspect the submitted changes with `lyra_inspect_report`. Then compare the [output tables](#download-a-retained-table) and [selected input records](#read-retained-location-inputs).
 
 Truncation metadata records what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric. To read the saved report without truncation, [inspect it with its job ID](#inspect-a-retained-execution-report).
 
@@ -197,30 +197,10 @@ Save `job_id` when submitting the job. Use these tools after job expiry:
 | Read saved metadata | `lyra_describe_result` |
 | Inspect the report | `lyra_inspect_report` |
 | Get an Arrow download URL | `lyra_download_table` |
-| Read row pages | `lyra_get_result_rows` |
 
 Active jobs have no terminal retention deadline. Use the current job status to distinguish active and completed jobs.
 
 Infrastructure and deadline failures can produce retryable tool errors. Retry the observation without resubmitting the job. If retained data is gone, decide whether you need a new execution.
-
-## Read retained row pages
-
-Call `lyra_get_result_rows` with `job_id` and `output_name` to read saved rows. Set a positive integer `limit` to change the default of 100 rows per page.
-
-Read `rows` and `next_cursor` directly from `structuredContent`. Pass `next_cursor` unchanged as `cursor`, using the same result and output. Continue until `next_cursor` is `null`, even after a short page.
-
-Read schemas and provider ownership from `lyra_describe_result`. Interpret row cells using these encodings:
-
-- **Integers**: decimal strings
-- **Floating-point values**: JSON numbers
-- **Geometry**: full-precision WKT in the saved CRS
-- **Missing cells**: `null`
-
-Empty geometry remains distinct from missing geometry: `POINT EMPTY` represents an empty point.
-
-When the next row cannot fit, `row_too_large` identifies the result and output and supplies an absolute Arrow `download_url`. Preceding rows may arrive in an earlier page, but the failing continuation never skips the oversized row. Fetch the complete table with your agent Bearer credential. See [payload examples](../../reference/mcp-payloads/#retained-row-pages) and [Python recovery](../results/#recover-a-row-that-exceeds-the-size-limit).
-
-See [payload examples](../../reference/mcp-payloads/) for complete formatted responses and [results](../results/) for table interpretation.
 
 ## Inspect calculation relationships
 
@@ -241,10 +221,6 @@ Use your saved `job_id` to retrieve location inputs through MCP. Choose `input_n
 
 If the description exceeds the response limit, follow the preview’s authenticated JSON download URL. The download includes every output and input description without truncating schemas.
 
-Call `lyra_get_location_input_rows` with `job_id` and `input_name`. Set a positive integer `limit` to change the default of 100 rows. Read `rows` and `next_cursor` directly from `structuredContent`, using the [row cell encodings](#read-retained-row-pages).
-
-Pass `next_cursor` unchanged as `cursor` with the same result and input until it returns `null`. Continue after short pages when a cursor remains; output-table cursors aren’t valid here. For correspondence inputs, each row maps an immediate source record to a target record, preserving repeated targets under different sources.
-
 Call `lyra_download_location_input` with `job_id` and `input_name`. If the input is available, the tool returns a download URL. Read these fields directly from `structuredContent`:
 
 - `job_id`: the saved result
@@ -256,7 +232,6 @@ Fetch `download_url` with your agent Bearer credential. If a required record is 
 When `isError` is `true`, inspect `structuredContent.error` using the [HTTP error codes and fields](../rest-api/#read-retained-location-inputs). Handle input-specific failures as follows:
 
 - `location_input_unavailable`: retrying doesn’t materialize the input or change its availability
-- `row_too_large`: fetch the authenticated Arrow `download_url`; the cursor remains at the oversized row
 - `result_not_found`: check the job ID and choose an input name from `description.location_inputs`
 
 Missing or wrongly typed tool arguments produce SDK validation errors in text content. See [location-input payload examples](../../reference/mcp-payloads/#retained-location-inputs) for request and response fields.

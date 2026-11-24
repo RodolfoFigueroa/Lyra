@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
 import geopandas as gpd
-import pandas as pd
 
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES, json_size, trim_inspection
 from lyra.data.results import serialize_outputs
 
 if TYPE_CHECKING:
+    import pandas as pd
+
+    from lyra.contracts.outputs import OutputMetadata
     from lyra.data.results import NativeOutputs
 
 
-def summarize_outputs(outputs: NativeOutputs) -> dict[str, Any]:
+def summarize_outputs(
+    outputs: NativeOutputs, declarations: dict[str, OutputMetadata]
+) -> dict[str, Any]:
     """Return a bounded preview and observed statistics without full JSON encoding.
 
     Raises:
@@ -52,7 +55,7 @@ def summarize_outputs(outputs: NativeOutputs) -> dict[str, Any]:
                 )
                 if spatial
                 else [],
-                "summary": _summaries(table, columns),
+                "summary": _summaries(table, columns, declarations[name]),
             },
             "preview": preview,
             "truncation": {
@@ -71,32 +74,24 @@ def summarize_outputs(outputs: NativeOutputs) -> dict[str, Any]:
     return result
 
 
-def _summaries(table: pd.DataFrame, columns: list[str]) -> dict:
+def _summaries(
+    table: pd.DataFrame, columns: list[str], declaration: OutputMetadata
+) -> dict:
+    dtypes = {column.name: column.dtype for column in declaration.columns}
     summaries = {}
     for column in columns:
         series = table[column]
-        present = series.dropna()
-        numeric = pd.api.types.infer_dtype(present, skipna=True) in {
-            "integer",
-            "floating",
-            "mixed-integer-float",
-            "decimal",
-        }
+        count = int(series.count())
+        dtype = dtypes.get(column)
+        minimum = maximum = None
+        if count and dtype in {"int64", "Int64"}:
+            minimum, maximum = int(series.min()), int(series.max())
+        elif count and dtype in {"float64", "Float64"}:
+            minimum, maximum = float(series.min()), float(series.max())
         summaries[column] = {
-            "null_count": int(series.isna().sum()),
-            "non_null_count": len(present),
-            "minimum": _number(min(present.tolist()))
-            if numeric and len(present)
-            else None,
-            "maximum": _number(max(present.tolist()))
-            if numeric and len(present)
-            else None,
+            "null_count": len(series) - count,
+            "non_null_count": count,
+            "minimum": minimum,
+            "maximum": maximum,
         }
     return summaries
-
-
-def _number(value: object) -> int | float:
-    if isinstance(value, Decimal):
-        return float(value)
-    item = getattr(value, "item", None)
-    return cast("int | float", item() if callable(item) else value)

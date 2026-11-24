@@ -13,7 +13,7 @@ from lyra.contracts.jobs import (
     TableJobResult,
 )
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
-from lyra.server.mcp.serialization import serialize_result, serialized_size
+from lyra.server.mcp.serialization import mcp_response_size, serialize_result
 from lyra.server.result_projection import project_observation
 from tests.job_id_helpers import TEST_JOB_ID
 from tests.result_helpers import inspection_of, result_observation
@@ -132,7 +132,9 @@ def test_many_outputs_share_preview_limits() -> None:
 @pytest.mark.parametrize("large", ["value", "geometry", "metadata"])
 def test_wire_budget_and_explicit_omission(large: str) -> None:
     value = {"value": {"nested": ["界" * 20000]}}
-    declaration = OutputMetadata(columns=[column("value")])
+    declaration = OutputMetadata(
+        columns=[column("value").model_copy(update={"dtype": "str"})]
+    )
     if large == "metadata":
         declaration.columns[0].description = "界" * 40000
     if large == "geometry":
@@ -154,8 +156,8 @@ def test_wire_budget_and_explicit_omission(large: str) -> None:
         output_metadata={"output": declaration},
     )
     before = result.model_dump_json()
-    wire = serialize_result(inspect(result).model_dump(mode="json"), bounded=True)
-    assert serialized_size(wire) <= 65536
+    wire = serialize_result(inspect(result).model_dump(mode="json"), 10)
+    assert mcp_response_size(wire, 10) <= 65536
     assert not wire.isError
     payload = wire.structuredContent
     assert payload is not None
@@ -195,7 +197,7 @@ def test_summaries_use_observed_values_without_schema_coercion() -> None:
             ]
         },
         output_metadata={
-            "output": OutputMetadata(columns=[column("mixed"), column("absent")])
+            "output": OutputMetadata(columns=[column("number"), column("absent")])
         },
     )
     metadata = (

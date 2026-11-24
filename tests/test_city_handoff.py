@@ -363,23 +363,7 @@ def test_inline_street_proposal_through_json_tools(city_server: CityServer) -> N
     }
     description = tool("lyra_describe_result", {"job_id": ref})["result"]["description"]
     assert description["location_inputs"]["streets"]["provider_scope"] == scope
-    assert tool(
-        "lyra_get_location_input_rows",
-        {
-            "job_id": ref,
-            "input_name": "streets",
-            "limit": 1,
-        },
-    ) == {"rows": proposal["add"], "next_cursor": None}
     expected = [{"street_id": "proposed-1", "length_m": 150.0}]
-    assert tool(
-        "lyra_get_result_rows",
-        {
-            "job_id": ref,
-            "output_name": "lengths",
-            "limit": 1,
-        },
-    ) == {"rows": expected, "next_cursor": None}
 
     response = city_server.dispatch(
         "POST", "/jobs", json=request, headers=mcp_headers()

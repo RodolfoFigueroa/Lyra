@@ -26,7 +26,6 @@ from lyra.contracts.errors import (
     ResultNotFoundError,
 )
 from lyra.contracts.provider_scope import ProviderScope
-from lyra.contracts.results import CompleteResultDescription, ResultDescription
 from lyra.contracts.retrieval_errors import error_payload, error_status
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.result_descriptions import (
@@ -44,14 +43,13 @@ from lyra.sdk.output_schema import compile_output
 from lyra.sdk.storage_schema import describe
 from lyra.server.main import create_app
 from lyra.server.mcp.serialization import mcp_response_size
-from lyra.server.mcp.server import LyraFastMCP
+from lyra.server.mcp.server import LyraFastMCP, create_mcp_app
+from lyra.server.mcp.tools import InProcessLyraBackend
 from lyra.server.response_budget import (
     MAX_RETRIEVAL_BYTES,
     ResponseBudget,
-    http_response_size,
 )
 from lyra.server.results import ResultService
-from lyra.server.routes import results as result_routes
 from lyra.server.runtime import ApplicationRuntime
 from test_support.publication import publish_result
 from tests.config_helpers import api_credentials, load_test_config
@@ -64,6 +62,8 @@ if TYPE_CHECKING:
 
     from fastapi import FastAPI
     from pydantic import BaseModel
+
+    from lyra.contracts.results import ResultDescription
 
 __all__ = ["database"]
 _BASE = "https://lyra.example.test/public/api"
@@ -194,35 +194,12 @@ def test_complete_description_http_and_clients(
         )
         inspection = runner.run(http.get(_BASE + path, headers=mcp_headers()))
         assert inspection.status_code == 200
-        assert len(inspection.content) <= MAX_RETRIEVAL_BYTES
-        complete_size = http_response_size(
-            CompleteResultDescription(description=expected)
+        assert inspection.json() == expected.model_dump(mode="json")
+        assert runner.run(http.get(_BASE + path)).status_code == 401
+        assert (
+            runner.run(http.get(_BASE + path, headers=mcp_headers("wrong"))).status_code
+            == 403
         )
-        if complete_size <= MAX_RETRIEVAL_BYTES:
-            assert inspection.json() == {
-                "kind": "complete",
-                "description": expected.model_dump(mode="json"),
-            }
-        else:
-            assert inspection.json() == {
-                "kind": "preview",
-                "job_id": expected.job_id,
-                "omitted": ["description"],
-                "download_url": _BASE + path + "/description/download",
-            }
-        download = runner.run(
-            http.get(_BASE + path + "/description/download", headers=mcp_headers())
-        )
-        assert download.headers["content-type"] == "application/json"
-        assert download.json() == expected.model_dump(mode="json")
-        for suffix in ("", "/description/download"):
-            assert runner.run(http.get(_BASE + path + suffix)).status_code == 401
-            assert (
-                runner.run(
-                    http.get(_BASE + path + suffix, headers=mcp_headers("wrong"))
-                ).status_code
-                == 403
-            )
 
         requests: list[httpx.Request] = []
 
@@ -263,11 +240,7 @@ def test_complete_description_http_and_clients(
 
         first = fetch()
         assert first == expected
-        assert [str(r.url) for r in requests] == (
-            [_BASE + path]
-            if complete_size <= MAX_RETRIEVAL_BYTES
-            else [_BASE + path, _BASE + path + "/description/download"]
-        )
+        assert [str(r.url) for r in requests] == [_BASE + path]
         assert all(
             r.headers["authorization"] == "Bearer agent-secret" for r in requests
         )
@@ -279,46 +252,11 @@ def test_complete_description_http_and_clients(
     assert database.rows == before
 
 
-def test_http_boundary_uses_encoded_response(
-    retained: Retained, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    expected = retained.description
-    expected.parameters["escaped"] = _TEXT * 200
-    monkeypatch.setattr(
-        retained.runtime.results,
-        "read_description",
-        lambda _: expected.model_copy(deep=True),
-    )
-    size = http_response_size(CompleteResultDescription(description=expected))
-    original_budget = result_routes.http_response_budget
-
-    async def run() -> None:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=retained.public)
-        ) as client:
-            for limit, kind in ((size, "complete"), (size - 1, "preview")):
-                monkeypatch.setattr(
-                    result_routes,
-                    "http_response_budget",
-                    partial(original_budget, limit=limit),
-                )
-                response = await client.get(
-                    f"{_BASE}/results/{expected.job_id}", headers=mcp_headers()
-                )
-                assert response.json()["kind"] == kind
-                assert len(response.content) <= limit
-                if kind == "complete":
-                    assert len(response.content) == size
-
-    asyncio.run(run())
-
-
 @pytest.mark.parametrize(
     "damage", ["invalid", "absent", "store", "registration", "report"]
 )
-@pytest.mark.parametrize("suffix", ["", "/description/download"])
 def test_description_domain_errors(
-    retained: Retained, database: Database, damage: str, suffix: str
+    retained: Retained, database: Database, damage: str
 ) -> None:
     reference = retained.description.job_id
     if damage == "invalid":
@@ -342,7 +280,7 @@ def test_description_domain_errors(
             transport=httpx.ASGITransport(app=retained.public)
         ) as client:
             response = await client.get(
-                f"{_BASE}/results/{reference}{suffix}", headers=mcp_headers()
+                f"{_BASE}/results/{reference}", headers=mcp_headers()
             )
         if expected is None:
             assert response.status_code == 422
@@ -361,19 +299,11 @@ def test_mcp_description_sdk_and_boundaries(
     retained: Retained, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected = retained.description
-    observed: list[int] = []
-    limit = MAX_RETRIEVAL_BYTES
+    limit = 2**63 - 1  # Measure the full response using the actual SDK transport.
     original = LyraFastMCP.retrieval_budget
 
     def budget(server: LyraFastMCP, name: str) -> ResponseBudget[BaseModel]:
-        value = replace(original(server, name), limit=limit)
-
-        def measure(candidate: BaseModel) -> int:
-            size = value.size(candidate)
-            observed.append(size)
-            return size
-
-        return replace(value, size=measure)
+        return replace(original(server, name), limit=limit)
 
     monkeypatch.setattr(LyraFastMCP, "retrieval_budget", budget)
 
@@ -399,32 +329,34 @@ def test_mcp_description_sdk_and_boundaries(
             assert len(response.content) <= limit
             actual = CallToolResult.model_validate(response.json()["result"])
             assert mcp_response_size(actual, 10) == len(response.content)
-            if body["kind"] == "complete":
-                assert body["description"] == expected.model_dump(mode="json")
-                assert observed[-1] == len(response.content)
-                limit = len(response.content)
-                exact = await http.post(
-                    url,
-                    json=tool_call_payload(
-                        "lyra_describe_result", {"job_id": expected.job_id}
-                    ),
-                )
-                assert exact.content == response.content
-                limit -= 1
-                response = await http.post(
-                    url,
-                    json=tool_call_payload(
-                        "lyra_describe_result", {"job_id": expected.job_id}
-                    ),
-                )
-                body = response.json()["result"]["structuredContent"]["result"]
+            assert body["kind"] == "complete"
+            default_kind = (
+                "complete"
+                if len(response.content) <= MAX_RETRIEVAL_BYTES
+                else "preview"
+            )
+            assert body["description"] == expected.model_dump(mode="json")
+            limit = len(response.content)
+            exact = await http.post(
+                url,
+                json=tool_call_payload(
+                    "lyra_describe_result", {"job_id": expected.job_id}
+                ),
+            )
+            assert exact.content == response.content
+            limit -= 1
+            response = await http.post(
+                url,
+                json=tool_call_payload(
+                    "lyra_describe_result", {"job_id": expected.job_id}
+                ),
+            )
+            body = response.json()["result"]["structuredContent"]["result"]
             assert body == {
                 "kind": "preview",
                 "job_id": expected.job_id,
                 "omitted": ["description"],
-                "download_url": (
-                    f"{_BASE}/results/{expected.job_id}/description/download"
-                ),
+                "download_url": (f"{_BASE}/results/{expected.job_id}"),
             }
             assert len(response.content) <= limit
             assert (await http.get(body["download_url"])).json() == expected.model_dump(
@@ -434,10 +366,38 @@ def test_mcp_description_sdk_and_boundaries(
                 await http.get(body["download_url"], headers={"Authorization": ""})
             ).status_code == 401
             limit = MAX_RETRIEVAL_BYTES
-            kind = "complete" if observed[-1] <= limit else "preview"
-            await _check_sdk(http, url, expected, kind)
+            await _check_sdk(http, url, expected, default_kind)
 
     asyncio.run(run())
+
+
+@pytest.mark.anyio
+async def test_inline_description_with_oversized_preview_url(
+    retained: Retained,
+) -> None:
+    app = create_mcp_app(
+        agent_api_key="agent-secret",
+        public_api_base_url=_BASE + "/" + "p" * 33000,
+        backend=InProcessLyraBackend(lambda: retained.runtime),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="https://lyra.example.test"
+        ) as http,
+    ):
+        response = await http.post(
+            "/",
+            headers=mcp_headers(),
+            json=tool_call_payload(
+                "lyra_describe_result", {"job_id": retained.description.job_id}
+            ),
+        )
+    assert len(response.content) <= MAX_RETRIEVAL_BYTES
+    assert response.json()["result"]["structuredContent"]["result"] == {
+        "kind": "complete",
+        "description": retained.description.model_dump(mode="json"),
+    }
 
 
 async def _check_sdk(

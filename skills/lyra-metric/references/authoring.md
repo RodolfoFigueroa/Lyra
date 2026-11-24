@@ -856,15 +856,9 @@ Lyra retains values, final descriptions, and reports indefinitely while the stor
 
 Save the job ID and deployment address when you submit a job. After queue expiry, use the same ID for [remote retained reads](#native-table-ownership-and-encoding). With filesystem access, you can also open the store using `ResultStore`.
 
-Both Python clients automatically download descriptions that exceed inspection limits. For reports, use `reports.inspect(job_id)` for a bounded inspection or `reports.get(job_id)` for the complete model. Save the complete JSON with `reports.download(job_id, path)`.
+Both Python clients fetch complete descriptions in one GET. For reports, use `reports.inspect(job_id)` for a bounded inspection or `reports.get(job_id)` for the complete model. Save the complete JSON with `reports.download(job_id, path)`.
 
-Use `results.rows(job_id, output_name)` for bounded JSON pages. Pass each `next_cursor` unchanged until it is `None`, including after short pages. Interpret cells using these encodings:
-
-- **Integers**: decimal strings
-- **Geometry**: full-precision WKT in the declared CRS
-- **Missing cells**: `null`
-
-If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Download the complete table with `results.download_table(job_id, output_name, path)`. The file contains an Arrow IPC stream, regardless of its filename extension.
+Use `results.inspect(job_id)` for bounded output summaries and previews. To filter a complete output locally, read it with `results.table(job_id, output_name)`. Save its Arrow IPC stream with `results.download_table(job_id, output_name, path)`.
 
 Read saved streams with PyArrow or `GeoDataFrame.from_arrow()` to restore declared scalar types and GeoArrow WKB/CRS metadata. Both file-download methods replace destinations only after success. On failure or cancellation, they preserve the destination and remove temporary files.
 

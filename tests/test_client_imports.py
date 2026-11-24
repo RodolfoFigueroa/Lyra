@@ -128,33 +128,23 @@ def test_describe_clients_without_runtime_or_native_dependencies() -> None:
             job_id="a" * 32,
             metric_name="metric", parameters={"default": None}, outputs={},
         )
-        for preview in (False, True):
-            def handle(request):
-                if request.url.path.endswith("/download"):
-                    return httpx.Response(200, json=description.model_dump())
-                payload = {
-                    "kind": "preview", "job_id": description.job_id,
-                    "omitted": ["description"],
-                    "download_url": "https://example.test/description/download",
-                } if preview else {
-                    "kind": "complete", "description": description.model_dump(),
-                }
-                return httpx.Response(200, json=payload)
-            transport = httpx.MockTransport(handle)
-            with (
-                patch("httpx.Client", partial(httpx.Client, transport=transport)),
-                patch("httpx.AsyncClient", partial(
-                    httpx.AsyncClient, transport=transport,
-                )),
-            ):
-                with LyraClient("example.test") as client:
-                    result = client.results.describe(description.job_id)
+        def handle(request):
+            return httpx.Response(200, json=description.model_dump())
+        transport = httpx.MockTransport(handle)
+        with (
+            patch("httpx.Client", partial(httpx.Client, transport=transport)),
+            patch("httpx.AsyncClient", partial(
+                httpx.AsyncClient, transport=transport,
+            )),
+        ):
+            with LyraClient("example.test") as client:
+                result = client.results.describe(description.job_id)
+            assert result == description
+            async def run():
+                async with AsyncLyraClient("example.test") as client:
+                    result = await client.results.describe(description.job_id)
                 assert result == description
-                async def run():
-                    async with AsyncLyraClient("example.test") as client:
-                        result = await client.results.describe(description.job_id)
-                    assert result == description
-                asyncio.run(run())
+            asyncio.run(run())
         assert "lyra.api.client._tables" not in sys.modules
         """,
     )
@@ -243,10 +233,10 @@ def test_arrow_download_without_native_dependencies() -> None:
 
         body = b'unchanged stream bytes'
         def respond(request):
-            if '/missing/' in request.url.path:
+            if request.url.params['output_name'] == 'missing':
                 return httpx.Response(404, json={'detail': {
                     'code': 'result_not_found', 'message': 'Absent',
-                    'job_id': 'a' * 32, 'output_name': 'missing',
+                    'job_id': 'a' * 32, 'output_name': 'missing', 'input_name': None,
                 }})
             return httpx.Response(200, content=body, headers={
                 'Content-Type': 'application/vnd.apache.arrow.stream',

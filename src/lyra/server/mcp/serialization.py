@@ -39,7 +39,7 @@ def mcp_response_budget(
     envelope overhead.
 
     Returns:
-        A budget for complete/preview candidates, row pages, and download links.
+        A budget for complete/preview candidates and download links.
     """
 
     def size(candidate: BaseModel) -> int:
@@ -75,13 +75,8 @@ def _wire_result(payload: dict[str, Any], *, is_error: bool) -> CallToolResult:
     )
 
 
-def serialized_size(result: CallToolResult) -> int:
-    """Return actual compact UTF-8 bytes including both payload representations."""
-    return len(result.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8"))
-
-
 def serialize_result(
-    payload: dict[str, Any], *, is_error: bool = False, bounded: bool = False
+    payload: dict[str, Any], request_id: RequestId, *, is_error: bool = False
 ) -> CallToolResult:
     """Serialize one payload, trimming inspection details deterministically.
 
@@ -90,14 +85,17 @@ def serialize_result(
         error when mandatory identifiers and access metadata cannot fit.
     """
     result = _wire_result(payload, is_error=is_error)
-    if not bounded or serialized_size(result) <= MAX_INSPECTION_BYTES:
+    budget = ResponseBudget[CallToolResult](
+        lambda candidate: mcp_response_size(candidate, request_id), MAX_INSPECTION_BYTES
+    )
+    if budget.fits(result):
         return result
     if not is_error:
         while trim_inspection(payload.get("result", payload)):
             result = _wire_result(payload, is_error=False)
-            if serialized_size(result) <= MAX_INSPECTION_BYTES:
+            if budget.fits(result):
                 return result
-    return _wire_result(
+    fallback = _wire_result(
         {
             "error": {
                 "code": "result_response_too_large",
@@ -109,3 +107,4 @@ def serialize_result(
         },
         is_error=True,
     )
+    return budget.require_fits(fallback)

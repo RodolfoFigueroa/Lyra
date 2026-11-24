@@ -184,13 +184,7 @@ def inspect_outputs(observation: JobObservation) -> dict[str, ResultOutputInspec
     """Return bounded statistics with captured output declarations."""
     if observation.inspection is None:
         return {}
-    if observation.retained_result is not None:
-        declarations = {
-            name: output.table_schema
-            for name, output in observation.retained_result.metadata.outputs.items()
-        }
-    else:
-        return {}
+    declarations = observation.declarations
     outputs = {}
     for name, saved in observation.inspection.items():
         item = deepcopy(saved)

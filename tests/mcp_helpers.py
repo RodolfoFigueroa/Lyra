@@ -38,7 +38,7 @@ def tool_call_payload(
     name: str,
     arguments: dict[str, Any],
     *,
-    request_id: int = 10,
+    request_id: int | str = 10,
 ) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",

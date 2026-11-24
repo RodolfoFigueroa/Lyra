@@ -1,5 +1,7 @@
 """HTTP endpoints for submitting and inspecting metric jobs."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
@@ -175,10 +177,15 @@ async def inspect_job_result(
     """Return saved summaries and previews within the inspection byte budget.
 
     Raises:
+        InvalidJobResultHTTPError: If the retained result is invalid.
         HTTPException: If mandatory inspection fields exceed the byte limit.
     """
     observation = await _result_observation(job_id, results)
-    payload = results.inspect(observation).model_dump(mode="json")
+    try:
+        inspection = await asyncio.to_thread(results.inspect, observation)
+    except InvalidJobResultError as error:
+        raise InvalidJobResultHTTPError from error
+    payload = inspection.model_dump(mode="json")
     while json_size(payload) > MAX_INSPECTION_BYTES and trim_inspection(payload):
         pass
     if json_size(payload) > MAX_INSPECTION_BYTES:

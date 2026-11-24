@@ -13,7 +13,6 @@ from geopandas.testing import assert_geodataframe_equal
 from lyra.api import LyraClient
 from lyra.api.exceptions import DownloadError
 from lyra.contracts.errors import ResultNotFoundError
-from lyra.contracts.results import ResultDescriptionPreview
 from lyra.contracts.retrieval_errors import error_payload, error_status
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.result_store import ResultStore
@@ -32,14 +31,14 @@ pytestmark = pytest.mark.usefixtures("database")
 
 @pytest.mark.parametrize("selection", ["output", "provider", "correspondence"])
 @pytest.mark.parametrize("empty", [False, True])
-@pytest.mark.parametrize("preview", [False, True])
+@pytest.mark.parametrize("large", [False, True])
 def test_remote_export(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     selection: str,
     *,
     empty: bool,
-    preview: bool,
+    large: bool,
 ) -> None:
     store = SQLiteStore(tmp_path / "store")
     if selection == "output":
@@ -61,7 +60,7 @@ def test_remote_export(
     selected = (
         description.outputs if selection == "output" else description.location_inputs
     )["a"]
-    if preview:
+    if large:
         selected.table_schema.columns[0].description = (
             "Large retained description " * 10000
         )
@@ -70,29 +69,7 @@ def test_remote_export(
         service.stream_table if selection == "output" else service.stream_location_input
     )
     responses = [arrow_response(b"".join(stream(reference, "a")))]
-    if preview:
-        responses.extend(
-            (
-                httpx.Response(
-                    200,
-                    json=ResultDescriptionPreview(
-                        job_id=reference,
-                        download_url=f"https://example.test/api/results/{reference}/description/download",
-                    ).model_dump(mode="json"),
-                ),
-                httpx.Response(200, json=description.model_dump(mode="json")),
-            )
-        )
-    else:
-        responses.append(
-            httpx.Response(
-                200,
-                json={
-                    "kind": "complete",
-                    "description": description.model_dump(mode="json"),
-                },
-            )
-        )
+    responses.append(httpx.Response(200, json=description.model_dump(mode="json")))
 
     served = list(responses)
     observe_publication(monkeypatch, served)
@@ -111,7 +88,7 @@ def test_remote_export(
     with LyraClient("example.test/api") as client:
         assert (
             getattr(client.results, method)(
-                reference, "a", str(remote) if preview else remote
+                reference, "a", str(remote) if large else remote
             )
             is None
         )

@@ -98,7 +98,8 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
             updated_at=provenance.accepted.created_at,
             completed_at=provenance.accepted.created_at,
         ),
-        inspection=summarize_outputs({"root": frame(rows)}),
+        inspection=summarize_outputs({"root": frame(rows)}, contract.outputs),
+        declarations=contract.outputs,
         provenance=provenance,
     )
     return ResultWorkload(work, catalog, native, envelope, result, observation)

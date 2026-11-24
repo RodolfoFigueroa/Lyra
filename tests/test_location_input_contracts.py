@@ -7,11 +7,9 @@ import pytest
 from pydantic import ValidationError
 
 from lyra.contracts.errors import (
-    InvalidPaginationError,
     LocationInputUnavailableError,
     ResultIntegrityError,
     ResultNotFoundError,
-    RowTooLargeError,
 )
 from lyra.contracts.references import (
     validate_job_id,
@@ -19,7 +17,7 @@ from lyra.contracts.references import (
 )
 from lyra.contracts.results import LocationInputDescription, ResultDescription
 from lyra.contracts.retrieval_errors import decode_error, error_payload
-from lyra.contracts.retrieval_paths import table_rows_path
+from lyra.contracts.retrieval_paths import table_download_path
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server.mcp.models import DownloadTableInput
@@ -93,7 +91,7 @@ def test_lookup_names_are_strict_across_boundaries(name: object) -> None:
     with pytest.raises(ValidationError):
         reader.read_table(_REFERENCE, cast("str", name))
     with pytest.raises(ValidationError):
-        table_rows_path(_REFERENCE, cast("str", name))
+        table_download_path(_REFERENCE, cast("str", name))
 
 
 @pytest.mark.parametrize("name", [1, b"blocks", None])
@@ -123,13 +121,11 @@ def test_existing_lookup_payloads_keep_their_shape(output_name: str | None) -> N
     for error in (
         ResultNotFoundError(_REFERENCE, output_name),
         ResultIntegrityError(_REFERENCE, output_name),
-        InvalidPaginationError(_REFERENCE, output_name, "cursor"),
-        RowTooLargeError(_REFERENCE, output_name, "https://example.test/download"),
     ):
         assert error.input_name is None
         payload = error_payload(error).model_dump()
         assert payload["output_name"] == output_name
-        assert "input_name" not in payload
+        assert payload["input_name"] is None
 
 
 @pytest.mark.parametrize("field", ["code", "message", "job_id", "input_name"])

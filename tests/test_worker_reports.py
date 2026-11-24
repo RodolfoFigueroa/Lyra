@@ -126,13 +126,14 @@ def assert_public_job_identity(
     assert isinstance(result, TableJobResult)
     inspection = service.inspect(observation)
     assert status is not None
-    assert observation.retained_result is not None
+    with ResultStore.open(path) as reader:
+        retained = reader.read_result(native.id)
     assert (
         status.job_id
         == result.job_id
         == inspection.job_id
-        == observation.retained_result.report.job_id
-        == observation.retained_result.metadata.job_id
+        == retained.report.job_id
+        == retained.metadata.job_id
         == handoff["job_id"]
         == native.id
     )

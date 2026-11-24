@@ -211,32 +211,3 @@ def geometry_wkt(geometry: shapely.Geometry) -> str:
     # GEOS uses fixed notation down to 1e-4. At that magnitude 20 decimal
     # places retain 17 significant digits, enough to round-trip a binary64.
     return shapely.to_wkt(geometry, rounding_precision=WKT_PRECISION)
-
-
-def encode_row(
-    cells: tuple[Cell, ...], description: RowLayout
-) -> dict[str, str | float | bool | None]:
-    """Encode declared SQL cells without rounding, reprojection, or type inference.
-
-    Returns:
-        Every declared column mapped to its fixed JSON cell representation.
-    """
-    row: dict[str, str | float | bool | None] = {}
-    for name, dtype, value in zip(
-        description.columns,
-        description.pandas_dtypes,
-        cells,
-        strict=True,
-    ):
-        if value is None:
-            row[name] = None
-        elif dtype == "geometry":
-            row[name] = geometry_wkt(shapely.from_wkb(binary_geometry(value)))
-        elif dtype == "boolean":
-            row[name] = bool(value)
-        elif dtype == "Float64":
-            row[name] = float(value)
-        else:
-            # Both declared strings and signed integers have exact string cells.
-            row[name] = str(value)
-    return row

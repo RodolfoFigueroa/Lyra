@@ -52,6 +52,7 @@ def assert_remote_outputs(
     now = datetime.now(UTC)
     status = JobStatusInfo(
         job_id=metadata.job_id,
+        metric=metadata.metric_name,
         status="succeeded",
         created_at=now,
         updated_at=now,
@@ -131,19 +132,6 @@ def assert_remote_run(result: RunResult, native: NativeAPI, directory: Path) -> 
         assert description.outputs == result.metadata.outputs
         assert description.job_id == job_id
         frame = native.resolve(client.results.table(reference, "area"))
-        rows = []
-        cursor = None
-        while True:
-            page = native.resolve(
-                client.results.rows(reference, "area", limit=1, cursor=cursor)
-            )
-            rows.extend(page.rows)
-            cursor = page.next_cursor
-            if cursor is None:
-                break
-        assert rows == [
-            {**row, "value": str(row["value"])} for row in frame.to_dict("records")
-        ]
         native.resolve(
             client.results.download_table(reference, "area", directory / "values.any")
         )
@@ -181,7 +169,6 @@ async def assert_scope_tools(http: httpx.AsyncClient, result: RunResult) -> None
     for name, arguments in (
         ("lyra_describe_result", {"job_id": reference}),
         ("lyra_inspect_report", {"job_id": result.metadata.job_id}),
-        ("lyra_get_result_rows", {"job_id": reference, "output_name": "area"}),
         ("lyra_download_table", {"job_id": reference, "output_name": "area"}),
     ):
         response = await http.post(
@@ -202,12 +189,6 @@ async def assert_scope_tools(http: httpx.AsyncClient, result: RunResult) -> None
     assert responses["lyra_inspect_report"]["result"][
         "report"
     ] == result.report.model_dump(mode="json")
-    rows = responses["lyra_get_result_rows"]
-    assert rows["next_cursor"] is None
-    assert rows["rows"] == [
-        {**row, "value": str(row["value"])}
-        for row in result.tables["area"].to_dict("records")
-    ]
     link = responses["lyra_download_table"]["download_url"]
     assert link.startswith(BASE + "/results/")
     assert (await http.get(link)).status_code == 401

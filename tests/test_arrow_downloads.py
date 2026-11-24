@@ -6,8 +6,9 @@ import asyncio
 import json
 import threading
 from contextlib import contextmanager, nullcontext
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import geopandas as gpd
 import httpx
@@ -19,7 +20,6 @@ from jsonschema import validate
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent
-from starlette.requests import ClientDisconnect
 
 from lyra.contracts.errors import (
     ResultIntegrityError,
@@ -27,11 +27,13 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.retrieval_errors import error_payload, error_status
 from lyra.runtime.sqlite_store import SQLiteStore
+from lyra.server import table_response
 from lyra.server.mcp.serialization import mcp_response_size
 from lyra.server.response_budget import MAX_RETRIEVAL_BYTES
 from lyra.server.results import ResultService
 from lyra.server.table_response import TableResponse
 from tests.arrow_download_helpers import BASE, Retained, retained
+from tests.location_input_arrow_helpers import retained_input
 from tests.mcp_helpers import mcp_headers, tool_call_payload
 from tests.retained_table_helpers import mixed_result
 from tests.retrieval_client_helpers import NativeAPI, native_api
@@ -43,7 +45,7 @@ if TYPE_CHECKING:
 
     from starlette.types import Message
 
-__all__ = ["database", "native_api", "retained"]
+__all__ = ["database", "native_api", "retained", "retained_input"]
 
 
 @pytest.mark.parametrize(
@@ -103,9 +105,9 @@ def test_http_ordinary_readers(
     database.connection.__exit__.assert_called()
     database.engine.dispose.assert_called()
     # OpenAPI advertises the stream media type rather than a JSON wrapper.
-    operation = retained.app.openapi()["paths"][
-        "/results/{job_id}/tables/{output_name}/download"
-    ]["get"]
+    operation = retained.app.openapi()["paths"]["/results/{job_id}/tables/download"][
+        "get"
+    ]
     assert (
         "application/vnd.apache.arrow.stream"
         in operation["responses"]["200"]["content"]
@@ -168,7 +170,7 @@ def test_lookup_errors_before_stream_and_mcp(
             ) as http,
         ):
             response = await http.get(
-                f"{BASE}/results/{reference}/tables/{output}/download"
+                f"{BASE}/results/{reference}/tables/download?output_name={output}"
             )
             if error is None:
                 assert response.status_code == 422
@@ -289,7 +291,7 @@ def test_stream_resources_close(
 
     def execute(statement: sa.Select, parameters: object = None) -> object:
         cursor = database.execute(statement, parameters)
-        if "LIMIT" in str(statement):
+        if "ORDER BY" in str(statement):
             cursors.append(cursor)
             if ending == "fetch-error":
                 cursor.mappings.side_effect = RuntimeError("fetch failed")
@@ -322,13 +324,20 @@ def test_stream_resources_close(
     async def run() -> None:
         version = "2.0" if ending == "receive-disconnect" else "2.4"
         await response(
-            {"type": "http", "asgi": {"spec_version": version}}, receive, send
+            {
+                "type": "http",
+                "method": "GET",
+                "headers": [],
+                "asgi": {"spec_version": version},
+            },
+            receive,
+            send,
         )
 
     exception = {
         "complete": None,
         "receive-disconnect": None,
-        "disconnect": ClientDisconnect,
+        "disconnect": OSError,
         "fetch-error": RuntimeError,
         "conversion-error": None,
     }[ending]
@@ -340,17 +349,49 @@ def test_stream_resources_close(
     assert released == ["writer"]
     assert all(cursor.close.called for cursor in cursors)
     assert next(response.stream, None) is None
-    assert asyncio.run(anext(response.iterator, None)) is None
     database.connection.__exit__.assert_called()
     database.engine.dispose.assert_called()
 
 
+@pytest.fixture
+def staging_directory(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    @contextmanager
+    def directory() -> Generator[str]:
+        with TemporaryDirectory(dir=staging) as path:
+            try:
+                yield path
+            finally:
+                # Staging cleanup must follow the worker's storage cleanup.
+                database.engine.dispose.assert_called()
+
+    monkeypatch.setattr(table_response, "TemporaryDirectory", directory)
+    return staging
+
+
 @pytest.mark.parametrize("stage", ["preflight", "batch"])
+@pytest.mark.parametrize("resource", ["output", "input"])
 def test_native_task_cancellation_joins_reader(
-    retained: Retained, database: Database, stage: str
+    request: pytest.FixtureRequest,
+    database: Database,
+    staging_directory: Path,
+    stage: str,
+    resource: str,
 ) -> None:
+    if resource == "output":
+        output = request.getfixturevalue("retained")
+        response = TableResponse(
+            output.service.stream_table(output.reference, output.output_name)
+        )
+        batch_query = "ORDER BY"
+    else:
+        response = TableResponse(request.getfixturevalue("retained_input").stream())
+        batch_query = "LIMIT"
     release = threading.Event()
-    response = TableResponse(retained.service.stream_table(retained.reference, "rows"))
     database.connection.reset_mock()
     database.engine.reset_mock()
 
@@ -359,7 +400,7 @@ def test_native_task_cancellation_joins_reader(
         loop = asyncio.get_running_loop()
 
         def execute(statement: sa.Select, parameters: object = None) -> object:
-            if (stage == "batch" and "LIMIT" in str(statement)) or (
+            if (stage == "batch" and batch_query in str(statement)) or (
                 stage == "preflight" and "FROM final_results" in str(statement)
             ):
                 loop.call_soon_threadsafe(started.set)
@@ -372,25 +413,37 @@ def test_native_task_cancellation_joins_reader(
             await asyncio.Event().wait()
             return {"type": "http.disconnect"}
 
-        async def send(_message: Message) -> None:
-            await asyncio.sleep(0)
-
+        send = AsyncMock()
         task = asyncio.create_task(
-            response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+            response(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "headers": [],
+                    "asgi": {"spec_version": "2.4"},
+                },
+                receive,
+                send,
+            )
         )
         await asyncio.wait_for(started.wait(), timeout=5)
-        task.cancel()
-        # Cancellation must not close a generator while the worker is inside it.
-        await asyncio.sleep(0)
         try:
-            assert not task.done()
-            database.engine.dispose.assert_not_called()
+            for _ in range(2):
+                task.cancel()
+                await asyncio.sleep(0)
+                assert not task.done()
+                assert await asyncio.to_thread(
+                    lambda: any(staging_directory.glob("*/*.arrow"))
+                )
+                database.engine.dispose.assert_not_called()
         finally:
             release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
+        send.assert_not_awaited()
 
     asyncio.run(run())
+    assert not list(staging_directory.iterdir())
     assert next(response.stream, None) is None
     database.connection.__exit__.assert_called()
     database.engine.dispose.assert_called()

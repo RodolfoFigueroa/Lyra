@@ -9,7 +9,7 @@ from build_scripts import profile_retained_inputs as profile
 
 def test_case_matrix() -> None:
     cases = profile.cases()
-    assert len({case.name for case in cases}) == len(cases) == 47
+    assert len({case.name for case in cases}) == len(cases) == 34
     assert all(case.references == 0 for case in cases if case.graph != "direct")
     assert sum(case.operation == "mixed" for case in cases) == 4
     for case in cases:

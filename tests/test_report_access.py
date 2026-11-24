@@ -274,19 +274,11 @@ def test_mcp_report_sdk_and_boundaries(
     retained: Retained, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected = retained.report
-    observed: list[int] = []
-    limit = MAX_RETRIEVAL_BYTES
+    limit = 2**63 - 1  # Measure the full response using the actual SDK transport.
     original = LyraFastMCP.retrieval_budget
 
     def budget(server: LyraFastMCP, name: str) -> ResponseBudget[BaseModel]:
-        value = replace(original(server, name), limit=limit)
-
-        def measure(candidate: BaseModel) -> int:
-            size = value.size(candidate)
-            observed.append(size)
-            return size
-
-        return replace(value, size=measure)
+        return replace(original(server, name), limit=limit)
 
     monkeypatch.setattr(LyraFastMCP, "retrieval_budget", budget)
 
@@ -312,25 +304,29 @@ def test_mcp_report_sdk_and_boundaries(
             assert len(response.content) <= limit
             actual = CallToolResult.model_validate(response.json()["result"])
             assert mcp_response_size(actual, 10) == len(response.content)
-            if body["kind"] == "complete":
-                assert body["report"] == expected.model_dump(mode="json")
-                assert observed[-1] == len(response.content)
-                limit = len(response.content)
-                exact = await http.post(
-                    url,
-                    json=tool_call_payload(
-                        "lyra_inspect_report", {"job_id": expected.job_id}
-                    ),
-                )
-                assert exact.content == response.content
-                limit -= 1
-                response = await http.post(
-                    url,
-                    json=tool_call_payload(
-                        "lyra_inspect_report", {"job_id": expected.job_id}
-                    ),
-                )
-                body = response.json()["result"]["structuredContent"]["result"]
+            assert body["kind"] == "complete"
+            default_kind = (
+                "complete"
+                if len(response.content) <= MAX_RETRIEVAL_BYTES
+                else "preview"
+            )
+            assert body["report"] == expected.model_dump(mode="json")
+            limit = len(response.content)
+            exact = await http.post(
+                url,
+                json=tool_call_payload(
+                    "lyra_inspect_report", {"job_id": expected.job_id}
+                ),
+            )
+            assert exact.content == response.content
+            limit -= 1
+            response = await http.post(
+                url,
+                json=tool_call_payload(
+                    "lyra_inspect_report", {"job_id": expected.job_id}
+                ),
+            )
+            body = response.json()["result"]["structuredContent"]["result"]
             assert body == {
                 "kind": "preview",
                 "job_id": expected.job_id,
@@ -349,8 +345,7 @@ def test_mcp_report_sdk_and_boundaries(
                 await http.get(body["download_url"], headers={"Authorization": ""})
             ).status_code == 401
             limit = MAX_RETRIEVAL_BYTES
-            kind = "complete" if observed[-1] <= limit else "preview"
-            await _check_sdk(http, url, expected, kind)
+            await _check_sdk(http, url, expected, default_kind)
 
     asyncio.run(run())
 

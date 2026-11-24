@@ -13,7 +13,6 @@ from geopandas.testing import assert_geodataframe_equal
 from lyra.api import AsyncLyraClient
 from lyra.api.exceptions import DownloadError
 from lyra.contracts.errors import ResultNotFoundError
-from lyra.contracts.results import ResultDescriptionPreview
 from lyra.contracts.retrieval_errors import error_payload, error_status
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.result_store import ResultStore
@@ -36,14 +35,14 @@ pytestmark = pytest.mark.usefixtures("database")
 
 @pytest.mark.parametrize("selection", ["output", "provider", "correspondence"])
 @pytest.mark.parametrize("empty", [False, True])
-@pytest.mark.parametrize("preview", [False, True])
+@pytest.mark.parametrize("large", [False, True])
 def test_remote_export(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     selection: str,
     *,
     empty: bool,
-    preview: bool,
+    large: bool,
 ) -> None:
     store = SQLiteStore(tmp_path / "store")
     if selection == "output":
@@ -65,7 +64,7 @@ def test_remote_export(
     selected = (
         description.outputs if selection == "output" else description.location_inputs
     )["a"]
-    if preview:
+    if large:
         selected.table_schema.columns[0].description = (
             "Large retained description " * 10000
         )
@@ -74,29 +73,7 @@ def test_remote_export(
         service.stream_table if selection == "output" else service.stream_location_input
     )
     responses = [arrow_response(b"".join(stream(reference, "a")))]
-    if preview:
-        responses.extend(
-            (
-                httpx.Response(
-                    200,
-                    json=ResultDescriptionPreview(
-                        job_id=reference,
-                        download_url=f"https://example.test/api/results/{reference}/description/download",
-                    ).model_dump(mode="json"),
-                ),
-                httpx.Response(200, json=description.model_dump(mode="json")),
-            )
-        )
-    else:
-        responses.append(
-            httpx.Response(
-                200,
-                json={
-                    "kind": "complete",
-                    "description": description.model_dump(mode="json"),
-                },
-            )
-        )
+    responses.append(httpx.Response(200, json=description.model_dump(mode="json")))
 
     served = list(responses)
     observe_publication(monkeypatch, served)
@@ -119,7 +96,7 @@ def test_remote_export(
         async with AsyncLyraClient("example.test/api") as client:
             assert (
                 await getattr(client.results, method)(
-                    reference, "a", str(remote) if preview else remote
+                    reference, "a", str(remote) if large else remote
                 )
                 is None
             )
@@ -189,7 +166,7 @@ def test_retrieval_failure_preserves_destination(
 @pytest.mark.parametrize(
     "method", ["export_geoparquet", "export_location_input_geoparquet"]
 )
-@pytest.mark.parametrize("stage", ["arrow", "description", "preview"])
+@pytest.mark.parametrize("stage", ["arrow", "description"])
 @pytest.mark.parametrize("existing", [False, True])
 def test_cancelled_retrieval_closes_response(
     tmp_path: Path,
@@ -211,19 +188,8 @@ def test_cancelled_retrieval_closes_response(
             stream=CancellableStream(harness),
             headers={"Content-Type": "application/vnd.apache.arrow.stream"},
         )
-        calls = 0
 
         def respond(_request: httpx.Request) -> httpx.Response:
-            nonlocal calls
-            calls += 1
-            if stage == "preview" and calls == 1:
-                return httpx.Response(
-                    200,
-                    json=ResultDescriptionPreview(
-                        job_id="a" * 32,
-                        download_url="https://example.test/api/description/download",
-                    ).model_dump(mode="json"),
-                )
             return response
 
         monkeypatch.setattr(

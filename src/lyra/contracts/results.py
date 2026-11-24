@@ -89,10 +89,3 @@ class LocationInputDownload(StrictBaseModel):
 ResultDescriptionInspection = Annotated[
     CompleteResultDescription | ResultDescriptionPreview, Field(discriminator="kind")
 ]
-
-
-class ResultRowPage(StrictBaseModel):
-    """Complete JSON rows and an opaque continuation; null means completion."""
-
-    rows: list[dict[str, str | float | bool | None]]
-    next_cursor: str | None

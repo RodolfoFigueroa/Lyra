@@ -60,7 +60,7 @@ if TYPE_CHECKING:
         WorkersResponse,
     )
     from lyra.contracts.reports import ExecutionReport, ExecutionReportInspection
-    from lyra.contracts.results import ResultDescription, ResultRowPage
+    from lyra.contracts.results import ResultDescription
     from lyra.contracts.types import JsonObject
     from lyra.data.interventions import Intervention
 
@@ -247,28 +247,11 @@ class _ResultsResource:
         self._transport = transport
 
     def describe(self, job_id: str) -> ResultDescription:
-        """Return complete retained metadata, following a preview link when needed."""
-        inspection = self._transport.request(endpoints.get_result_description(job_id))
-        if inspection.kind == "complete":
-            return inspection.description
-        return self._transport.request(
-            endpoints.download_result_description(inspection.download_url)
-        )
+        """Return the complete validated retained description in one request."""
+        return self._transport.request(endpoints.get_result_description(job_id))
 
     def get(self, job_id: str) -> TerminalJobResult:
         return self._transport.request(endpoints.get_job_result(job_id))
-
-    def rows(
-        self,
-        job_id: str,
-        output_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-    ) -> ResultRowPage:
-        """Return a bounded page, preserving decimal integer and WKT strings."""
-        return self._transport.request(
-            endpoints.get_result_rows(job_id, output_name, limit, cursor)
-        )
 
     def table(self, job_id: str, output_name: str) -> pd.DataFrame | gpd.GeoDataFrame:
         """Return an independent native frame from the retained Arrow stream.
@@ -338,18 +321,6 @@ class _ResultsResource:
             self._native_table(
                 endpoints.get_location_input_download(job_id, input_name)
             ),
-        )
-
-    def location_input_rows(
-        self,
-        job_id: str,
-        input_name: str,
-        limit: int = 100,
-        cursor: str | None = None,
-    ) -> ResultRowPage:
-        """Return a bounded page of the retained logical input selection."""
-        return self._transport.request(
-            endpoints.get_location_input_rows(job_id, input_name, limit, cursor)
         )
 
     def download_location_input(

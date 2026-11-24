@@ -12,7 +12,7 @@ _T = TypeVar("_T")
 
 
 class ResponseTooLargeError(ValueError):
-    """A fixed preview, link, error, or page cannot fit without losing fields."""
+    """A fixed preview, link, or error cannot fit without losing fields."""
 
 
 @dataclass(frozen=True)
@@ -41,14 +41,12 @@ class ResponseBudget(Generic[_T]):
         """Choose the complete body or fixed preview; validate the preview itself.
 
         Feature handlers supply fully formed typed variants, including download
-        links and omission markers. Required fields are never shortened. Row-page
-        handlers use fits/require_fits with the same transport encoder.
+        links and omission markers. Required fields are never shortened.
 
         Returns:
             One unchanged candidate within the limit.
         """
-        self.require_fits(preview)
-        return complete if self.fits(complete) else preview
+        return complete if self.fits(complete) else self.require_fits(preview)
 
 
 def http_json_response(payload: BaseModel, *, status_code: int = 200) -> JSONResponse:
@@ -66,5 +64,5 @@ def http_response_size(payload: BaseModel) -> int:
 def http_response_budget(
     *, limit: int = MAX_RETRIEVAL_BYTES
 ) -> ResponseBudget[BaseModel]:
-    """Return the common HTTP inspection/page budget."""
+    """Return the common HTTP inspection budget."""
     return ResponseBudget(http_response_size, limit)

@@ -1,6 +1,6 @@
 """SQL-bounded retained traversal and resource lifecycles without live services."""
 
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock
@@ -61,23 +61,21 @@ def test_selected_batches_use_bounded_sql(
             "row_key",
             "value",
         ]
-    assert all(0 < len(batch.rows) <= batch_size for batch in batches)
-    assert [row for batch in batches for row in batch.rows] == [
+    assert all(0 < len(batch) <= batch_size for batch in batches)
+    assert [row for batch in batches for row in batch] == [
         ("same", "a", 10),
         ("same", "z", 30),
         ("next", "r", 2),
     ]
-    addresses = [address for batch in batches for address in batch.addresses]
-    assert len(set(addresses)) == 3
-    assert {address.computation for address in addresses} == {0, 1}
+    assert len(queries) == 2
+    for cursor in cursors[-2:]:
+        cursor.mappings.return_value.partitions.assert_called_once_with(batch_size)
     for query in queries:
         compiled = query.compile(dialect=sqlite.dialect())
         sql = str(compiled).upper()
-        assert "LIMIT" in sql
         assert "ORDER BY" in sql
         assert "WHERE" in sql
         assert "LOCATION_ID IN" in sql
-        assert batch_size in compiled.params.values()
         assert "DISTINCT" not in sql
     assert all(cursor.close.called for cursor in cursors)
     database.connection.__exit__.assert_called()
@@ -94,7 +92,7 @@ def test_batch_resources_close(
 
     def execute(statement: sa.Select, parameters: object = None) -> object:
         cursor = database.execute(statement, parameters)
-        if "LIMIT" in str(statement):
+        if "ORDER BY" in str(statement):
             cursors.append(cursor)
             if exit_kind == "fetch-error":
                 cursor.mappings.side_effect = RuntimeError("fetch failed")
@@ -110,10 +108,12 @@ def test_batch_resources_close(
         if exit_kind == "exhausted":
             assert len(list(selected.batches(1))) == 3
         else:
-            assert len(next(selected.batches(1)).rows) == 1
-            if exit_kind == "error":
-                msg = "consumer failed"
-                raise RuntimeError(msg)
+            with closing(selected.batches(1)) as batches:
+                assert len(next(batches)) == 1
+                assert not cursors[-1].close.called
+                if exit_kind == "error":
+                    msg = "consumer failed"
+                    raise RuntimeError(msg)
     assert cursors
     assert all(cursor.close.called for cursor in cursors)
     database.connection.__exit__.assert_called()
@@ -179,7 +179,7 @@ def test_unselected_groups_are_not_audited(database: Database, tmp_path: Path) -
         if row[data.value_column] == "fresh" and row["location_id"] == "same":
             row["row_key"] = None
     with descriptions.select(reference, "a") as selected:
-        assert [row for batch in selected.batches(1) for row in batch.rows] == [
+        assert [row for batch in selected.batches(1) for row in batch] == [
             ("same", "a", 10),
             ("same", "z", 30),
             ("next", "r", 2),
@@ -197,7 +197,7 @@ def test_batches_cross_location_boundaries(database: Database, tmp_path: Path) -
     )
     row["description"] = description.model_dump_json()
     with descriptions.select(reference, "a") as selected:
-        assert [row for batch in selected.batches(1) for row in batch.rows] == [
+        assert [row for batch in selected.batches(1) for row in batch] == [
             ("next", "r", 20),
             ("same", "a", 10),
             ("same", "z", 30),

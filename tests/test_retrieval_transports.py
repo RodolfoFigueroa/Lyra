@@ -10,24 +10,20 @@ from mcp.types import CallToolResult
 from pydantic import ConfigDict, Field, ValidationError
 
 from lyra.contracts.errors import (
-    InvalidPaginationError,
     LocationInputUnavailableError,
     ReportIntegrityError,
     ReportNotFoundError,
     ResultAccessError,
     ResultIntegrityError,
     ResultNotFoundError,
-    RowTooLargeError,
 )
 from lyra.contracts.retrieval_errors import decode_error, error_payload, error_status
 from lyra.contracts.retrieval_paths import (
     absolute_api_url,
     report_download_path,
     report_inspection_path,
-    result_description_download_path,
     result_description_path,
     table_download_path,
-    table_rows_path,
 )
 from lyra.contracts.strict import StrictBaseModel
 from lyra.server.mcp.serialization import mcp_response_size, retrieval_error_result
@@ -47,14 +43,6 @@ _ERRORS = [
     LocationInputUnavailableError(_REFERENCE, "reference_blocks"),
     ResultNotFoundError(_REFERENCE, input_name="blocks"),
     ResultIntegrityError(_REFERENCE, input_name="blocks"),
-    InvalidPaginationError(_REFERENCE, None, "cursor", input_name="blocks"),
-    InvalidPaginationError(_REFERENCE, None, "limit", input_name="blocks"),
-    RowTooLargeError(
-        _REFERENCE, None, "https://example.test/input/download", input_name="blocks"
-    ),
-    RowTooLargeError(_REFERENCE, "snow", "https://example.test/api/table/download"),
-    InvalidPaginationError(_REFERENCE, "snow", "cursor"),
-    InvalidPaginationError(_REFERENCE, "snow", "limit"),
     ResultNotFoundError(_REFERENCE),
     ResultNotFoundError(_REFERENCE, '雪/"?'),
     ResultIntegrityError(_REFERENCE),
@@ -70,8 +58,6 @@ def test_error_payload_round_trip(error: ResultAccessError) -> None:
     http_response = retrieval_error_response(error)
     assert http_response.status_code == error_status(payload)
     expected_statuses: dict[type[ResultAccessError], int] = {
-        InvalidPaginationError: 422,
-        RowTooLargeError: 422,
         ResultNotFoundError: 404,
         ReportNotFoundError: 404,
         ResultIntegrityError: 500,
@@ -109,42 +95,18 @@ def test_unrecognized_errors_are_not_guessed(payload: object, status: int) -> No
     assert decode_error(payload, status=status) is None
 
 
-@pytest.mark.parametrize(
-    "field", ["code", "message", "job_id", "output_name", "parameter"]
-)
-def test_pagination_error_requires_every_field(field: str) -> None:
-    payload = error_payload(
-        InvalidPaginationError(_REFERENCE, "snow", "cursor")
-    ).model_dump()
-    del payload[field]
-    assert decode_error(payload, status=422) is None
-
-
-@pytest.mark.parametrize("parameter", ["offset", "", None, 1])
-def test_pagination_error_requires_supported_parameter(parameter: object) -> None:
-    payload = error_payload(
-        InvalidPaginationError(_REFERENCE, "snow", "cursor")
-    ).model_dump()
-    payload["parameter"] = parameter
-    assert decode_error(payload, status=422) is None
-
-
 def test_paths_keep_resource_kinds_and_encoded_segments() -> None:
     result = f"results/{_REFERENCE}"
     report = f"executions/{_EXECUTION}/report"
     assert result_description_path(_REFERENCE) == result
-    assert (
-        result_description_download_path(_REFERENCE) == f"{result}/description/download"
-    )
     assert report_inspection_path(_EXECUTION) == f"{report}/inspection"
     assert report_download_path(_EXECUTION) == f"{report}/download"
-    table = f"{result}/tables/%E9%9B%AA%20%2F%25%3F%23"
-    assert table_download_path(_REFERENCE, "雪 /%?#") == f"{table}/download"
-    assert table_rows_path(_REFERENCE, "雪 /%?#") == f"{table}/rows"
-    for name in (".", ".."):
-        path = table_rows_path(_REFERENCE, name)
-        url = absolute_api_url("https://example.test:8443/public/api/", path)
-        assert httpx.URL(url).raw_path.decode() == f"/public/api/{path}"
+    table = f"{result}/tables/download?output_name=%E9%9B%AA+%2F%25%3F%23"
+    assert table_download_path(_REFERENCE, "雪 /%?#") == table
+    assert (
+        absolute_api_url("https://example.test:8443/public/api/", table)
+        == f"https://example.test:8443/public/api/{table}"
+    )
     assert absolute_api_url("https://example.test/public/api/", f"/{result}") == (
         f"https://example.test/public/api/{result}"
     )
@@ -340,14 +302,3 @@ def test_sdk_domain_errors_preserve_context_and_validation_is_distinct(
                     assert "validation error" in result["content"][0]["text"]
 
     asyncio.run(run())
-
-
-@pytest.mark.parametrize(
-    "field", ["code", "message", "job_id", "output_name", "download_url"]
-)
-def test_oversized_error_requires_every_field(field: str) -> None:
-    payload = error_payload(
-        RowTooLargeError(_REFERENCE, "snow", "https://example.test/table/download")
-    ).model_dump()
-    del payload[field]
-    assert decode_error(payload, status=422) is None

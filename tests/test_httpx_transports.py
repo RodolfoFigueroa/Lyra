@@ -879,20 +879,3 @@ def test_atomic_error_body_stream_failure_closes_response(
     assert caught.value.__cause__ is failure
     assert stream.closed
     assert response.is_closed
-
-
-def test_row_request_encoding(transport: TransportHarness) -> None:
-    consumer = transport.open(api_key="consumer")
-    transport.responses.append(
-        httpx.Response(200, json={"rows": [], "next_cursor": None})
-    )
-    page = transport.resolve(
-        consumer.request(
-            endpoints.get_result_rows("a" * 32, "named output", 3, "opaque+/=")
-        )
-    )
-    assert page.rows == []
-    request = transport.requests[-1]
-    assert request.url.path.endswith("/tables/named output/rows")
-    assert dict(request.url.params) == {"limit": "3", "cursor": "opaque+/="}
-    assert request.headers["authorization"] == "Bearer consumer"

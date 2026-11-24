@@ -162,7 +162,7 @@ def test_reopened_frames_and_exports(
 
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
 @pytest.mark.anyio
-async def test_effective_descriptions_pages_and_arrow(
+async def test_effective_descriptions_and_arrow(
     expired_result: tuple[ApplicationRuntime, str],
 ) -> None:
     runtime, ref = expired_result
@@ -178,8 +178,8 @@ async def test_effective_descriptions_pages_and_arrow(
         response.raise_for_status()
         inspection = response.json()
         mcp = await call_tool(backend, "lyra_describe_result", {"job_id": ref})
-        assert mcp["structuredContent"]["result"] == inspection
-        linked = inspection["description"]["location_inputs"]["linked"]
+        assert mcp["structuredContent"]["result"]["description"] == inspection
+        linked = inspection["location_inputs"]["linked"]
         assert linked["source_scope"]["intervention"] == {
             "catalog": "sources",
             "id": "links",
@@ -191,37 +191,9 @@ async def test_effective_descriptions_pages_and_arrow(
             "revision": "2",
         }
 
-        endpoint = f"/results/{ref}/location-inputs/linked"
-        rows = []
-        query = {"limit": 1}
-        while True:
-            response = await http.get(f"{endpoint}/rows", params=query)
-            response.raise_for_status()
-            page = response.json()
-            wire = await call_tool(
-                backend,
-                "lyra_get_location_input_rows",
-                {
-                    "job_id": ref,
-                    "input_name": "linked",
-                    **query,
-                },
-            )
-            assert wire["structuredContent"] == page
-            rows.extend(page["rows"])
-            if page["next_cursor"] is None:
-                break
-            query["cursor"] = page["next_cursor"]
-        assert [
-            (row["source_location_id"], row["location_id"], row["count"])
-            for row in rows
-        ] == [
-            ("a", "a", "1"),
-            ("x", "001", str(COUNT)),
-            ("y", "001", str(COUNT)),
-        ]
-        assert shapely.from_wkt(rows[1]["geometry"]) == POINT
-        response = await http.get(f"{endpoint}/download")
+        response = await http.get(
+            f"/results/{ref}/location-inputs/download", params={"input_name": "linked"}
+        )
         response.raise_for_status()
         with pa.ipc.open_stream(response.content) as stream:
             for role in ("source_scope", "provider_scope"):

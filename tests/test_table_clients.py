@@ -19,11 +19,9 @@ from typing_extensions import override
 from lyra.api import AsyncLyraClient
 from lyra.api.exceptions import DownloadError
 from lyra.contracts.errors import (
-    InvalidPaginationError,
     ResultAccessError,
     ResultIntegrityError,
     ResultNotFoundError,
-    RowTooLargeError,
 )
 from lyra.contracts.retrieval_errors import error_payload, error_status
 from lyra.contracts.retrieval_paths import table_download_path
@@ -92,11 +90,7 @@ def test_native_table_values_and_isolation(
     reference = retained.reference
     body = b"".join(retained.service.stream_table(reference, "rows"))
     description = retained.service.read_description(reference)
-    client.responses.append(
-        httpx.Response(
-            200, json={"kind": "complete", "description": description.model_dump()}
-        )
-    )
+    client.responses.append(httpx.Response(200, json=description.model_dump()))
     captured = client.resolve(client.client.results.describe(reference))
     client.responses.extend(arrow_response(body) for _ in range(3))
     first = client.resolve(client.client.results.table(reference, "rows"))
@@ -179,13 +173,10 @@ def test_public_download_preserves_bytes_and_reads_normally(
     pd.testing.assert_frame_equal(frame, retained.frame, check_exact=True)
 
 
-@pytest.mark.parametrize("method", ["table", "download_table", "rows"])
+@pytest.mark.parametrize("method", ["table", "download_table"])
 @pytest.mark.parametrize(
     "error",
     [
-        RowTooLargeError(_ID, "rows", "https://example.test/api/table/download"),
-        InvalidPaginationError(_ID, "rows", "cursor"),
-        InvalidPaginationError(_ID, "rows", "limit"),
         ResultNotFoundError(_ID, "rows"),
         ResultIntegrityError(_ID, "rows"),
     ],
@@ -204,8 +195,6 @@ def test_structured_errors_precede_arrow_decoding(
         client.resolve(
             client.client.results.table(_ID, "rows")
             if method == "table"
-            else client.client.results.rows(_ID, "rows")
-            if method == "rows"
             else client.client.results.download_table(_ID, "rows", path)
         )
     assert vars(caught.value) == vars(error)

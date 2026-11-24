@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -19,22 +20,6 @@ if TYPE_CHECKING:
     from lyra.data.relational import Cell
     from lyra.runtime.sqlite_schema import DataTable, Registration
     from lyra.runtime.sqlite_store import Header, SQLiteStore
-
-
-@dataclass(frozen=True)
-class RowAddress:
-    """Private traversal position within one retained output selection."""
-
-    computation: int
-    key: tuple[str | int, ...]
-
-
-@dataclass(frozen=True)
-class RowBatch:
-    """Declared SQL cells and separate private positions for each stored row."""
-
-    rows: tuple[tuple[Cell, ...], ...]
-    addresses: tuple[RowAddress, ...]
 
 
 def _read(connection: sa.Connection, statement: sa.Select) -> list[sa.RowMapping]:
@@ -72,31 +57,6 @@ class ComputationRows:
         )
         if self.groups is not None:
             query = query.where(table.c.location_id.in_(self.groups))
-        return query
-
-    def statement(
-        self, limit: int, after: tuple[str | int, ...] | None = None
-    ) -> sa.Select:
-        """Select a bounded ordered batch after an optional private row address.
-
-        Returns:
-            A SQL query that never deduplicates visible row values.
-        """
-        query = (
-            self.select(*self.data.logical_columns).order_by(*self.keys).limit(limit)
-        )
-        if after is not None:
-            query = query.where(
-                sa.or_(
-                    *(
-                        sa.and_(
-                            *(self.keys[j] == after[j] for j in range(i)),
-                            column > after[i],
-                        )
-                        for i, column in enumerate(self.keys)
-                    )
-                )
-            )
         return query
 
     def validate(self, connection: sa.Connection, counts: int | dict[str, int]) -> None:
@@ -195,65 +155,36 @@ class OutputSelection:
     computations: tuple[ComputationRows, ...]
 
     def batches(
-        self,
-        batch_size: int = 1024,
-        *,
-        after: RowAddress | None = None,
-        limit: int | None = None,
-    ) -> Generator[RowBatch]:
-        """Yield bounded cells and private positions, closing each SQL cursor.
-
-        The caller owns the connection and must keep its context open throughout
-        traversal. No cursor remains open across a yield, including early exits.
-        Internal callers may supply a validated exclusive address and total limit.
-
-        Yields:
-            At most batch_size rows from one selected computation at a time.
+        self, batch_size: int = 1024
+    ) -> Generator[tuple[tuple[Cell, ...], ...]]:
+        """Yield ordered cells in bounded batches from each computation's cursor.
 
         Raises:
             ValueError: If the batch size is not a positive integer.
         """
-        if (
-            isinstance(batch_size, bool)
-            or not isinstance(batch_size, int)
-            or batch_size < 1
-        ):
+        if type(batch_size) is not int or batch_size < 1:
             msg = "Batch size must be a positive integer"
             raise ValueError(msg)
-        remaining = limit
-        for index, computation in enumerate(self.computations):
-            if after is not None and index < after.computation:
-                continue
-            key = (
-                after.key if after is not None and index == after.computation else None
+        for computation in self.computations:
+            columns = [
+                computation.data.table.c[col.name].label(col.name)
+                for col in self.registration.columns
+            ]
+            # A columnless table still needs a projection to yield its rows.
+            query = computation.select(*(columns or [sa.null()])).order_by(
+                *computation.keys
             )
-            while remaining is None or remaining > 0:
-                size = batch_size if remaining is None else min(batch_size, remaining)
-                rows = _read(self.connection, computation.statement(size, key))
-                if not rows:
-                    break
-                addresses = tuple(
-                    RowAddress(
-                        index, tuple(row[column.key] for column in computation.keys)
-                    )
-                    for row in rows
-                )
-                yield RowBatch(
-                    tuple(
+            with closing(self.connection.execute(query)) as cursor:
+                for rows in cursor.mappings().partitions(batch_size):
+                    yield tuple(
                         tuple(row[column.name] for column in self.registration.columns)
                         for row in rows
-                    ),
-                    addresses,
-                )
-                key = addresses[-1].key
-                if remaining is not None:
-                    remaining -= len(rows)
-                if len(rows) < size:
-                    break
+                    )
 
     def frame(self) -> pd.DataFrame:
         """Return a detached native frame using retained logical types and CRS."""
-        return frame_from_rows(
-            (row for batch in self.batches() for row in batch.rows),
-            self.registration.storage_description(),
-        )
+        with closing(self.batches()) as batches:
+            return frame_from_rows(
+                (row for batch in batches for row in batch),
+                self.registration.storage_description(),
+            )
