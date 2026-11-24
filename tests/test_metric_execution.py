@@ -26,7 +26,7 @@ def test_named_outputs_complete_zero_row_owners_and_detach(*, spatial: bool) -> 
             {
                 "location_id": ["a", "b"],
                 "row_key": ["same", "same"],
-                "value": ["1", None],
+                "value": pd.array([1, None], dtype="Int64"),
             }
         )
         if spatial:
@@ -73,7 +73,7 @@ def test_invalid_results_never_complete(fault: str) -> None:
             {
                 "location_id": [fault if fault in {"reference", "edited"} else "a"],
                 "row_key": ["row"],
-                "value": ["-1" if fault == "check" else "1"],
+                "value": pd.array([-1 if fault == "check" else 1], dtype="Int64"),
             }
         )
         if fault == "duplicate":
@@ -145,7 +145,13 @@ def test_downstream_named_inputs_and_producer_references_are_independent() -> No
     )
     def producer(main: gpd.GeoDataFrame) -> pd.DataFrame:
         assert "a" in main.location_id.tolist()
-        frame = pd.DataFrame({"location_id": ["a"], "row_key": ["row"], "value": [1]})
+        frame = pd.DataFrame(
+            {
+                "location_id": ["a"],
+                "row_key": ["row"],
+                "value": pd.array([1], dtype="Int64"),
+            }
+        )
         retained.append(frame)
         return frame
 

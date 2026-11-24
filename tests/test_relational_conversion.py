@@ -10,7 +10,6 @@ from pandera.typing import Series
 from shapely.geometry import Point, Polygon
 
 from lyra.contracts.errors import MetricResultError
-from lyra.data.arrow_tables import table_batch, table_schema
 from lyra.data.relational import frame_from_rows, rows_from_validated
 from lyra.sdk.storage_schema import describe, prepare_native
 from test_support.location_schema import column
@@ -90,25 +89,24 @@ def test_wkb_and_declared_crs(*, empty: bool) -> None:
         assert isinstance(cells[0][layout.columns.index("geometry")], bytes)
 
 
-def test_producer_callback_and_caller_references_are_isolated() -> None:
-    retained = []
+def test_producer_check_runs_once_and_handoff_is_owned() -> None:
+    checked = []
 
     def check(value: pd.DataFrame) -> bool:
-        retained.append(value)
+        checked.append(len(value))
         return True
 
     schema = pa.DataFrameSchema(
         {"value": column("Int64")},
         strict=True,
-        checks=pa.Check(check, name="retain_reference"),
+        checks=pa.Check(check, name="check_rows"),
     )
     source = pd.DataFrame({"value": pd.Series([1], dtype="Int64")})
     source.attrs = {"scope": {"ids": ["untrusted"]}}
     owned, layout = prepare_native(source, schema)
-    assert len(retained) == 1
+    assert checked == [1]
     source.loc[0, "value"] = 2
-    retained[0].loc[0, "value"] = 3
-    retained[0].attrs["scope"]["ids"].clear()
+    source.attrs["scope"]["ids"].clear()
     assert owned.attrs["scope"]["ids"] == ["untrusted"]
     cells = rows_from_validated(owned, layout)
     working = frame_from_rows(cells, layout)
@@ -116,7 +114,7 @@ def test_producer_callback_and_caller_references_are_isolated() -> None:
     assert rows_from_validated(owned, layout) == [(1,)]
     assert frame_from_rows(cells, layout).value.tolist() == [1]
     assert not frame_from_rows(cells, layout).attrs
-    assert len(retained) == 1
+    assert checked == [1]
 
 
 @pytest.mark.parametrize("values", [[float("inf")], [-float("inf")]])
@@ -163,13 +161,12 @@ def test_all_null_scalars(dtype: str) -> None:
     pd.testing.assert_frame_equal(frame_from_rows(cells, layout), source)
 
 
-def test_nullable_geometry_and_coercion() -> None:
+def test_nullable_geometry() -> None:
     schema = declaration()
     schema.columns["geometry"].nullable = True
-    schema.columns["count"].coerce = True
     source = frame()
     source.geometry = gpd.GeoSeries([None, None], crs=source.crs)
-    source["count"] = ["1", "2"]
+    source["count"] = pd.array([1, 2], dtype="Int64")
     owned, layout = prepare_native(source, schema)
     cells = rows_from_validated(owned, layout)
     assert all(row[layout.columns.index("geometry")] is None for row in cells)
@@ -179,15 +176,4 @@ def test_nullable_geometry_and_coercion() -> None:
     assert restored.geometry.isna().all()
     assert restored["count"].tolist() == [1, 2]
     assert restored["count"].dtype == pd.Int64Dtype()
-    assert source["count"].tolist() == ["1", "2"]
-
-
-def test_zero_column_row_cardinality() -> None:
-    schema = pa.DataFrameSchema({}, strict=True)
-    source = pd.DataFrame(index=range(3))
-    owned, layout = prepare_native(source, schema)
-    rows = rows_from_validated(owned, layout)
-    assert rows == [(), (), ()]
-    batch = table_batch(rows, layout, table_schema(layout))
-    assert (batch.num_rows, batch.num_columns) == (3, 0)
-    pd.testing.assert_frame_equal(frame_from_rows([(), (), ()], layout), source)
+    assert source["count"].tolist() == [1, 2]

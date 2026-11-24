@@ -14,6 +14,7 @@ from lyra.runtime.planning.preparation import PreparationError, prepare_executio
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_frame, value_schema
 
 
 def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None:
@@ -68,11 +69,11 @@ def test_metric_visibility(visibility: tuple[bool, bool]) -> None:
             code_revision="1",
             name=name,
             description="Variant",
-            outputs={"data": pa.DataFrameSchema({}, strict=True)},
+            outputs={"data": value_schema()},
             private=private,
         )
         def handler() -> pd.DataFrame:
-            return pd.DataFrame()
+            return value_frame()
 
         return handler
 

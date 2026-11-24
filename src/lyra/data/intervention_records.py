@@ -118,8 +118,21 @@ def encode_additions(
             msg = f"Column {column.name!r} requires {column.dtype}, got {values.dtype}"
             raise ValueError(msg)
     validate_serializable(frame)
+    return encode_validated_additions(frame, metadata)
+
+
+def encode_validated_additions(
+    frame: gpd.GeoDataFrame, metadata: OutputMetadata
+) -> list[dict[str, str | float | bool | None]]:
+    """Encode records already accepted against the provider declaration.
+
+    Returns:
+        Schema-directed JSON records in input order.
+    """
     layout = RowLayout(
-        columns, dtypes, tuple(column.nullable for column in metadata.columns)
+        tuple(column.name for column in metadata.columns),
+        tuple(logical_dtype(column.dtype) for column in metadata.columns),
+        tuple(column.nullable for column in metadata.columns),
     )
     return [encode_row(row, layout) for row in rows_from_validated(frame, layout)]
 

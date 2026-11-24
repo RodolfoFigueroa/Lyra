@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field
 
@@ -27,6 +26,7 @@ from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk import Dependency, Input, LocationDependency, metric
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.storage_schema import empty_frame
+from test_support.table_fixtures import value_frame, value_schema
 from tests.metric_execution_helpers import schema, setup
 
 
@@ -280,11 +280,11 @@ def test_unpartitioned_dependency_keeps_whole_reference_context() -> None:
         name="summary",
         description="Whole selection summary",
         inputs={"main": LocationDependency(provider="tracts")},
-        outputs={"data": pa.DataFrameSchema(strict=True)},
+        outputs={"data": value_schema()},
     )
     def summary(main: gpd.GeoDataFrame) -> pd.DataFrame:
         del main
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         name="findings",
@@ -409,12 +409,12 @@ def test_empty_producer_revision_reaches_consuming_computation(*, nested: bool) 
                 "main": LocationDependency(provider="tracts"),
                 "data": Dependency("data", producer="middle" if nested else "producer"),
             },
-            outputs={"data": pa.DataFrameSchema(strict=True)},
+            outputs={"data": value_schema()},
         )
         def findings(main: gpd.GeoDataFrame, data: pd.DataFrame) -> pd.DataFrame:
             assert main.empty
             assert data.empty
-            return pd.DataFrame()
+            return value_frame()
 
         executor, invocation = setup(findings, producer, middle, ids=())
         outcome = executor.execute(invocation)

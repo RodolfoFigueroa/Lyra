@@ -1,6 +1,5 @@
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
@@ -16,6 +15,7 @@ from test_support.location_helpers import (
     provider_plugin,
     scoped_payload,
 )
+from test_support.table_fixtures import value_frame, value_schema
 from tests.geometry_fixtures import projected_collection
 
 
@@ -59,11 +59,11 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
         inputs={"location": LocationDependency(provider="test:units")},
         name="point_contract",
         description="Check point inputs.",
-        outputs={"point_contract": pa.DataFrameSchema({}, strict=True)},
+        outputs={"point_contract": value_schema()},
     )
     def handler(location: gpd.GeoDataFrame) -> pd.DataFrame:
         observed.append(location)
-        return pd.DataFrame(index=location.location_id.tolist())
+        return value_frame(len(location))
 
     plugin = PluginDefinition(metrics=[handler])
     payload = projected_collection("Point")

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import geopandas as gpd
+import pyarrow as pa
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.sql.dml import Insert
@@ -46,6 +47,18 @@ def test_native_inputs_survive_closure(tmp_path: Path) -> None:
     with ResultStore.open(store.path) as reader:
         blocks = reader.read_location_input(reference, "blocks")
         pairs = reader.read_location_input(reference, "nearby")
+        declared = (
+            reader.describe_result(reference).location_inputs["nearby"].table_schema
+        )
+        source = next(
+            column for column in declared.columns if column.name == "source_location_id"
+        )
+        with pa.ipc.open_stream(
+            b"".join(reader.stream_location_input(reference, "nearby"))
+        ) as stream:
+            field = stream.schema.field(source.name)
+            assert field.metadata[b"description"] == source.description.encode()
+            assert field.nullable == source.nullable
         assert blocks.location_id.tolist() == ["a", "b"]
         assert str(blocks["count"].dtype) == "Int64"
         assert blocks["count"].isna().tolist() == [False, True]

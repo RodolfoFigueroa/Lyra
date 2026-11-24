@@ -15,7 +15,6 @@ from lyra.runtime.location_inputs import (
 from lyra.runtime.operation_pairs import OperationPairs
 from lyra.runtime.provider_records import ProviderRecords, provider_registration
 from lyra.runtime.result_descriptions import ResultDescriptions
-from lyra.runtime.sqlite_schema import StoredColumn
 from lyra.runtime.sqlite_store import Header, SQLiteStore
 from test_support.publication import publish_result
 from tests.acquisition_helpers import acquisition_fixture
@@ -66,20 +65,7 @@ def retained(store: SQLiteStore) -> tuple[InputSelection, InputSelection]:
             table_schema=metadata,
             availability="available",
         ),
-        registration=registration.model_copy(
-            update={
-                "table_schema": metadata,
-                "columns": (
-                    StoredColumn(
-                        name="source_location_id",
-                        dtype="string",
-                        nullable=False,
-                        unit=None,
-                    ),
-                    *registration.columns,
-                ),
-            }
-        ),
+        registration=registration.forwarded,
         operations=(
             OperationSelection(header=header, sources=("A", "B"), targets=("a",)),
         ),

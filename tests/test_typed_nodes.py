@@ -14,6 +14,7 @@ from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from test_support.runtime_inputs import native_inputs
+from test_support.table_fixtures import value_frame, value_schema
 from tests.provider_helpers import FakeProvider
 
 
@@ -31,7 +32,7 @@ def test_named_concrete_inputs_and_operation_output() -> None:
         description="Compare population observations.",
         outputs={
             "comparison": pa.DataFrameSchema(
-                {},
+                value_schema().columns,
                 strict=True,
                 metadata={
                     "meaning": "Population difference",
@@ -50,7 +51,7 @@ def test_named_concrete_inputs_and_operation_output() -> None:
             == set(current.columns)
             == {"location_id", "geometry", "label"}
         )
-        return pd.DataFrame()
+        return value_frame()
 
     @location_operation(
         code_revision="1",
@@ -124,14 +125,14 @@ def test_declarations_reject_incomplete_inputs_and_additional_operation_source()
 ):
     def handler(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> pd.DataFrame:
         del left, right
-        return pd.DataFrame()
+        return value_frame()
 
     with pytest.raises(PluginDefinitionError, match="unsupported name"):
         metric(
             code_revision="1",
             name="incomplete",
             description="Incomplete inputs.",
-            outputs={"result": pa.DataFrameSchema({}, strict=True)},
+            outputs={"result": value_schema()},
             inputs={"left": LocationDependency(provider=FakeProvider.id)},
         )(handler)
     with pytest.raises(PluginDefinitionError, match="one provider source"):
@@ -152,11 +153,11 @@ def test_registered_provider_is_input_schema_authority() -> None:
         code_revision="1",
         name="consume",
         description="Use all registered fields.",
-        outputs={"result": pa.DataFrameSchema({}, strict=True)},
+        outputs={"result": value_schema()},
         inputs={"subject": LocationDependency(provider=FakeProvider.id)},
     )
     def consume(subject: gpd.GeoDataFrame) -> pd.DataFrame:
-        return pd.DataFrame(index=subject.index)
+        return value_frame(len(subject))
 
     plugin = PluginDefinition(metrics=[consume], resources={"places": FakeProvider})
     location = plugin.node_manifests[0].location_inputs["subject"].contract

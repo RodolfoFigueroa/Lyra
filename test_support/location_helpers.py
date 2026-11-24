@@ -82,7 +82,7 @@ def producer_result(
             continue
         if name not in frame and frame.empty:
             frame[name] = pd.Series([], dtype=object)
-        if name in frame and not (column.coerce or contract.schema.coerce):
+        if name in frame:
             frame[name] = column.dtype.coerce(frame[name])
     frame = frame[
         [name for name in contract.schema.columns if name in frame]

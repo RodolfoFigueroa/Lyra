@@ -1,7 +1,6 @@
 """Mixed SDK dependency graphs preserve binding paths and validate receiving inputs."""
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
@@ -9,6 +8,7 @@ from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.parameters import use_key
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_frame, value_schema
 from tests.live_graph_helpers import operation, plugins
 
 
@@ -93,10 +93,10 @@ def test_operation_names_share_graph_namespace(name: str) -> None:
         name=name,
         description="Independent output",
         code_revision="1",
-        outputs={"select": pa.DataFrameSchema(strict=True)},
+        outputs={"select": value_schema()},
     )
     def calculate() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     definitions = plugins()
     definitions["extra"] = PluginDefinition(metrics=[calculate])

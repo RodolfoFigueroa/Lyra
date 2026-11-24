@@ -12,7 +12,6 @@ import shapely
 from pyproj import CRS
 
 from lyra.contracts.provider_scope import EffectiveScope
-from lyra.data.arrow_conversion import to_arrow
 from lyra.data.relational import checked_column
 
 if TYPE_CHECKING:
@@ -22,24 +21,22 @@ if TYPE_CHECKING:
     from lyra.data.relational import Cell, StorageDescription
 
 
-def table_schema(
-    description: StorageDescription, **scopes: DatasetScope | None
-) -> pa.Schema:
-    """Return declared Arrow fields, GeoArrow CRS and applicable dataset scopes.
+def base_schema(description: StorageDescription) -> pa.Schema:
+    """Build the scope-independent download schema from logical columns.
 
-    For intervened tables, schema metadata carries the retained JSON scope for
-    each ID role, including the ordinary counterpart in a correspondence.
+    Returns:
+        Ordered Arrow fields and native pandas reconstruction metadata.
     """
     scalars = pd.DataFrame(
         {
-            name: pd.Series(dtype=dtype)
+            name: pd.Series(dtype="string[python]" if dtype == "string" else dtype)
             for name, dtype in zip(
                 description.columns, description.pandas_dtypes, strict=True
             )
             if dtype != "geometry"
         }
     )
-    properties = to_arrow(scalars, description.properties).schema
+    properties = pa.Schema.from_pandas(scalars, preserve_index=False)
     fields = []
     for name, nullable, text, unit in zip(
         description.columns,
@@ -64,27 +61,35 @@ def table_schema(
             ).encode()
             field = pa.field(name, pa.binary(), nullable=nullable)
         else:
-            field = properties.field(name)
+            field = properties.field(name).with_nullable(nullable)
             metadata = {**(field.metadata or {}), **metadata}
         fields.append(field.with_metadata(metadata))
-    metadata = {
-        **(description.properties.metadata or {}),
-        **(properties.metadata or {}),
-    }
-    if any(isinstance(scope, EffectiveScope) for scope in scopes.values()):
-        metadata.update(
-            {
-                role.encode(): scope.model_dump_json().encode()
-                for role, scope in scopes.items()
-                if scope is not None
-            }
-        )
+    metadata = dict(properties.metadata or {})
     if description.metadata is not None:
         for name in ("meaning", "granularity"):
             value = getattr(description.metadata, name)
             if value is not None:
                 metadata[name.encode()] = value.encode()
     return pa.schema(fields, metadata=metadata)
+
+
+def table_schema(schema: pa.Schema, **scopes: DatasetScope | None) -> pa.Schema:
+    """Attach the selected intervention scopes for this download.
+
+    Returns:
+        An Arrow schema with the applicable scope metadata.
+    """
+    if not any(isinstance(scope, EffectiveScope) for scope in scopes.values()):
+        return schema
+    metadata = dict(schema.metadata or {})
+    metadata.update(
+        {
+            role.encode(): scope.model_dump_json().encode()
+            for role, scope in scopes.items()
+            if scope is not None
+        }
+    )
+    return schema.with_metadata(metadata)
 
 
 def table_batch(
@@ -105,7 +110,4 @@ def table_batch(
         if pa.types.is_boolean(field.type):
             values = [None if value is None else bool(value) for value in values]
         arrays.append(pa.array(values, type=field.type))
-    if not arrays:
-        batch = pa.record_batch([pa.nulls(len(rows))], names=["_rows"]).select([])
-        return batch.replace_schema_metadata(schema.metadata)
     return pa.RecordBatch.from_arrays(arrays, schema=schema)

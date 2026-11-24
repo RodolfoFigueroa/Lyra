@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import TYPE_CHECKING
 
 from lyra.contracts.interventions import (
     AcceptedIntervention,
     InterventionSpec,
 )
-from lyra.data.intervention_records import decode_additions, encode_additions
+from lyra.data.intervention_records import decode_additions, encode_validated_additions
 from lyra.data.interventions import Intervention
-from lyra.sdk.provider_schema import ProviderSchema
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from lyra.sdk.provider_schema import ProviderSchema
 
 __all__ = ["Intervention", "accept_interventions"]
 
@@ -54,13 +54,6 @@ def accept_interventions(
 def _accept(
     value: Intervention | InterventionSpec, schema: ProviderSchema
 ) -> AcceptedIntervention:
-    # Interventions must validate the submitted types even when a provider's
-    # producer schema normally permits coercion of its acquired records.
-    declaration = deepcopy(schema.schema)
-    declaration.coerce = False
-    for column in declaration.columns.values():
-        column.coerce = False
-    strict_schema = ProviderSchema(declaration)
     if isinstance(value, Intervention):
         frame = value.add
     else:
@@ -71,7 +64,7 @@ def _accept(
             contents.pop("add")
         value = InterventionSpec.model_validate(contents)
         frame = (
-            decode_additions(value.add, strict_schema.metadata)
+            decode_additions(value.add, schema.metadata)
             if "add" in value.model_fields_set
             else None
         )
@@ -84,6 +77,6 @@ def _accept(
         "add_omitted": frame is None,
     }
     if frame is not None:
-        validated = strict_schema.validate(frame)
-        payload["add"] = encode_additions(validated, schema.metadata)
+        validated = schema.validate(frame)
+        payload["add"] = encode_validated_additions(validated, schema.metadata)
     return AcceptedIntervention.model_validate(payload)

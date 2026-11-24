@@ -3,7 +3,6 @@
 from dataclasses import replace
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field
 
@@ -15,6 +14,7 @@ from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_schema
 from tests.live_graph_helpers import plugins
 from tests.node_declaration_helpers import provider
 
@@ -96,7 +96,7 @@ def test_effective_parameter_keys_and_output_contract_independence() -> None:
             name="measure",
             description="Measure",
             cache=policy,
-            outputs={"value": pa.DataFrameSchema(strict=True)},
+            outputs={"value": value_schema()},
         )
         def measure(parameters: Parameters) -> pd.DataFrame:
             del parameters

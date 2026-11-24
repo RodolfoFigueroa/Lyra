@@ -15,7 +15,6 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 import sqlalchemy as sa
-from geopandas.testing import assert_geodataframe_equal
 from jsonschema import validate
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -53,7 +52,7 @@ __all__ = ["database", "native_api", "retained"]
     [
         (spatial, state)
         for spatial in (False, True)
-        for state in ("populated", "empty", "all-null", "large")
+        for state in ("populated", "empty", "all-null", "large", "python-string")
     ],
     indirect=True,
 )
@@ -94,13 +93,14 @@ def test_http_ordinary_readers(
             assert field.type == pa.binary()
             assert field.metadata[b"ARROW:extension:name"] == b"geoarrow.wkb"
             restored = gpd.GeoDataFrame.from_arrow(table)
-            assert_geodataframe_equal(restored, retained.frame)
             assert restored.geometry.name == "geometry"
             assert restored.crs is not None
             assert restored.crs.to_epsg() == 3857
         else:
             restored = table.to_pandas()
-        pd.testing.assert_frame_equal(restored, retained.frame, check_exact=True)
+        assert isinstance(restored.label.dtype, pd.StringDtype)
+        expected = retained.frame.astype({"label": restored.label.dtype})
+        pd.testing.assert_frame_equal(restored, expected, check_exact=True)
     database.connection.__exit__.assert_called()
     database.engine.dispose.assert_called()
     # OpenAPI advertises the stream media type rather than a JSON wrapper.

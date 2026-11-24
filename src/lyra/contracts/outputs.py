@@ -28,7 +28,6 @@ class ColumnMetadata(StrictBaseModel):
     dtype: str
     parameters: JsonObject = Field(default_factory=dict)
     unique: bool = False
-    coerce: bool = False
     checks: list[CheckMetadata] = Field(default_factory=list)
     unit: ColumnUnit
     description: str = Field(min_length=1)
@@ -46,7 +45,6 @@ class OutputMetadata(StrictBaseModel):
 
     checks: list[CheckMetadata] = Field(default_factory=list)
     ordered: bool = False
-    coerce: bool = False
     unique: str | list[str] | list[list[str]] | None = None
 
     @model_validator(mode="after")

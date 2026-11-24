@@ -21,6 +21,7 @@ from lyra.runtime.sqlite_store import (
     SQLiteStore,
 )
 from lyra.sdk.storage_schema import describe, prepare_native
+from test_support.table_fixtures import value_schema
 from tests.metric_execution_helpers import schema as scoped_schema
 from tests.sqlite_helpers import Database, database
 
@@ -205,7 +206,7 @@ def test_atomic_outputs(
 def test_exact_output_names(
     database: Database, tmp_path: Path, names: tuple[str, ...]
 ) -> None:
-    layout = describe(pa.DataFrameSchema({}, strict=True))
+    layout = describe(value_schema())
     tables = MetricTables(SQLiteStore(tmp_path / "values.sqlite"))
     with pytest.raises(ValueError, match="exactly"):
         tables.publish(

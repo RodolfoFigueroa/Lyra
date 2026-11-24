@@ -5,7 +5,6 @@ from typing import Any
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 from typing_extensions import override
 
 from lyra.contracts.dependencies import Input
@@ -18,6 +17,7 @@ from lyra.sdk import PluginDefinition, location_operation, metric
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from test_support.location_operations import Places
 from test_support.runtime_inputs import native_inputs
+from test_support.table_fixtures import value_frame, value_schema
 from tests.graph_arguments_helpers import Producer
 
 _DEFAULT = object()
@@ -83,17 +83,17 @@ def implementation(
         inputs={"source": LocationDependency(provider=PreparedPlaces.id)},
         name="leaf",
         description="Leaf",
-        outputs={"leaf": pa.DataFrameSchema({}, strict=True)},
+        outputs={"leaf": value_schema()},
     )
     def leaf(source: gpd.GeoDataFrame, parameters: Producer) -> pd.DataFrame:
         seen.append(("leaf", source, parameters))
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         code_revision="1",
         name="middle",
         description="Middle",
-        outputs={"middle": pa.DataFrameSchema({}, strict=True)},
+        outputs={"middle": value_schema()},
         inputs={
             "source": LocationDependency(provider=PreparedPlaces.id),
             "table": Dependency("leaf", producer="leaf"),
@@ -119,7 +119,7 @@ def implementation(
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"root": pa.DataFrameSchema({}, strict=True)},
+        outputs={"root": value_schema()},
         inputs={
             "source": LocationDependency(provider=PreparedPlaces.id),
             "alias": LocationDependency(provider=PreparedPlaces.id),

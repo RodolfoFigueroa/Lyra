@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field
 
@@ -16,6 +15,7 @@ from lyra.runtime.planning.discovery import Discovery
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.table_fixtures import value_schema
 from tests.live_graph_helpers import operation
 from tests.node_declaration_helpers import Tracts, provider
 
@@ -29,7 +29,7 @@ class Options(MetricParameters):
     code_revision="1",
     description="Score counties.",
     inputs={"places": LocationDependency(provider="counties")},
-    outputs={"value": pa.DataFrameSchema(strict=True)},
+    outputs={"value": value_schema()},
 )
 def score(places: gpd.GeoDataFrame, *, parameters: Options) -> pd.DataFrame:
     del places, parameters
@@ -176,7 +176,7 @@ def test_receiving_routes_and_derived_inputs() -> None:
                 places=Input("derived")
             ),
         },
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
     )
     def consumer(
         seed: gpd.GeoDataFrame, derived: gpd.GeoDataFrame, table: pd.DataFrame
@@ -247,7 +247,7 @@ def test_python_omission_and_private_selection(monkeypatch: pytest.MonkeyPatch) 
         code_revision="1",
         description="Private calculation.",
         private=True,
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
     )
     def private_score(*, parameters: Options) -> pd.DataFrame:
         del parameters

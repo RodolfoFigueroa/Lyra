@@ -4,13 +4,14 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from pandera.engines.numpy_engine import String
 from pydantic import ValidationError
 from shapely.geometry import Point
 
 from lyra.contracts.accepted import ExecutionRequest
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.interventions import AcceptedIntervention, InterventionSpec
-from lyra.data.intervention_records import accepted_additions
+from lyra.data.intervention_records import accepted_additions, encode_additions
 from lyra.data.interventions import Intervention
 from lyra.sdk.interventions import accept_interventions
 from lyra.sdk.provider_schema import ProviderSchema
@@ -267,14 +268,12 @@ def test_record_completeness_and_duplicate_ids(problem: str) -> None:
         accept(spec(add=rows))
     data = additions()
     data["location_id"] = ["a", "a"]
-    with pytest.raises(ValueError, match="unique"):
+    with pytest.raises(ValueError, match="duplicate"):
         accept(native(data))
 
 
 def test_executable_checks_run_without_coercing_submitted_types() -> None:
     declared = declaration()
-    declared.coerce = True
-    declared.columns["count"].coerce = True
     declared.columns["count"].checks = [pa.Check.ge(0)]
     registered = ProviderSchema(declared)
     data = frame()
@@ -284,7 +283,6 @@ def test_executable_checks_run_without_coercing_submitted_types() -> None:
     data["count"] = pd.Series([-1, 2], dtype="Int64")
     with pytest.raises(MetricResultError):
         accept_interventions([native(data)], {"trees": registered})
-    assert registered.schema.coerce is True
 
 
 def test_ownership_of_frames_actions_metadata_and_nested_request_values() -> None:
@@ -372,6 +370,38 @@ def test_nullable_bool_preserves_executable_check() -> None:
         accept_interventions([native(data)], {"trees": ProviderSchema(declared)})
 
 
+@pytest.mark.parametrize("values", [["001", None], [None, None], []])
+def test_numpy_string_provider_and_additions_preserve_values(
+    values: list[str | None],
+) -> None:
+    declared = declaration()
+    declared.columns["label"] = column(String, nullable=True)
+    registered = ProviderSchema(declared)
+    labels = pd.Series(values, dtype=object if values else "string")
+    data = frame().iloc[: len(values)].assign(label=labels)
+    pd.testing.assert_series_equal(registered.validate(data).label, data.label)
+    encoded = encode_additions(data, registered.metadata)
+    (accepted,) = accept_interventions([native(data)], {"trees": registered})
+    assert accepted.add == encoded
+    assert [row["label"] for row in encoded] == values
+
+
+@pytest.mark.parametrize("value", [17, ["nested"]])
+def test_numpy_string_provider_and_additions_reject_nonstring_cells(
+    value: object,
+) -> None:
+    declared = declaration()
+    declared.columns["label"] = column(String)
+    registered = ProviderSchema(declared)
+    data = frame().assign(label=pd.Series(["001", value], dtype=object))
+    with pytest.raises(MetricResultError, match="label"):
+        registered.validate(data)
+    with pytest.raises(MetricResultError, match="label"):
+        accept_interventions([native(data)], {"trees": registered})
+    with pytest.raises(ValueError, match="label"):
+        encode_additions(data, registered.metadata)
+
+
 @pytest.mark.parametrize("empty", [True, False])
 def test_native_boolean_and_alternate_string_backing(*, empty: bool) -> None:
     data = additions().iloc[: 0 if empty else 1].astype({"label": "string[python]"})
@@ -379,3 +409,30 @@ def test_native_boolean_and_alternate_string_backing(*, empty: bool) -> None:
     assert [row["label"] for row in captured.add] == data.label.tolist()
     with pytest.raises(MetricResultError):
         accept(native(data.astype({"enabled": bool})))
+
+
+@pytest.mark.parametrize("storage", ["python", "pyarrow"])
+@pytest.mark.parametrize("values", [[], [None, None], ["001", None]])
+def test_provider_and_additions_accept_either_string_storage(
+    storage: str, values: list[str | None]
+) -> None:
+    declared = declaration()
+    other = "python" if storage == "pyarrow" else "pyarrow"
+    declared.columns["label"] = column(
+        f"string[{other}]", nullable=True, checks=pa.Check.str_startswith("0")
+    )
+    registered = ProviderSchema(declared)
+    data = (
+        frame()
+        .iloc[: len(values)]
+        .assign(label=pd.Series(values, dtype=f"string[{storage}]"))
+    )
+    validated = registered.validate(data)
+    assert validated.label.fillna("<missing>").tolist() == [
+        v if v is not None else "<missing>" for v in values
+    ]
+    (captured,) = accept_interventions([native(data)], {"trees": registered})
+    assert [row["label"] for row in captured.add] == values
+    invalid = frame().assign(label=pd.Series(["bad", None], dtype=f"string[{storage}]"))
+    with pytest.raises(MetricResultError):
+        registered.validate(invalid)

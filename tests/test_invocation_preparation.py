@@ -13,10 +13,7 @@ from lyra.runtime.arguments import (
     PreparedResolvedInvocation,
 )
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
-from test_support.location_helpers import (
-    producer_result,
-)
-from test_support.location_schema import column, contract, declaration, locations
+from test_support.location_schema import locations
 from tests.graph_arguments_helpers import Producer
 from tests.invocation_preparation_helpers import implementation, invocation_inputs
 
@@ -63,14 +60,8 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
     "invalid",
     [
         None,
-        producer_result(
-            locations({"count": "invalid"}),
-            contract(declaration(count=column(int, coerce=True))),
-        ),
-        producer_result(
-            locations({"unexpected": 2}),
-            contract(declaration(count=column(int, coerce=True))),
-        ),
+        locations({"count": "invalid"}),
+        locations({"unexpected": 2}),
     ],
 )
 def test_invalid_operation_result_prevents_consumer_preparation(

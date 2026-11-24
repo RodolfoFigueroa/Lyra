@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.runtime.local import LocalRunner
@@ -13,6 +12,7 @@ from lyra.sdk.context import RunContext
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO
 from lyra.server import worker
+from test_support.table_fixtures import value_frame, value_schema
 from tests.config_helpers import load_test_config
 
 
@@ -106,11 +106,11 @@ def test_local_and_worker_contexts_validate_reporting(
             code_revision="1",
             name="select",
             description="Capture reporting services",
-            outputs={"result": pa.DataFrameSchema({}, strict=True)},
+            outputs={"result": value_schema()},
         )
         def capture(context: RunContext) -> pd.DataFrame:
             contexts.append(context)
-            return pd.DataFrame()
+            return value_frame()
 
         LocalRunner.from_definitions(
             {"test": PluginDefinition(metrics=[capture])},

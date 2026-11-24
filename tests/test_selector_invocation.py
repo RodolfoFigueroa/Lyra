@@ -6,7 +6,6 @@ import geopandas as gpd
 import ibis.expr.operations as ops
 import ibis.expr.types as ir
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from geopandas.testing import assert_geodataframe_equal
 from pydantic import Field
@@ -20,6 +19,7 @@ from lyra.runtime.planning.native_bindings import bind_native_definitions
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_operations import Places
+from test_support.table_fixtures import value_frame, value_schema
 from tests.provider_schema_helpers import frame
 from tests.selector_helpers import prepared
 
@@ -252,13 +252,13 @@ def test_explicit_forwarding_supplies_both_callbacks() -> None:
             ).bind(declared_source=Input("seed")),
             "seed": LocationDependency(provider=Places.id),
         },
-        outputs={"result": pa.DataFrameSchema({}, strict=True)},
+        outputs={"result": value_schema()},
     )
     def consumer(
         records: gpd.GeoDataFrame, seed: gpd.GeoDataFrame, *, parameters: Parameters
     ) -> pd.DataFrame:
         del records, seed, parameters
-        return pd.DataFrame()
+        return value_frame()
 
     definition = PluginDefinition(metrics=[consumer])
     definitions = bind_native_definitions(

@@ -4,13 +4,13 @@ from collections.abc import Callable
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.table_fixtures import value_schema
 from tests.node_declaration_helpers import CENSUS, Tracts, provider
 
 
@@ -41,7 +41,7 @@ def plugins(
         description="Private producer.",
         private=True,
         inputs={"places": LocationDependency(provider="counties")},
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
         origins=[CENSUS],
     )
     def producer(places: gpd.GeoDataFrame, *, parameters: Parameters) -> pd.DataFrame:
@@ -64,7 +64,7 @@ def plugins(
             "first": binding or use(2020),
             "second": use(2021),
         },
-        outputs={"result": pa.DataFrameSchema(strict=True)},
+        outputs={"result": value_schema()},
     )
     def consumer(
         seed: gpd.GeoDataFrame,

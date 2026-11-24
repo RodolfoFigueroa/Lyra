@@ -169,7 +169,7 @@ def retain_descriptions(store: SQLiteStore) -> InputBindings:
         )
         store.initialize((registration,))
         if desc.kind == "correspondence":
-            registration = registration.forwarded()
+            registration = registration.forwarded
         refs[name] = (
             LocationInputs(store).publish(
                 InputSelection(description=desc, registration=registration)

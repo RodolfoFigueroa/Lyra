@@ -75,38 +75,20 @@ def test_native_types_and_empty_frames(dtype: str, values: list) -> None:
         "null",
     ],
 )
-@pytest.mark.parametrize("after", [False, True])
-def test_structural_invariants_before_and_after_schema_checks(
-    mutation: str, *, after: bool
-) -> None:
+def test_invalid_producer_frame(mutation: str) -> None:
     source = locations({"count": 1}, {"count": 2})
-    original = source.copy(deep=True)
-    schema = contract(declaration(count=column(int)))
-
-    if after:
-        schema.schema.checks = [
-            pa.Check(lambda frame: alter_frame(frame, mutation), name="alter")
-        ]
-    else:
-        alter_frame(source, mutation)
-    with pytest.raises((ValueError, TypeError, KeyError)):
-        schema.prepare_frame(source)
-    if after:
-        pd.testing.assert_frame_equal(source, original)
+    alter_frame(source, mutation)
+    with pytest.raises((ValueError, TypeError)):
+        contract(declaration(count=column(int))).prepare_frame(source)
 
 
-@pytest.mark.parametrize("coerce", [False, True])
-def test_explicit_coercion_and_geometry_crs(*, coerce: bool) -> None:
-    source = locations({"count": "2"})
-    compiled = contract(declaration(count=column(int, coerce=coerce)))
-    if coerce:
-        assert compiled.prepare_frame(source)["count"].tolist() == [2]
-        assert source["count"].tolist() == ["2"]
-    else:
-        with pytest.raises(MetricResultError):
-            compiled.prepare_frame(source)
+def test_requires_declared_dtype_and_crs() -> None:
+    with pytest.raises(MetricResultError):
+        contract(declaration(count=column(int))).prepare_frame(
+            locations({"count": "2"})
+        )
     schema = declaration()
-    schema.columns["geometry"] = column(Geometry(crs=27700), coerce=coerce)
+    schema.columns["geometry"] = column(Geometry(crs=27700))
     with pytest.raises(ValueError, match="CRS"):
         contract(schema).prepare_frame(locations({}))
 

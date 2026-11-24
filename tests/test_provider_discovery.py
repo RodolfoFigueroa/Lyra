@@ -6,7 +6,6 @@ from unittest.mock import Mock, create_autospec
 import geopandas as gpd
 import httpx
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from fastapi import FastAPI
 
@@ -24,6 +23,7 @@ from lyra.server.routes import metrics
 from lyra.server.runtime import get_catalog
 from test_support.mcp import call_tool
 from test_support.routing_plugins import conversion
+from test_support.table_fixtures import value_schema
 from tests.node_declaration_helpers import provider
 
 CENSUS = Origin(id="census", revision="2025", description="Census release")
@@ -73,11 +73,7 @@ def definition(monkeypatch: pytest.MonkeyPatch) -> PluginDefinition:
             ),
         },
         origins=(CENSUS,),
-        outputs={
-            "result": pa.DataFrameSchema(
-                strict=True,
-            )
-        },
+        outputs={"result": value_schema()},
     )
     def measure(
         tracts: gpd.GeoDataFrame,

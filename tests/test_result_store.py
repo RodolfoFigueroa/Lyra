@@ -27,6 +27,7 @@ from lyra.sdk import PluginDefinition, loading, metric
 from lyra.server.response_budget import http_response_budget
 from lyra.server.result_rows import RowPageBuilder
 from test_support.publication import publish_result
+from test_support.table_fixtures import value_frame, value_schema
 from tests.result_description_helpers import publish_values
 from tests.retained_table_helpers import retained_service
 from tests.sqlite_helpers import Database, database
@@ -432,13 +433,13 @@ def test_missing_declared_output_selection(
 def test_unpartitioned_empty_output_inventory(
     database: Database, tmp_path: Path, damage: str
 ) -> None:
-    schema = pa.DataFrameSchema(strict=True)
+    schema = value_schema()
 
     @metric(
         name="empty", description="Empty tables", outputs={"a": schema, "b": schema}
     )
     def empty() -> dict[str, pd.DataFrame]:
-        return {"a": pd.DataFrame(), "b": pd.DataFrame()}
+        return {"a": value_frame(), "b": value_frame()}
 
     path = tmp_path / "empty.sqlite"
     result = LocalRunner.from_definitions(

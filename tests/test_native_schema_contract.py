@@ -1,5 +1,6 @@
 """Registration and native producer invariants for fixed table schemas."""
 
+from collections.abc import Callable
 from typing import Literal
 
 import pandas as pd
@@ -68,12 +69,9 @@ def test_effective_model_strictness_is_required(
 
 
 @pytest.mark.parametrize("value", [2**63, -(2**63) - 1, str(2**63)])
-@pytest.mark.parametrize("coerce", [False, True])
-def test_integer_overflow_cannot_be_hidden_by_coercion(
-    value: object, *, coerce: bool
-) -> None:
-    schema = pa.DataFrameSchema({"value": column("Int64", coerce=coerce)}, strict=True)
-    with pytest.raises(MetricResultError, match="64-bit"):
+def test_int64_declaration_rejects_out_of_range_values(value: object) -> None:
+    schema = pa.DataFrameSchema({"value": column("Int64")}, strict=True)
+    with pytest.raises(MetricResultError, match="Int64"):
         normalize_native_result(
             "producer", {"data": schema}, pd.DataFrame({"value": [value]})
         )
@@ -106,3 +104,41 @@ def test_registration_retains_independent_storage_layout() -> None:
     empty = compiled.empty_frame()
     assert empty.crs == storage.crs
     assert empty["count"].dtype == pd.Int64Dtype()
+
+
+@pytest.mark.parametrize("registration", [compile_output, ProviderSchema])
+@pytest.mark.parametrize("setting", ["schema", "column", "default"])
+@pytest.mark.parametrize("model", [False, True])
+def test_registration_rejects_value_transforms(
+    registration: Callable, setting: str, *, model: bool
+) -> None:
+    if model:
+
+        class TransformConfig(StrictConfig):
+            strict = True
+            coerce = setting == "schema"
+
+        class Table(pa.DataFrameModel):
+            Config: type[BaseConfig] = TransformConfig
+            value: Series[int] = pa.Field(
+                description="Value",
+                metadata={"unit": None},
+                coerce=setting == "column",
+                default=7 if setting == "default" else None,
+            )
+
+        declared = Table
+    else:
+        declared = declaration()
+        declared.coerce = setting == "schema"
+        declared.columns["count"].coerce = setting == "column"
+        declared.columns["count"].default = 7 if setting == "default" else None
+    with pytest.raises(
+        ValueError, match="defaults" if setting == "default" else "coerce=True"
+    ):
+        registration(declared)
+
+
+def test_named_output_requires_a_column() -> None:
+    with pytest.raises(ValueError, match="at least one column"):
+        compile_output(pa.DataFrameSchema(strict=True))

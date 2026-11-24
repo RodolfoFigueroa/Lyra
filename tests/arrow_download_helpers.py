@@ -67,6 +67,8 @@ def retained(
             "flag": pd.Series([True, False, True, None], dtype="boolean"),
         }
     )
+    if state == "python-string":
+        frame["label"] = frame.label.astype("string[python]")
     if state == "all-null":
         frame.iloc[:] = pd.NA
     if spatial:

@@ -4,12 +4,12 @@ from collections.abc import Callable
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from test_support.location_operations import Parameters, Places
+from test_support.table_fixtures import value_frame, value_schema
 
 
 def provider(name: str) -> type[Places]:
@@ -51,7 +51,7 @@ def score_plugin(
 
     def score(places: gpd.GeoDataFrame, reference: gpd.GeoDataFrame) -> pd.DataFrame:
         del places, reference
-        return pd.DataFrame()
+        return value_frame()
 
     def parameterized(
         places: gpd.GeoDataFrame,
@@ -60,7 +60,7 @@ def score_plugin(
         parameters: MetricParameters,
     ) -> pd.DataFrame:
         del places, reference, parameters
-        return pd.DataFrame()
+        return value_frame()
 
     handler: Callable = score
     if model is not None:
@@ -71,7 +71,7 @@ def score_plugin(
         code_revision="1",
         description="Score places.",
         private=private,
-        outputs={"result": pa.DataFrameSchema(strict=True)},
+        outputs={"result": value_schema()},
         inputs={
             "places": LocationDependency(provider=target),
             "reference": LocationDependency(provider="other"),

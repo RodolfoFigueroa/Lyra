@@ -2,6 +2,7 @@
 
 import sys
 from dataclasses import dataclass
+from functools import cached_property
 from string import ascii_lowercase, ascii_uppercase
 from typing import Literal
 
@@ -12,7 +13,8 @@ from pydantic import BaseModel, ConfigDict
 from lyra.contracts import outputs
 from lyra.contracts.units import ColumnUnit
 from lyra.contracts.value_identity import value_key
-from lyra.data.relational import StorageDescription
+from lyra.data.arrow_tables import base_schema
+from lyra.data.relational import StorageDescription, logical_dtype
 
 
 class StoredColumn(BaseModel):
@@ -84,27 +86,25 @@ class Registration(BaseModel):
             geometry=description.geometry,
         )
 
+    @cached_property
+    def arrow_schema(self) -> pa.Schema:
+        """Scope-independent fields of this loaded registration."""
+        return base_schema(self.storage_description())
+
     def storage_description(self) -> StorageDescription:
         """Return a native reconstruction layout without loading producer code."""
         types = {
-            "string": (pa.string(), "TEXT"),
-            "Int64": (pa.int64(), "INTEGER"),
-            "Float64": (pa.float64(), "REAL"),
-            "boolean": (pa.bool_(), "INTEGER"),
-            "geometry": (pa.binary(), "BLOB"),
+            "string": "TEXT",
+            "Int64": "INTEGER",
+            "Float64": "REAL",
+            "boolean": "INTEGER",
+            "geometry": "BLOB",
         }
         return StorageDescription(
             metadata=self.table_schema,
-            properties=pa.schema(
-                [
-                    pa.field(c.name, types[c.dtype][0], nullable=c.nullable)
-                    for c in self.columns
-                    if c.dtype != "geometry"
-                ]
-            ),
             columns=tuple(c.name for c in self.columns),
             pandas_dtypes=tuple(c.dtype for c in self.columns),
-            sqlite_types=tuple(types[c.dtype][1] for c in self.columns),
+            sqlite_types=tuple(types[c.dtype] for c in self.columns),
             nullable=tuple(c.nullable for c in self.columns),
             crs=self.crs,
             geometry=self.geometry,
@@ -112,8 +112,9 @@ class Registration(BaseModel):
             units=tuple(c.unit for c in self.columns),
         )
 
+    @cached_property
     def forwarded(self) -> "Registration":
-        """Return the logical layout of expanded target records.
+        """Logical layout of expanded target records.
 
         Raises:
             ValueError: If the provider is missing its public schema.
@@ -121,13 +122,16 @@ class Registration(BaseModel):
         if self.table_schema is None:
             msg = "Missing provider table schema"
             raise ValueError(msg)
-        source = StoredColumn(
-            name="source_location_id", dtype="string", nullable=False, unit=None
+        forwarded_schema = outputs.forwarding_schema(self.table_schema)
+        source_column = forwarded_schema.columns[0]
+        source = StoredColumn.model_validate(
+            source_column.model_dump() | {"dtype": logical_dtype(source_column.dtype)}
         )
-        return self.model_copy(
-            update={
+        return Registration.model_validate(
+            self.model_dump()
+            | {
                 "columns": (source, *self.columns),
-                "table_schema": outputs.forwarding_schema(self.table_schema),
+                "table_schema": forwarded_schema,
             }
         )
 
@@ -145,6 +149,9 @@ class Registration(BaseModel):
                 structural.append("row_key")
             elif self.kind == "operation":
                 structural.append("source_location_id")
+        if not names:
+            msg = "A retained table requires at least one column"
+            raise ValueError(msg)
         if (
             len(names) != len(set(names))
             or any(name not in names for name in structural)

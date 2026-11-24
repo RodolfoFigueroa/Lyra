@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from geopandas import GeoDataFrame
 from pydantic import Field, field_validator
@@ -21,6 +20,7 @@ from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import node_contract
 from test_support.routing_plugins import provider
+from test_support.table_fixtures import value_schema
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -92,7 +92,7 @@ def plugin(
         code_revision="1",
         name=name,
         description=name,
-        outputs={key: pa.DataFrameSchema(strict=True) for key in (name, "second")},
+        outputs={key: value_schema() for key in (name, "second")},
         inputs=inputs,
     )(handler)
     return BoundPlugin(
@@ -149,7 +149,7 @@ def parameter_edge(
         code_revision="1",
         description=owner,
         inputs={"table": dependency},
-        outputs={owner: pa.DataFrameSchema(strict=True)},
+        outputs={owner: value_schema()},
     )(independent if model is None else calculate)
     catalog = compile_live_catalog(
         {
@@ -186,7 +186,7 @@ def location_edge(
         description="Forward selected inputs",
         code_revision="1",
         inputs={**locations, "table": dependency},
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
     )(consume)
     catalog = compile_live_catalog(
         {

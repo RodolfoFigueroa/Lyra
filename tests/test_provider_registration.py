@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import ValidationError
 
@@ -21,6 +20,7 @@ from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.plugin_cli import render_description, render_manifest
 from lyra.sdk.resources import BaseIO
 from lyra.server.registry import Catalog
+from test_support.table_fixtures import value_frame, value_schema
 from tests.plugin_helpers import DEFINITIONS, plugin_config
 from tests.provider_helpers import FakeProvider, create_provider
 
@@ -29,14 +29,10 @@ from tests.provider_helpers import FakeProvider, create_provider
     code_revision="1",
     name="plain",
     description="No location required",
-    outputs={
-        "plain": pa.DataFrameSchema(
-            strict=True,
-        )
-    },
+    outputs={"plain": value_schema()},
 )
 def plain() -> pd.DataFrame:
-    return pd.DataFrame()
+    return value_frame()
 
 
 def _manifest(definition: PluginDefinition, name: str) -> PluginManifest:

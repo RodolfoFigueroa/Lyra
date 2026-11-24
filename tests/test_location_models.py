@@ -4,8 +4,8 @@ import pytest
 from pydantic import ValidationError
 from shapely.geometry import shape
 
+from lyra.contracts.geometry import Feature
 from lyra.contracts.locations import LocationSelection
-from lyra.data import geometry_buffers
 from test_support.location_helpers import scoped_payload, stored_locations
 from tests.geometry_fixtures import GEOMETRIES, station_collection
 
@@ -100,4 +100,4 @@ def test_geometry_rejects_unsupported_types_and_structure(
     payload = station_collection(["Point"])
     payload["features"][0]["geometry"] = geometry
     with pytest.raises(ValidationError):
-        geometry_buffers.encode([geometry])
+        Feature.model_validate(payload["features"][0] | {"geometry": geometry})

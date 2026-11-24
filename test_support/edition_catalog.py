@@ -2,7 +2,6 @@
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 from pydantic import Field
 
 from lyra.runtime.planning.catalog import compile_live_catalog
@@ -11,6 +10,7 @@ from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.routing_plugins import conversion, provider
+from test_support.table_fixtures import value_frame, value_schema
 
 
 class Measurement(MetricParameters):
@@ -29,7 +29,7 @@ def discovery(
 
         def measure(places: gpd.GeoDataFrame, parameters: Measurement) -> pd.DataFrame:
             del places, parameters
-            return pd.DataFrame()
+            return value_frame()
 
         metrics.append(
             metric(
@@ -38,7 +38,7 @@ def discovery(
                 code_revision="1",
                 private=index == private,
                 inputs={"places": LocationDependency(provider=name)},
-                outputs={"value": pa.DataFrameSchema(strict=True)},
+                outputs={"value": value_schema()},
             )(measure)
         )
     operations = []

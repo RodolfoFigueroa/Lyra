@@ -74,6 +74,7 @@ from lyra.server.runtime import get_runtime
 from test_support.location_operations import Places
 from test_support.location_resolution import Provider, selection
 from test_support.mcp import call_tool
+from test_support.table_fixtures import value_frame, value_schema
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import NestedDefaultParameters
 from tests.mcp_helpers import (
@@ -300,11 +301,11 @@ def _table_handler(
         location: gpd.GeoDataFrame, parameters: MetricParameters
     ) -> pd.DataFrame:
         del location, parameters
-        return pd.DataFrame()
+        return pd.DataFrame({"value": pd.Series(dtype=int)})
 
     def bounded(bounds: gpd.GeoDataFrame, parameters: MetricParameters) -> pd.DataFrame:
         del bounds, parameters
-        return pd.DataFrame()
+        return value_frame()
 
     def paired(
         location: gpd.GeoDataFrame,
@@ -312,7 +313,7 @@ def _table_handler(
         parameters: MetricParameters,
     ) -> pd.DataFrame:
         del location, bounds, parameters
-        return pd.DataFrame()
+        return value_frame()
 
     handler = {
         ("location",): located,
@@ -361,11 +362,11 @@ def _parameterless_metric(name: str, description: str) -> PluginDefinition:
         description=description,
         code_revision="1",
         inputs={"location": LocationDependency(provider=MCPPlaces.id)},
-        outputs={name: pa.DataFrameSchema(strict=True)},
+        outputs={name: value_schema()},
     )
     def calculate(location: gpd.GeoDataFrame) -> pd.DataFrame:
         del location
-        return pd.DataFrame()
+        return value_frame()
 
     return PluginDefinition(metrics=[calculate], resources={"places": MCPPlaces})
 
@@ -2094,7 +2095,7 @@ def _submission_fixture(
             name="report",
             code_revision="1",
             description="Report",
-            outputs={"report": pa.DataFrameSchema(strict=True)},
+            outputs={"report": value_schema()},
         )
         def report() -> pd.DataFrame:
             pytest.fail("Submission invoked a handler")
@@ -2109,7 +2110,7 @@ def _submission_fixture(
             name="report",
             description="Report",
             code_revision="1",
-            outputs={"report": pa.DataFrameSchema(strict=True)},
+            outputs={"report": value_schema()},
             inputs={
                 name: LocationDependency(provider=Provider.id) for name in locations
             },

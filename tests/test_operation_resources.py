@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from typing_extensions import override
 
@@ -18,6 +17,7 @@ from lyra.sdk import LocationDependency, PluginDefinition, location_operation, m
 from lyra.sdk.resources import BaseIO, Resource
 from test_support.location_operations import Places
 from test_support.operation_execution import OperationExecutor
+from test_support.table_fixtures import value_frame, value_schema
 
 
 def resource_runner(
@@ -77,14 +77,14 @@ def resource_runner(
         name="later",
         description="Consume the shared dependency after acquisition",
         code_revision="1",
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
     )
     def later(database: Annotated[Database, Resource("database")]) -> pd.DataFrame:
         assert database is instances[-1]
         assert "database close" not in events
         events.append("consumer")
         fail_at(failure, "consumer")
-        return pd.DataFrame()
+        return value_frame()
 
     return LocalRunner.from_definitions(
         {

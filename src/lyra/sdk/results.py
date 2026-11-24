@@ -1,14 +1,12 @@
-"""Producer result validation and coercion against executable schemas."""
+"""Producer result validation against executable schemas."""
 
 from __future__ import annotations
 
 from copy import deepcopy
-from decimal import Decimal, InvalidOperation
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 import geopandas as gpd
-import pyproj
 from pandera.config import ValidationDepth, config_context
 from pandera.errors import SchemaError, SchemaErrors
 
@@ -56,7 +54,7 @@ def validate_registered_result(
     """Validate return shape, schemas, and serialization requirements.
 
     Returns:
-        Named validated tables, including explicitly requested coercion.
+        Named validated tables in declaration order.
 
     Raises:
         MetricResultError: If output names or native table types are invalid.
@@ -118,13 +116,13 @@ def _validate_table(
             ],
         )
     try:
+        _validate_geometry(table, schema)
         table = _normalize_frame(table, schema)
-        _validate_declared_values(table, schema)
         with config_context(
             validation_enabled=True, validation_depth=ValidationDepth.SCHEMA_AND_DATA
         ):
-            validated = schema.validate(table, lazy=lazy)
-        _validate_serializable(validated, schema)
+            validated = schema.validate(table, lazy=lazy, inplace=True)
+        validate_serializable(validated)
     except (SchemaError, SchemaErrors) as exc:
         errors = getattr(exc, "schema_errors", [exc])
         failures = [
@@ -154,9 +152,7 @@ def _validate_table(
                 }
             ],
         ) from exc
-    # A custom check can retain the frame it receives. Detach after all callbacks
-    # so those references cannot mutate the runtime's private producer value.
-    return _normalize_frame(validated, schema)
+    return validated
 
 
 def _normalize_frame(table: pd.DataFrame, schema: pa.DataFrameSchema) -> pd.DataFrame:
@@ -176,46 +172,15 @@ def _normalize_frame(table: pd.DataFrame, schema: pa.DataFrameSchema) -> pd.Data
     return detached
 
 
-def _validate_serializable(validated: pd.DataFrame, schema: pa.DataFrameSchema) -> None:
-    _validate_declared_values(validated, schema)
-    geometry = [
-        key for key, column in schema.columns.items() if str(column.dtype) == "geometry"
-    ]
-    if geometry:
+def _validate_geometry(table: pd.DataFrame, schema: pa.DataFrameSchema) -> None:
+    column = schema.columns.get("geometry")
+    if column is not None and str(column.dtype) == "geometry":
         if (
-            not isinstance(validated, gpd.GeoDataFrame)
-            or validated.active_geometry_name != geometry[0]
-            or validated.crs is None
+            not isinstance(table, gpd.GeoDataFrame)
+            or table.active_geometry_name != "geometry"
         ):
-            msg = "Expected GeoDataFrame with declared active geometry and known CRS"
+            msg = "Expected GeoDataFrame with declared active geometry"
             raise ValueError(msg)
-    elif isinstance(validated, gpd.GeoDataFrame):
+    elif isinstance(table, gpd.GeoDataFrame):
         msg = "Spatial output requires a declared geometry column"
         raise ValueError(msg)
-    validate_serializable(validated)
-
-
-def _validate_declared_values(table: pd.DataFrame, schema: pa.DataFrameSchema) -> None:
-    """Reject spatial changes and integer overflow before coercion can hide them.
-
-    Raises:
-        ValueError: If CRS, active geometry, or integer bounds are invalid.
-    """
-    for name, column in schema.columns.items():
-        if str(column.dtype) in {"int64", "Int64"}:
-            for value in table[name].dropna():
-                try:
-                    number = Decimal(str(value))
-                except InvalidOperation:
-                    continue  # Pandera reports incompatible scalar values.
-                if not number.is_finite() or not -(2**63) <= number <= 2**63 - 1:
-                    msg = f"Column {name!r} exceeds signed 64-bit integer bounds"
-                    raise ValueError(msg)
-        if str(column.dtype) == "geometry" and (
-            not isinstance(table, gpd.GeoDataFrame)
-            or table.active_geometry_name != name
-            or table.crs is None
-            or table.crs != pyproj.CRS(column.dtype.crs)
-        ):
-            msg = "Expected declared active geometry and CRS; reproject explicitly"
-            raise ValueError(msg)

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field, JsonValue, field_validator
 
@@ -23,6 +22,7 @@ from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import main, worker
 from test_support.accepted_sources import routed_request
+from test_support.table_fixtures import value_frame, value_schema
 from tests.config_helpers import api_credentials
 from tests.invocation_preparation_helpers import implementation
 from tests.mcp_helpers import submit_both
@@ -58,7 +58,7 @@ class ProducerParameters(MetricParameters):
 
 def test_complete_values_transport_execution_and_identity() -> None:
     seen = []
-    schema = pa.DataFrameSchema({}, strict=True)
+    schema = value_schema()
 
     @metric(
         cache="full",
@@ -70,7 +70,7 @@ def test_complete_values_transport_execution_and_identity() -> None:
     def producer(parameters: ProducerParameters) -> pd.DataFrame:
         seen.append(parameters.model_dump())
         parameters.filters.tags.append("handler mutation")
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",
@@ -196,18 +196,18 @@ def test_execution_uses_accepted_factory_values() -> None:
         code_revision="1",
         name="leaf",
         description="Leaf",
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
     )
     def leaf(parameters: Parameters) -> pd.DataFrame:
         assert parameters.tags == ["accepted"]
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
         inputs={"data": Dependency("data", producer="leaf")},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:

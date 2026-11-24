@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from shapely.geometry import Point
 
@@ -184,3 +185,41 @@ def _assert_inputs(result: RunResult, owners: set[str]) -> None:
             )
             == owners
         )
+
+
+def test_each_fresh_miss_batch_is_validated_once(tmp_path: Path) -> None:
+    checked = []
+    declaration = schema()
+
+    def check_batch(data: pd.DataFrame) -> bool:
+        if data.attrs.get("fresh"):
+            checked.append(set(data.location_id))
+        return True
+
+    declaration.checks = [pa.Check(check_batch, name="check_batch")]
+
+    @metric(
+        name="sample",
+        description="Sample requested owners",
+        cache="per_location",
+        inputs={"places": LocationDependency(provider="target", primary=True)},
+        outputs={"rows": declaration},
+    )
+    def sample(places: gpd.GeoDataFrame) -> pd.DataFrame:
+        data = pd.DataFrame(
+            {"location_id": places.location_id, "row_key": "r", "value": 1}
+        )
+        data.attrs["fresh"] = True
+        return data
+
+    definitions = provider_execution_definitions([])
+    definitions["sample"] = PluginDefinition(metrics=[sample])
+    runner = LocalRunner.from_definitions(
+        definitions, result_store_path=tmp_path / "sample.sqlite"
+    )
+    for ids in (["a", "b"], ["b", "c"]):
+        result = runner.run(
+            "sample", inputs={"places": {"provider": "target", "ids": ids}}
+        )
+        assert set(result.tables["rows"].location_id) == set(ids)
+    assert checked == [{"a", "b"}, {"c"}]

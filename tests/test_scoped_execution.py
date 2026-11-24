@@ -25,6 +25,7 @@ from test_support.location_helpers import (
 )
 from test_support.routing_plugins import provider
 from test_support.runtime_inputs import assert_records
+from test_support.table_fixtures import value_frame
 from tests.frame_assertions import assert_logical_equal
 from tests.graph_arguments_helpers import (
     Consumer,
@@ -134,7 +135,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     )
     def free() -> pd.DataFrame:
         free_calls.append("free")
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",
@@ -361,7 +362,7 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
     def source(location: gpd.GeoDataFrame, parameters: Producer) -> pd.DataFrame:
         assert isinstance(location, gpd.GeoDataFrame)
         assert parameters == Producer()
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",

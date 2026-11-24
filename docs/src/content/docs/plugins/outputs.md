@@ -6,7 +6,7 @@ contentPlan: plugins/outputs
 sidebar: { label: "Declare Output Tables And Units" }
 ---
 
-Declare each output table in a nonempty `outputs` mapping using Pandera models or schema objects. Lyra compiles these declarations for validation and storage when you register the metric. It validates fresh outputs before consumers or storage receive them. Cache reads check stored data integrity without repeating producer validation.
+Declare each output table in a nonempty `outputs` mapping using Pandera models or schema objects. Lyra compiles these declarations for validation and storage when you register the metric. It validates fresh outputs before consumers or storage receive them.
 
 ## Declare a model
 
@@ -92,17 +92,16 @@ Choose a supported dtype:
 
 Lyra rejects unrestricted object, complex, nested, and custom extension dtypes. Express temporal and categorical values through supported strings or numbers.
 
-## Configure coercion, checks, and indices
+## Validate typed columns and row identities
 
-Lyra leaves dtype coercion disabled by default. Request it explicitly on a schema or column:
+Each named output must declare at least one column. An unpartitioned metric can return a geometry-only table. Convert source data and fill any required values before returning the frame. For example, declare a nullable integer count as follows:
 
-```python {6,8}
+```python {5,6}
 observations = pa.DataFrameSchema(
     {
         "count": pa.Column(
             "Int64",
             nullable=True,
-            coerce=True,
             description="Observed count.",
             metadata={"unit": "count"},
         ),
@@ -124,7 +123,7 @@ empty = pd.DataFrame({"count": pd.Series([], dtype="Int64")})
 
 Lyra copies producer frames before validation and rejects explicit index declarations. Declare identifiers and uniqueness constraints, including compound keys, in columns because indexes and row positions don’t establish identity. Sort results explicitly for presentation.
 
-Use built-in constraints, uniqueness rules, and named deterministic Python checks that operate on the supplied data:
+Use built-in constraints, uniqueness rules, and named, read-only, deterministic Python checks that operate on the supplied data:
 
 ```python
 positive_total = pa.Check(
@@ -195,7 +194,9 @@ You own returned frames and nested metadata; editing them doesn’t change retai
 
 Check any consumer assumptions beyond the producer contract, such as required properties or supported geometry. [Graph execution errors](../../concepts/graphs/#stop-at-the-first-failure) identify the failing node and dependency path.
 
-Update origin or provider identities when datasets change. Change the node ID or `code_revision` when declarations or callbacks change outputs. Your calculation must remain deterministic even with caching off; validation can’t prove that property. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
+With `cache="per_location"`, the handler may receive only locations with cache misses. That batch must pass every check independently, and combining its rows with retained partitions must also satisfy the checks. Use `cache="full"` for constraints such as uniqueness of a code across locations.
+
+Change the metric’s `code_revision` when a validation change can reject previously accepted output. Update origin or provider identities when datasets change. Change the node ID or `code_revision` when declarations or callbacks change outputs. Your calculation must remain deterministic even with caching off; validation can’t prove that property. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
 
 Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in WGS84. Missing values become null.
 

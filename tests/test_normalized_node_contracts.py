@@ -4,7 +4,6 @@ import copy
 from typing import TYPE_CHECKING, Annotated
 
 import geopandas as gpd
-import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import Field, ValidationError
@@ -22,6 +21,7 @@ from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import node_contract
+from test_support.table_fixtures import value_schema
 from tests.provider_helpers import FakeProvider
 
 if TYPE_CHECKING:
@@ -41,7 +41,7 @@ def definition() -> PluginDefinition:
         code_revision="1",
         name="normalized",
         description="Normalized contract",
-        outputs={"table": pa.DataFrameSchema({}, strict=True)},
+        outputs={"table": value_schema()},
         inputs={"places": LocationDependency(provider=FakeProvider.id)},
     )
     def handler(
@@ -222,6 +222,6 @@ def test_unknown_dependency_input_is_rejected_at_registration() -> None:
             code_revision="1",
             name="invalid",
             description="Invalid binding",
-            outputs={"table": pa.DataFrameSchema({}, strict=True)},
+            outputs={"table": value_schema()},
             inputs={"missing": LocationDependency(provider=FakeProvider.id)},
         )(handler)

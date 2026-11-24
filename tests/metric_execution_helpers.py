@@ -24,7 +24,6 @@ def schema(*, spatial: bool = False) -> pa.DataFrameSchema:
         "value": pa.Column(
             "Int64",
             nullable=True,
-            coerce=True,
             checks=pa.Check(lambda s: (s >= 0).all(), name="nonnegative"),
             description="Value",
             metadata={"unit": None},

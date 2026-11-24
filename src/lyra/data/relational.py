@@ -15,8 +15,6 @@ import shapely
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    import pyarrow as pa
-
     from lyra.contracts.outputs import OutputMetadata
 
 
@@ -61,7 +59,6 @@ class RowLayout:
 class StorageDescription(RowLayout):
     """Immutable declared layout; scalar dtypes are canonical reconstruction types."""
 
-    properties: pa.Schema
     sqlite_types: tuple[str, ...]
     crs: str | None
     geometry: str | None
@@ -96,8 +93,6 @@ def rows_from_validated(
                     values, dtype="Int64" if dtype == "boolean" else dtype
                 ).array.to_numpy(dtype=object, na_value=None)
             )
-    if not columns:
-        return [()] * len(frame)
     return list(zip(*columns, strict=True))
 
 

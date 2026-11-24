@@ -355,7 +355,7 @@ class ResultStore:
             BytesIO() as sink,
         ):
             description = selected.registration.storage_description()
-            schema = table_schema(description, **scopes)
+            schema = table_schema(selected.registration.arrow_schema, **scopes)
             with pa.ipc.new_stream(sink, schema) as writer:
                 # An empty batch emits the schema before any value reads, including
                 # for a known empty output. IPC stream framing is filename agnostic.

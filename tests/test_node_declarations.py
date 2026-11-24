@@ -17,6 +17,7 @@ from lyra.runtime.planning.node_declarations import (
 from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
+from test_support.table_fixtures import value_frame, value_schema
 from tests.node_declaration_helpers import (
     CENSUS,
     ELEVATION,
@@ -189,14 +190,10 @@ def test_metric_decorator_normalizes_own_origins(origins: tuple[Origin, ...]) ->
         code_revision="1",
         description="Direct dependencies.",
         origins=origins,
-        outputs={
-            "value": pa.DataFrameSchema(
-                strict=True,
-            )
-        },
+        outputs={"value": value_schema()},
     )
     def handler() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     manifest = PluginDefinition(metrics=[handler]).node_manifests[0]
     assert manifest.kind == "metric"

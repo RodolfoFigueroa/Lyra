@@ -27,7 +27,6 @@ def column(
     *,
     checks: pa.Check | None = None,
     nullable: bool = False,
-    coerce: bool = False,
     required: bool = True,
 ) -> pa.Column:
     if dtype == "geometry":
@@ -40,7 +39,6 @@ def column(
         metadata={"unit": None},
         checks=checks,
         nullable=nullable,
-        coerce=coerce,
         required=required,
     )
 
@@ -98,14 +96,12 @@ def test_invalid_results_even_with_ambient_validation_disabled(
         plugin(Values).normalize_result("values", frame)
 
 
-def test_coercion_nullable_and_empty() -> None:
+def test_nullable_and_empty() -> None:
     definition = plugin(
-        pa.DataFrameSchema(
-            {"value": column("Int64", nullable=True, coerce=True)}, strict=True
-        )
+        pa.DataFrameSchema({"value": column("Int64", nullable=True)}, strict=True)
     )
     result = definition.normalize_result(
-        "values", pd.DataFrame({"value": ["1", None]})
+        "values", pd.DataFrame({"value": pd.array([1, None], dtype="Int64")})
     )["values"]
     assert str(result.value.dtype) == "Int64"
     definition.normalize_result("values", result.iloc[:0])
@@ -136,18 +132,18 @@ def test_unsupported_declarations(schema: pa.DataFrameSchema) -> None:
         compile_output(schema)
 
 
-def test_spatial_contract() -> None:
+@pytest.mark.parametrize("geometries", [[Point(0, 0), None], [None], []])
+def test_spatial_contract(geometries: list[Point | None]) -> None:
     definition = plugin(
         pa.DataFrameSchema({"geometry": column("geometry", nullable=True)}, strict=True)
     )
-    frame = gpd.GeoDataFrame(
-        {"geometry": [Point(0, 0), None]}, geometry="geometry", crs=4326
-    )
-    definition.normalize_result("values", frame)
-    definition.normalize_result("values", frame.iloc[:0])
-    frame = gpd.GeoDataFrame({"geometry": [Point(0, 0), None]}, geometry="geometry")
-    with pytest.raises(MetricResultError, match="CRS"):
-        definition.normalize_result("values", frame)
+    frame = gpd.GeoDataFrame({"geometry": geometries}, geometry="geometry")
+    declared = frame.set_crs(4326)
+    accepted = definition.normalize_result("values", declared)["values"]
+    pd.testing.assert_frame_equal(accepted, declared)
+    for invalid in (frame, frame.set_crs(3857)):
+        with pytest.raises(MetricResultError, match="CRS"):
+            definition.normalize_result("values", invalid)
 
 
 def test_infinity_and_lazy_diagnostics() -> None:
@@ -360,6 +356,14 @@ def test_object_backed_date_and_string_serialization() -> None:
     )
     encoded = serialize_outputs("values", definition.normalize_result("values", frame))
     assert encoded["values"] == [{"date": "2026-01-02", "text": "example"}]
+
+
+@pytest.mark.parametrize("value", [17, ["nested"]])
+def test_numpy_string_metric_rejects_nonstring_object_cells(value: object) -> None:
+    definition = plugin(pa.DataFrameSchema({"label": column(String)}, strict=True))
+    frame = pd.DataFrame({"label": pd.Series([value], dtype=object)})
+    with pytest.raises(MetricResultError, match="label"):
+        definition.normalize_result("values", frame)
 
 
 def test_geometry_infinity_fails_before_public_serialization() -> None:

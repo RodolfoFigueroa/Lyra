@@ -7,7 +7,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import ValidationError
 
@@ -21,6 +20,7 @@ from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import registry
 from lyra.server.job_submission import submit_job
 from test_support.routing_plugins import provider
+from test_support.table_fixtures import value_schema
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import (
@@ -444,7 +444,7 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
             code_revision="1",
             description=description,
             inputs={"location": LocationDependency(provider="test_units")},
-            outputs={"value": pa.DataFrameSchema(strict=True)},
+            outputs={"value": value_schema()},
         )
         def calculate(
             location: gpd.GeoDataFrame, parameters: ValueParameters

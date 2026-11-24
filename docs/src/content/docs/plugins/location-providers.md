@@ -51,7 +51,7 @@ Schemas cannot use these features:
 - Filtering or row dropping
 - Automatic insertion of missing columns
 
-Lyra validates returned frames against the registered schema, including frames from fake resource overrides. Validation rejects incorrect columns, invalid geometry, and incorrect CRS. Lyra applies declared coercion before passing records to handlers. Rename external columns and reproject coordinates before returning them.
+Lyra validates returned frames against the registered schema, including frames from fake resource overrides. Validation rejects incorrect columns, invalid geometry, and incorrect CRS. Convert source columns to their declared types before returning records. Provider records and intervention additions accept either pandas string storage backend, and a nullable `bool` declaration accepts pandas `boolean`. Rename external columns and reproject coordinates before returning them.
 
 Empty selections and operation results retain the declared columns, dtypes, active geometry, and CRS. Location IDs are opaque strings; expose numeric or composite source IDs as stable, unambiguous strings.
 

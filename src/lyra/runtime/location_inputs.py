@@ -283,7 +283,7 @@ class LocationInputs:
         self, connection: sa.Connection, key: str, *, derived: bool
     ) -> Registration:
         base = self.store.read_registration(connection, key)
-        return base.forwarded() if derived else base
+        return base.forwarded if derived else base
 
     def descriptions(
         self, connection: sa.Connection, bindings: InputBindings

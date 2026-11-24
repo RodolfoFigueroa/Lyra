@@ -288,7 +288,7 @@
       "audience": "Plugin authors",
       "contentPlan": [
         "Declare a model",
-        "Configure coercion, checks, and indices",
+        "Validate typed columns and row identities",
         "Declare spatial outputs",
         "Describe units and inspect metadata",
         "Return and encode validated tables",

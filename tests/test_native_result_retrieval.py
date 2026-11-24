@@ -8,6 +8,7 @@ import pandera.pandas as pa
 import pytest
 from geopandas.testing import assert_geodataframe_equal
 from pandera.engines.geopandas_engine import Geometry
+from pyarrow import ipc, types
 from shapely.geometry import Point
 
 # Exercise client decoding independently of HTTP transport.
@@ -16,11 +17,13 @@ from lyra.api.exceptions import DownloadError
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import TableJobResult
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_descriptions import (
     ResultDescriptions,
 )
 from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
+from lyra.sdk import PluginDefinition, metric
 from lyra.sdk.output_schema import compile_output
 from tests.retained_table_helpers import retained_service
 from tests.sqlite_helpers import database
@@ -106,6 +109,38 @@ def test_declared_types_and_independent_reads(
     assert repeated.retained_result is not None
     assert repeated.retained_result.metadata.outputs["rows"].table_schema == description
     assert_retrieved_frame(decode_tables(service.read_result(repeated))["rows"], frame)
+
+
+@pytest.mark.usefixtures("database")
+def test_reopened_string_schema_is_independent_of_pandas_storage(
+    tmp_path: Path,
+) -> None:
+    frame = pd.DataFrame({"label": pd.Series(["001", None], dtype="string")})
+    schema = pa.DataFrameSchema(
+        {
+            "label": pa.Column(
+                "string", nullable=True, description="Label", metadata={"unit": None}
+            )
+        },
+        strict=True,
+    )
+    path = tmp_path / "strings.sqlite"
+    _, reference = retained_service(path, schema, frame)
+    schemas = []
+    for storage in ("python", "pyarrow"):
+        with (
+            pd.option_context("mode.string_storage", storage),
+            ResultStore.open(path) as reader,
+            ipc.open_stream(b"".join(reader.stream_table(reference, "rows"))) as stream,
+        ):
+            schemas.append(stream.schema)
+            assert types.is_string(stream.schema.field("label").type)
+            table = stream.read_all()
+            assert table["label"].to_pylist() == ["001", None]
+            decoded = table.to_pandas().label
+            assert isinstance(decoded.dtype, pd.StringDtype)
+            pd.testing.assert_series_equal(decoded, frame.label.astype(decoded.dtype))
+    assert schemas[0].equals(schemas[1], check_metadata=True)
 
 
 def assert_batched_frame(path: Path, key: str, frame: pd.DataFrame) -> None:
@@ -211,3 +246,51 @@ def test_private_storage_names_do_not_replace_declared_columns(tmp_path: Path) -
         pd.testing.assert_frame_equal(selected.frame(), frame)
     with ResultStore.open(path) as store:
         pd.testing.assert_frame_equal(store.read_table(reference, "rows"), frame)
+
+
+@pytest.mark.usefixtures("database")
+@pytest.mark.parametrize("empty", [False, True])
+def test_geometry_only_native_and_arrow_after_reopen(
+    tmp_path: Path, *, empty: bool
+) -> None:
+    schema = pa.DataFrameSchema(
+        {
+            "geometry": pa.Column(
+                Geometry(crs=3857),
+                nullable=True,
+                description="Survey geometry",
+                metadata={"unit": None},
+                checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+            )
+        },
+        strict=True,
+    )
+    frame = gpd.GeoDataFrame(
+        geometry=gpd.GeoSeries(
+            [] if empty else [Point(1, 2, 3), Point(), None], crs=3857
+        )
+    )
+    path = tmp_path / "geometry.sqlite"
+
+    @metric(name="survey", description="Survey geometries", outputs={"rows": schema})
+    def survey() -> gpd.GeoDataFrame:
+        return frame
+
+    runner = LocalRunner.from_definitions(
+        {"survey": PluginDefinition(metrics=[survey])}, result_store_path=path
+    )
+    reference = runner.run("survey").report.result_ref
+    assert reference is not None
+    path.touch()
+    for _ in range(2):
+        with ResultStore.open(path) as reader:
+            restored = reader.read_table(reference, "rows")
+            with ipc.open_stream(
+                b"".join(reader.stream_table(reference, "rows"))
+            ) as stream:
+                downloaded = gpd.GeoDataFrame.from_arrow(stream.read_all())
+        for native in (restored, downloaded):
+            assert isinstance(native, gpd.GeoDataFrame)
+            assert list(native) == ["geometry"]
+            assert native.crs == frame.crs
+            assert native.geometry.to_wkb().tolist() == frame.geometry.to_wkb().tolist()

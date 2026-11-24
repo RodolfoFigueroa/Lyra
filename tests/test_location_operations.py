@@ -4,7 +4,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import ValidationError
 
@@ -29,6 +28,7 @@ from test_support.location_operations import (
     select_places,
 )
 from test_support.runtime_inputs import native_inputs
+from test_support.table_fixtures import value_frame, value_schema
 
 
 def source_records() -> NativeLocationInput:
@@ -150,10 +150,10 @@ def test_worker_and_installed_routing_exclude_operations(
         code_revision="1",
         name="counts",
         description="Counts",
-        outputs={"counts": pa.DataFrameSchema({}, strict=True)},
+        outputs={"counts": value_schema()},
     )
     def counts() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     plugin = PluginDefinition(
         metrics=[counts],

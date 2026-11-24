@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from unittest.mock import Mock
 
 import pandas as pd
-import pandera.pandas as pa
 from pydantic import Field, JsonValue
 
 from lyra.contracts.accepted import SubmittedRequest, WorkerRequest
@@ -20,6 +19,7 @@ from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_frame, value_schema
 
 
 class Nested(MetricParameters):
@@ -74,19 +74,19 @@ def test_registration_execution_and_inspection_are_independent() -> None:
         code_revision="1",
         name="leaf",
         description="Leaf",
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
     )
     def leaf(parameters: Parameters) -> pd.DataFrame:
         seen.append(parameters.model_dump())
         parameters.nested.tags.clear()
         parameters.options["changed"] = True
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
         inputs={"data": binding},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -133,7 +133,7 @@ def test_job_construction_captures_accepted_metadata() -> None:
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         return pd.DataFrame({"tags": parameters.nested.tags})

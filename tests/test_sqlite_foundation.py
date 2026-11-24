@@ -146,7 +146,7 @@ def test_registration_metadata_and_collision() -> None:
 def test_invalid_structural_layouts() -> None:
     definition = registration()
     layout = Layout()
-    with pytest.raises(ValueError, match="structural"):
+    with pytest.raises(ValueError, match="at least one column"):
         layout.register(definition.model_copy(update={"columns": ()}))
     bad = StoredColumn(name="location_id", dtype="string", nullable=True, unit=None)
     with pytest.raises(ValueError, match="structural"):

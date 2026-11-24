@@ -78,7 +78,7 @@ def capture_inputs(
                 table_schema=value.description,
                 availability="available",
             )
-            registration = registration.forwarded()
+            registration = registration.forwarded
         selection = InputSelection(description=description, registration=registration)
 
         bound = invocation.bound_use
@@ -249,7 +249,7 @@ def capture_skipped_inputs(
         if derived:
             if registration.key not in store.layout.descriptions:
                 store.initialize((registration,))
-            registration = registration.forwarded()
+            registration = registration.forwarded
             schema = forwarding_schema(schema)
         operations = []
         if value.computations:

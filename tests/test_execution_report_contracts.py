@@ -121,7 +121,7 @@ def test_complete_round_trip_and_ownership() -> None:
     returned = report.model_copy(deep=True)
     returned.request.inputs["places"].ids.clear()
     returned.nodes[2].parameters.clear()
-    returned.nodes[2].outputs["area"].table_schema.coerce = True
+    returned.nodes[2].outputs["area"].table_schema.meaning = "Changed"
     returned.parameter_bindings[0].target_parameter = "changed"
     assert report.model_dump() == snapshot
     report.nodes[0].origins.clear()

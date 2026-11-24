@@ -19,6 +19,7 @@ from test_support.location_helpers import (
     output_schema,
 )
 from test_support.routing_plugins import provider
+from test_support.table_fixtures import value_frame
 from tests.graph_arguments_helpers import geometry, scoped_inputs
 from tests.graph_execution_helpers import TABLE, Consumer, Label, Year, executor
 
@@ -179,7 +180,7 @@ def test_effective_arguments_control_reuse() -> None:
     )
     def source(parameters: Label) -> pd.DataFrame:
         calls.append(parameters.label)
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",
@@ -234,7 +235,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
     )
     def source(location: gpd.GeoDataFrame) -> pd.DataFrame:
         locations.append(location)
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",
@@ -301,7 +302,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         assert parameters.year == 2020
         if broken and failure == "handler":
             raise original
-        return None if broken and failure == "result" else pd.DataFrame()
+        return None if broken and failure == "result" else value_frame()
 
     @metric(
         cache="full",
@@ -325,7 +326,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     )
     def early() -> pd.DataFrame:
         trace.append("early")
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",
@@ -397,7 +398,7 @@ def test_context_identity_and_job_association() -> None:
     def source(context: RunContext) -> pd.DataFrame:
         assert context.node == "source"
         assert context.job_id == "job-123"
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         cache="full",
@@ -428,7 +429,7 @@ def test_source_can_be_execution_root() -> None:
         outputs={"source": TABLE},
     )
     def source() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     runner, plugin = executor(source)
     assert (

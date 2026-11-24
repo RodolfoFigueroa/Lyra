@@ -3,7 +3,6 @@
 from datetime import UTC, datetime
 
 import pandas as pd
-import pandera.pandas as pa
 from pydantic import Field, JsonValue, create_model
 
 from lyra.contracts.accepted import WorkerRequest
@@ -13,6 +12,7 @@ from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_frame, value_schema
 
 
 def result_provenance(data: dict) -> JobRunProvenance:
@@ -27,14 +27,14 @@ def result_provenance(data: dict) -> JobRunProvenance:
 
     def calculate(parameters: MetricParameters) -> pd.DataFrame:
         del parameters
-        return pd.DataFrame()
+        return value_frame()
 
     calculate.__annotations__["parameters"] = model
     decorated = metric(
         name=data["metric"],
         code_revision="1",
         description="Result fixture",
-        outputs={key: pa.DataFrameSchema(strict=True) for key in data["outputs"]},
+        outputs={key: value_schema() for key in data["outputs"]},
     )(calculate)
     plan = prepare_execution(
         compile_live_catalog({"fixture": PluginDefinition(metrics=[decorated])}),

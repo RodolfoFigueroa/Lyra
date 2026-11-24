@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import create_autospec
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 
@@ -27,6 +26,7 @@ from test_support.location_helpers import (
     fixture_locations,
     scoped_payload,
 )
+from test_support.table_fixtures import value_schema
 from tests.fixtures.contract_plugin import metrics
 from tests.fixtures.contract_plugin.plugin import create_plugin
 
@@ -126,9 +126,7 @@ def test_file_specimen(
     )
     assert path.read_text(encoding="utf-8") == "area_a\narea_b\n"
     with pytest.raises(MetricResultError, match="DataFrame"):
-        normalize_native_result(
-            "feature_report", {"report": pa.DataFrameSchema({}, strict=True)}, path
-        )
+        normalize_native_result("feature_report", {"report": value_schema()}, path)
     with pytest.raises(PluginDefinitionError, match="no parameters"):
         binding.prepare_parameters("bounded_features", {})
 

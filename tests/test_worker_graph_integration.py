@@ -28,6 +28,7 @@ from lyra.server.plugins import InstalledPlugin
 from lyra.server.routes.metrics import get_metric
 from test_support.canonical_execution import canonical_workload
 from test_support.location_resolution import Provider, selection
+from test_support.table_fixtures import value_frame
 from tests.config_helpers import load_test_config
 from tests.provider_execution_helpers import provider_execution_definitions
 from tests.queue_helpers import (
@@ -270,11 +271,11 @@ def test_worker_resolves_once_before_multiple_consumers(
 
     def with_location(location: gpd.GeoDataFrame) -> pd.DataFrame:
         seen.append({"location": location.to_dict()})
-        return pd.DataFrame()
+        return value_frame()
 
     def with_bounds(bounds: gpd.GeoDataFrame) -> pd.DataFrame:
         seen.append({"bounds": bounds.to_dict()})
-        return pd.DataFrame()
+        return value_frame()
 
     def with_both(location: gpd.GeoDataFrame, bounds: gpd.GeoDataFrame) -> pd.DataFrame:
         seen.append(
@@ -283,7 +284,7 @@ def test_worker_resolves_once_before_multiple_consumers(
                 "bounds": bounds.to_dict(),
             }
         )
-        return pd.DataFrame()
+        return value_frame()
 
     def root_location(
         location: gpd.GeoDataFrame, data: pd.DataFrame, other: pd.DataFrame
@@ -423,7 +424,7 @@ def test_submission_enqueues_one_native_job_without_retry(
         outputs={"answer": TABLE},
     )
     def root() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     _plugins, runtime = install(tmp_path, monkeypatch, [root])
     queue = Mock()
@@ -808,7 +809,7 @@ def test_wrong_queue_failure_replaces_worker_success(
     )
     def root() -> pd.DataFrame:
         calls.append("root")
-        return pd.DataFrame()
+        return value_frame()
 
     install(tmp_path, monkeypatch, [root])
     native = native_job(monkeypatch)

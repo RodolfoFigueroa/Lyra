@@ -6,7 +6,6 @@ import ibis
 import ibis.expr.datatypes as dt
 import ibis.expr.operations as ops
 import pandas as pd
-import pandera.pandas as pandera
 import pyarrow as pa
 import pytest
 from ibis.backends.postgres import Backend
@@ -24,6 +23,7 @@ from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import compile_query_schema
 from test_support.location_schema import column
+from test_support.table_fixtures import value_schema
 from tests.provider_helpers import FakeProvider
 from tests.provider_schema_helpers import declaration
 
@@ -152,7 +152,7 @@ def test_discovery_carries_query_metadata_without_executable_objects() -> None:
         code_revision="1",
         description="Inspect a managed source",
         inputs={"source": LocationDependency(provider="managed")},
-        outputs={"result": pandera.DataFrameSchema(strict=True)},
+        outputs={"result": value_schema()},
     )
     def inspect_source(source: gpd.GeoDataFrame) -> pd.DataFrame:
         return source

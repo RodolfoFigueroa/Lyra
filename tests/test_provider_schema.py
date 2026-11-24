@@ -71,14 +71,12 @@ def test_rejects_automatic_missing_column_insertion() -> None:
         ProviderSchema(schema)
 
 
-@pytest.mark.parametrize("coerce", [False, True])
 @pytest.mark.parametrize("ids", [[1, 2], [None, "b"], ["", "b"], ["a", "a"]])
-def test_identity_is_checked_before_coercion(ids: list, *, coerce: bool) -> None:
+def test_provider_rejects_invalid_location_ids(ids: list) -> None:
     schema = declaration()
-    schema.coerce = coerce
     data = frame()
     data["location_id"] = ids
-    with pytest.raises(ValueError, match=r"string|unique"):
+    with pytest.raises(ValueError, match=r"string|duplicate"):
         ProviderSchema(schema).validate(data)
 
 
@@ -179,7 +177,7 @@ def test_attribute_checks_and_nonnullability_are_enforced() -> None:
     schema.columns["count"].nullable = False
     schema.columns["count"].checks = [pa.Check.ge(0)]
     compiled = ProviderSchema(schema)
-    with pytest.raises(ValueError, match="not nullable"):
+    with pytest.raises(ValueError, match="null"):
         compiled.validate(frame())
     data = frame()
     data["count"] = pd.Series([-1, 2], dtype="Int64")

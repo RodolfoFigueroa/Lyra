@@ -4,7 +4,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.dependencies import Dependency, LocationDependency
@@ -17,6 +16,7 @@ from lyra.runtime.report_collection import ReportCollection
 from lyra.sdk.parquet import ParquetLocationProvider
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.postgres import PostgresIO
+from test_support.table_fixtures import value_schema
 from tests.live_graph_helpers import plugins
 from tests.metric_scope_helpers import identity_schema
 from tests.node_declaration_helpers import CENSUS, Tracts, provider
@@ -57,7 +57,7 @@ def test_capture_preserves_empty_ownership_and_detaches_declarations(
             "places": LocationDependency(provider="records"),
             "data": Dependency("first", producer="measure"),
         },
-        outputs={"data": pa.DataFrameSchema(strict=True)},
+        outputs={"data": value_schema()},
     )
     def summary(places: gpd.GeoDataFrame, data: pd.DataFrame) -> pd.DataFrame:
         del places, data

@@ -372,7 +372,7 @@ To test a public metric and its dependencies, import `LocalRunner` from `lyra.ru
 
 A requested metric returns all its declared outputs; intermediate dependency outputs remain internal. Lyra executes dependencies sequentially on the selected worker. Identical producer invocations reuse native tables within that job, including all outputs of a multi-output producer.
 
-Lyra supplies an independent frame for each handler argument. You can edit it without changing another named input, consumer, or retained result. Lyra copies producer outputs before validation and checks output owners against the original selections. Validation can apply declared coercion.
+Lyra supplies an independent frame for each handler argument. You can edit it without changing another named input, consumer, or retained result. Lyra copies producer outputs before validation and checks output owners against the original selections.
 
 Lyra applies the same declared reuse policies across jobs, so a cache hit can skip acquisition. Failures stop execution and fail the requested job without partial results or automatic retries. Inspect the failing node and dependency path in diagnostics and worker logs.
 
@@ -537,7 +537,7 @@ Pass resource settings to `LocalRunner` through `resource_config`. For tests, pa
 
 Prefer `pandera.pandas.DataFrameModel` declarations; object `DataFrameSchema` declarations are equally supported. Lyra compiles independent validation and storage descriptions once, without database access. Set `strict=True` on schemas or the effective model `Config`.
 
-Declare nullable dtypes explicitly and set `coerce=True` only when you intend conversion. Units describe values without converting them. Columns support these types:
+Declare at least one column per output. Return the declared dtypes, fill required values before handoff, and write read-only checks. An unpartitioned output can contain just geometry. Units describe values without converting them. Columns support these types:
 
 - Strings
 - Signed 64-bit integers
@@ -609,7 +609,7 @@ For a custom `LocationProvider`, implement synchronous `resolve(self, ids: list[
 
 Lyra associates records by provider scope and ID, and skips resolution for empty selections. Don’t rely on record order. Return the same record for an ID regardless of the other requested IDs.
 
-Lyra validates returned frames automatically against the registered provider schema, including fake resource overrides. Missing, extra, or duplicate records and columns, invalid geometry, and incorrect CRS fail validation. Declared type coercion runs before handlers receive the native frame. Rename external columns and reproject before returning.
+Lyra validates returned frames automatically against the registered provider schema, including fake resource overrides. Missing, extra, or duplicate records and columns, invalid geometry, and incorrect CRS fail validation. Convert source columns to their declared types before returning records. Provider records and intervention additions accept either pandas string storage backend, and a nullable `bool` declaration accepts pandas `boolean`. Rename external columns and reproject before returning.
 
 Raise `UnresolvedLocationIDsError(self.id, "location", missing_ids)` with every unknown ID, including total misses. Raise `LocationAcquisitionError` for service failures, chaining the cause without exposing credentials. Runtime diagnostics add the node and input.
 
@@ -704,7 +704,7 @@ Choose a cache policy on each declaration. Lyra accepts these settings and valid
 
 Mark exactly one metric location input `primary=True` to assign output rows to its locations. The marker doesn’t enable caching or promise independent computation. An operation’s sole source is automatically primary.
 
-Each primary partition contains the output rows for one primary location. Choose `per_location` only if adding or removing other primary locations cannot change that partition’s result. This promise includes dependencies and complete shared context. Lyra trusts your declaration without running independence proofs.
+Each primary partition contains the output rows for one primary location. Choose `per_location` only if adding or removing other primary locations cannot change that partition’s result. With `cache="per_location"`, the handler may receive only locations with cache misses. That batch must pass every check independently, and combining its rows with retained partitions must also satisfy the checks. Use `cache="full"` for constraints such as uniqueness of a code across locations. This promise includes dependencies and complete shared context. Lyra trusts your declaration without running independence proofs.
 
 Set a provider’s `cache = True` to reuse immutable records by exact ID. Providers reject strings and integers, and metrics and operations reject booleans.
 

@@ -1,7 +1,6 @@
 """Shared catalog capture and complete-catalog validation."""
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.errors import ResourceConfigurationError
@@ -10,14 +9,15 @@ from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.routing_plugins import provider
+from test_support.table_fixtures import value_frame, value_schema
 from test_support.workloads import catalog, installed, workload
 
 
 def metric_plugin(name: str, upstream: str | None = None) -> PluginDefinition:
-    schema = pa.DataFrameSchema(strict=True)
+    schema = value_schema()
 
     def source() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     def consumer(data: pd.DataFrame) -> pd.DataFrame:
         return data

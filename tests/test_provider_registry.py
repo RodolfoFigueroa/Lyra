@@ -18,6 +18,7 @@ from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
+from test_support.table_fixtures import value_frame, value_schema
 from tests.provider_helpers import FakeProvider
 from tests.provider_schema_helpers import declaration, frame
 
@@ -29,14 +30,10 @@ ELEVATION = Origin(id="elevation")
     code_revision="1",
     name="plain_registry_metric",
     description="A metric with no location inputs.",
-    outputs={
-        "result": pa.DataFrameSchema(
-            strict=True,
-        )
-    },
+    outputs={"result": value_schema()},
 )
 def plain() -> pd.DataFrame:
-    return pd.DataFrame()
+    return value_frame()
 
 
 def provider(**attributes: object) -> type[FakeProvider]:

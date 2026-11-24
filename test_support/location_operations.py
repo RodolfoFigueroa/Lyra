@@ -26,7 +26,7 @@ class MemoryIO(BaseIO):
         pass
 
 
-OUTPUT = contract(declaration(count=column(int, coerce=True)))
+OUTPUT = contract(declaration(count=column(int)))
 
 
 class Places(LocationProvider):

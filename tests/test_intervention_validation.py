@@ -442,3 +442,29 @@ def test_failed_result_publication_keeps_only_completed_work(
         pytest.raises(ReportNotFoundError),
     ):
         reader.read_report(caught.value.execution_id)
+
+
+@pytest.mark.usefixtures("database")
+def test_downloads_keep_intervention_scope_per_result(local: LocalRunner) -> None:
+    references = []
+    for revision in ("first", "second"):
+        intervention = replace(change(removed="b"), revision=revision)
+        result = local.run(
+            "measure", inputs=selected("a"), interventions=[intervention]
+        )
+        references.append((result.report.result_ref, revision))
+    path = result.metadata.store_path
+    path.touch()
+    with ResultStore.open(path) as reader:
+        for reference, revision in [*references, references[0]]:
+            for chunks, role in (
+                (reader.stream_table(reference, "rows"), b"owner_scope"),
+                (reader.stream_location_input(reference, "places"), b"provider_scope"),
+            ):
+                with pa.ipc.open_stream(b"".join(chunks)) as stream:
+                    assert (
+                        json.loads(stream.schema.metadata[role])["intervention"][
+                            "revision"
+                        ]
+                        == revision
+                    )

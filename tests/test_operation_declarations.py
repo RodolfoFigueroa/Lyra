@@ -5,7 +5,6 @@ from typing import Annotated, cast
 from unittest.mock import Mock
 
 import geopandas as gpd
-import pandera.pandas as pa
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
@@ -17,6 +16,7 @@ from lyra.runtime.planning.native_bindings import bind_native_definitions
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from test_support.location_operations import Places
+from test_support.table_fixtures import value_schema
 
 
 class Parameters(MetricParameters):
@@ -244,7 +244,7 @@ def test_source_binding_keeps_fixed_target(*, override_target: bool) -> None:
             "main": LocationDependency(provider=Places.id),
             "selected": source,
         },
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
     )
     def consumer(main: gpd.GeoDataFrame, selected: gpd.GeoDataFrame) -> None:
         pytest.fail(f"Unexpected execution: {main}, {selected}")

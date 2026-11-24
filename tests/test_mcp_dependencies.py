@@ -6,7 +6,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.runtime.planning.catalog import compile_live_catalog
@@ -18,6 +17,7 @@ from lyra.server.mcp.models import GetMetricInput
 from lyra.server.mcp.tools import InProcessLyraBackend
 from test_support.accepted_sources import routed_request
 from test_support.mcp import call_tool
+from test_support.table_fixtures import value_frame, value_schema
 from tests.live_graph_helpers import Parameters, plugins
 
 
@@ -27,10 +27,10 @@ def fixture(count: int = 3, *, private: bool = True) -> Discovery:
         code_revision="1",
         description="Base",
         private=private,
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
     )
     def base() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     def consumer_factory() -> Callable:
         def consumer(table: pd.DataFrame) -> pd.DataFrame:
@@ -44,7 +44,7 @@ def fixture(count: int = 3, *, private: bool = True) -> Discovery:
             code_revision="1",
             description="Consume measurement",
             inputs={"table": Dependency("value", producer="measure_0")},
-            outputs={"value": pa.DataFrameSchema(strict=True)},
+            outputs={"value": value_schema()},
         )(consumer_factory())
         for index in range(1, count)
     ]
@@ -83,7 +83,7 @@ def test_consumers_empty_and_truncation(count: int) -> None:
 def test_declared_operations_and_second_hop() -> None:
 
     definitions = plugins()
-    schema = pa.DataFrameSchema(strict=True)
+    schema = value_schema()
 
     @metric(
         name="upstream",
@@ -92,7 +92,7 @@ def test_declared_operations_and_second_hop() -> None:
         outputs={"rows": schema},
     )
     def upstream() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         name="producer",
@@ -158,7 +158,7 @@ def test_tool_dispatch() -> None:
 
 
 def test_named_outputs_and_registration_order() -> None:
-    schema = pa.DataFrameSchema(strict=True)
+    schema = value_schema()
 
     @metric(
         name="producer",
@@ -167,7 +167,7 @@ def test_named_outputs_and_registration_order() -> None:
         outputs={"first": schema, "second": schema},
     )
     def producer() -> dict[str, pd.DataFrame]:
-        return {"first": pd.DataFrame(), "second": pd.DataFrame()}
+        return {"first": value_frame(), "second": value_frame()}
 
     @metric(
         name="target",

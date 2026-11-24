@@ -15,7 +15,6 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.locations import LocationSelection
 from lyra.contracts.provider_scope import DatasetScope, RecordReferences
-from lyra.runtime.native_inputs import copy_frame
 from lyra.runtime.planning.provider_preparation import PreparedProviderInput
 from lyra.runtime.planning.provider_registry import RegisteredProvider
 from lyra.runtime.resources import ResourceScope
@@ -159,14 +158,14 @@ def acquire_provider_candidates(
     )
     if records is not None:
         records.publish(registered, frame, references=RecordReferences(scope, added))
-    return AcquiredProviderInput(copy_frame(frame), scope, added)
+    return AcquiredProviderInput(frame, scope, added)
 
 
 def _validate_candidates(
     registered: RegisteredProvider, output: gpd.GeoDataFrame
 ) -> gpd.GeoDataFrame:
     try:
-        return registered.schema.validate(copy_frame(output))
+        return registered.schema.validate(output)
     except Exception as exc:
         name = "candidates"
         raise LocationProviderContractError(
@@ -222,7 +221,7 @@ def acquire_provider_input(
         )
         raise LocationAcquisitionError(msg, ids=ids, input_name=selection.name) from exc
     try:
-        frame = registered.schema.validate(copy_frame(output))
+        frame = registered.schema.validate(output)
     except Exception as exc:
         raise LocationProviderContractError(
             selection.name, "Provider output failed its location schema", ids
@@ -237,4 +236,4 @@ def acquire_provider_input(
         )
     if records is not None:
         records.publish(registered, frame)
-    return AcquiredProviderInput(copy_frame(frame), registered.scope)
+    return AcquiredProviderInput(frame, registered.scope)

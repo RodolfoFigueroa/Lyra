@@ -4,7 +4,6 @@ from typing import Annotated
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from geopandas import GeoDataFrame
 from pydantic import Field, ValidationError
@@ -23,6 +22,7 @@ from lyra.runtime.planning.provider_registry import capture_provider
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.runtime_inputs import assert_records, native_inputs
+from test_support.table_fixtures import value_frame, value_schema
 from tests.geometry_fixtures import projected_collection
 from tests.provider_helpers import FakeProvider
 
@@ -48,7 +48,7 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
         },
         name="named",
         description="Named inputs.",
-        outputs={"named": pa.DataFrameSchema({}, strict=True)},
+        outputs={"named": value_schema()},
     )
     def named(
         blocks: Annotated[
@@ -61,7 +61,7 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
         bounds: gpd.GeoDataFrame,
     ) -> pd.DataFrame:
         observed.append((blocks, lots, bounds))
-        return pd.DataFrame()
+        return value_frame()
 
     plugin = PluginDefinition(metrics=[named], resources={"places": FakeProvider})
     binding = BoundPlugin(plugin)
@@ -108,26 +108,26 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         code_revision="1",
         name="source",
         description="No location.",
-        outputs={"source": pa.DataFrameSchema({}, strict=True)},
+        outputs={"source": value_schema()},
     )
     def source() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         code_revision="1",
         inputs={"lots": LocationDependency(provider=FakeProvider.id)},
         name="located",
         description="Uses lots.",
-        outputs={"located": pa.DataFrameSchema({}, strict=True)},
+        outputs={"located": value_schema()},
     )
     def located(lots: gpd.GeoDataFrame) -> pd.DataFrame:
-        return pd.DataFrame(index=list(lots.location_id))
+        return value_frame(len(lots))
 
     @metric(
         code_revision="1",
         name="consumer",
         description="Forwarding input.",
-        outputs={"consumer": pa.DataFrameSchema({}, strict=True)},
+        outputs={"consumer": value_schema()},
         inputs={
             "lots": LocationDependency(provider=FakeProvider.id),
             "data": Dependency("located", producer="located"),
@@ -176,7 +176,7 @@ def test_location_collisions_are_actionable(argument: str) -> None:
             code_revision="1",
             name="collision",
             description="Collision.",
-            outputs={"collision": pa.DataFrameSchema({}, strict=True)},
+            outputs={"collision": value_schema()},
             inputs={"data": Dependency("source", producer="source")}
             if argument == "data"
             else {},
@@ -204,7 +204,7 @@ def test_unsupported_location_annotations(annotation: object) -> None:
             name="invalid",
             description="Invalid.",
             inputs={"lots": LocationDependency(provider=FakeProvider.id)},
-            outputs={"invalid": pa.DataFrameSchema({}, strict=True)},
+            outputs={"invalid": value_schema()},
         )(handler)
 
 
@@ -214,10 +214,10 @@ def test_manifest_rejects_colliding_location_names() -> None:
         name="source",
         inputs={"lots": LocationDependency(provider=FakeProvider.id)},
         description="Source.",
-        outputs={"source": pa.DataFrameSchema({}, strict=True)},
+        outputs={"source": value_schema()},
     )
     def source(lots: gpd.GeoDataFrame) -> pd.DataFrame:
-        return pd.DataFrame(index=list(lots.location_id))
+        return value_frame(len(lots))
 
     payload = (
         PluginDefinition(metrics=[source], resources={"places": FakeProvider})

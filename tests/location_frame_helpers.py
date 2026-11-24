@@ -1,64 +1,30 @@
-from datetime import date
-from typing import cast
+"""Native frames and registered location schemas for ownership tests."""
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
-from geopandas import GeoDataFrame
 from pandera.engines.geopandas_engine import Geometry
-from pandera.engines.pandas_engine import Date
 from shapely.geometry import Point
 
-from lyra.data.geometry_shapely import ingest_geometries
-from lyra.data.location_frames import validate_frame
-from lyra.sdk.storage_schema import prepare
+from test_support.location_schema import column, contract, declaration
 
 
-def convert(frame: gpd.GeoDataFrame) -> GeoDataFrame:
-    validate_frame(frame, "key")
-    if any(type(value) is not str or not value for value in frame["key"]):
-        message = "Feature id must be a nonempty string"
-        raise ValueError(message)
-    if frame.geometry.isna().any():
-        message = "geometry cannot be null"
-        raise ValueError(message)
-    rich = "shape" in frame
-    geometry = "shape" if rich else "geometry"
-    types = {"key": str, geometry: Geometry}
-    if rich:
-        types.update(
-            count="Int64",
-            active="boolean",
-            ratio="Float64",
-            label="string",
-            category=pd.CategoricalDtype(["a"]),
-            day=Date,
-            time=pd.DatetimeTZDtype(tz="UTC"),
+def convert(frame: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if "active" in frame:
+        properties = {
+            "count": column("Int64", nullable=True),
+            "active": column("boolean", nullable=True),
+            "ratio": column("Float64", nullable=True),
+            "label": column("string", nullable=True),
+        }
+        crs = 27700
+    else:
+        properties = (
+            {"mixed": column("Int64", nullable=True)} if "mixed" in frame else {}
         )
-    for name in ("id", "geometry"):
-        if rich and name in frame:
-            types[name] = str
-    if "mixed" in frame:
-        types["mixed"] = "Int64"
-    schema = pa.DataFrameSchema(
-        {
-            name: pa.Column(
-                dtype,
-                nullable=name not in {"key", geometry},
-                coerce=name not in {"key", geometry},
-                description=name,
-                metadata={"unit": None},
-            )
-            for name, dtype in types.items()
-        },
-        strict=True,
-    )
-    if frame["key"].duplicated().any():
-        message = "IDs must be unique"
-        raise ValueError(message)
-    ingest_geometries(frame.geometry.to_numpy())
-    prepared = prepare(frame, schema)
-    return cast("gpd.GeoDataFrame", prepared.frame.copy(deep=True))
+        crs = 4326
+    schema = declaration(**properties)
+    schema.columns["geometry"] = column(Geometry(crs=crs))
+    return contract(schema).prepare_frame(frame)
 
 
 def source_frame() -> gpd.GeoDataFrame:
@@ -69,11 +35,7 @@ def source_frame() -> gpd.GeoDataFrame:
             "active": pd.Series([True, None], dtype="boolean"),
             "ratio": pd.Series([1.5, None], dtype="Float64"),
             "label": pd.Series(["station", None], dtype="string"),
-            "category": pd.Categorical(["a", None]),
-            "day": [date(2026, 10, 29), None],
-            "time": [pd.Timestamp("2026-10-29T12:00:00Z"), pd.NaT],
-            "shape": [Point(0, 1), Point(2, 3)],
         },
-        geometry="shape",
+        geometry=[Point(0, 1), Point(2, 3)],
         crs="EPSG:27700",
     )

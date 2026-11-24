@@ -14,10 +14,11 @@ from lyra.sdk.resources import BaseIO
 from lyra.server import worker
 from lyra.server.plugins import InstalledPlugin
 from lyra.server.runtime import ApplicationRuntime
+from test_support.table_fixtures import value_schema
 from tests.config_helpers import load_test_config
 from tests.runtime_helpers import make_runtime
 
-TABLE = pa.DataFrameSchema({}, strict=True)
+TABLE = value_schema()
 
 
 VALUES = pa.DataFrameSchema(

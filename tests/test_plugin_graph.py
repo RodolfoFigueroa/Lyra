@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.config import InstalledPluginConfig
@@ -21,6 +20,7 @@ from test_support.plugin_graph import (
     manifest,
     node,
 )
+from test_support.table_fixtures import value_schema
 from tests.config_helpers import load_test_config
 from tests.graph_arguments_helpers import parameter_edge
 from tests.live_graph_helpers import plugins
@@ -87,7 +87,7 @@ def test_invalid_parameter_supply(
 def test_catalog_graph_visibility_and_enabled_dependencies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    schema = pa.DataFrameSchema(strict=True)
+    schema = value_schema()
 
     @metric(
         name="source",

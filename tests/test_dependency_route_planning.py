@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field
 
@@ -19,6 +18,7 @@ from lyra.runtime.planning.parameters import receiving_key, route_key
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_schema
 from tests.dependency_route_helpers import definitions, request
 from tests.live_graph_helpers import operation
 from tests.node_declaration_helpers import provider
@@ -265,7 +265,7 @@ def test_independent_receiving_uses_may_order_operations_differently() -> None:
             "left": LocationDependency("forward").bind(source=Input("b")),
             "right": LocationDependency("reverse").bind(source=Input("a")),
         },
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
     )
     def root(
         a: gpd.GeoDataFrame,
@@ -319,7 +319,7 @@ def test_routes_below_repeated_producer_uses_have_independent_defaults() -> None
         tags: list[int] = Field(default_factory=defaults, description="Tags")
 
     plugins = definitions(options=Parameters)
-    table = pa.DataFrameSchema(strict=True)
+    table = value_schema()
 
     @metric(
         name="middle_metric",

@@ -3,7 +3,6 @@
 from collections.abc import Callable
 from unittest.mock import Mock
 
-import pandera.pandas as pa
 from pydantic import Field, field_validator
 
 from lyra.runtime.execution import GraphExecutor
@@ -12,8 +11,9 @@ from lyra.runtime.local import LocalRunner
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition
+from test_support.table_fixtures import value_schema
 
-TABLE = pa.DataFrameSchema({}, strict=True)
+TABLE = value_schema()
 
 
 def executor(

@@ -7,7 +7,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.dependencies import Input
@@ -18,6 +17,7 @@ from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from lyra.server import job_submission, worker
 from test_support.location_resolution import Blocks, Provider, selection
+from test_support.table_fixtures import value_frame, value_schema
 from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.worker_graph_integration_helpers import (
     install_definitions,
@@ -39,7 +39,7 @@ def definitions(
     class Source(Provider):
         code_revision = revisions.get("provider")
 
-    table = pa.DataFrameSchema({}, strict=True)
+    table = value_schema()
 
     @location_operation(
         code_revision=revisions.get("helper", "1"),
@@ -62,7 +62,7 @@ def definitions(
     )
     def records(source: gpd.GeoDataFrame) -> pd.DataFrame:
         calls.append("records")
-        return pd.DataFrame(index=range(len(source)))
+        return value_frame(len(source))
 
     def operation(
         name: str,
@@ -113,7 +113,7 @@ def definitions(
     ) -> pd.DataFrame:
         assert len(data) == len(left)
         calls.append("root")
-        return pd.DataFrame(index=range(len(left) + len(right)))
+        return value_frame(len(left) + len(right))
 
     @metric(
         code_revision=revisions.get("unrelated", "1"),

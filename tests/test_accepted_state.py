@@ -7,7 +7,6 @@ from typing import cast
 from unittest.mock import Mock
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field, ValidationError
 
@@ -20,6 +19,7 @@ from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server.job_submission import MetricPayloadValidationError, submit_job
 from lyra.server.registry import Catalog
+from test_support.table_fixtures import value_frame, value_schema
 
 
 def parameter_catalog() -> CompiledCatalog:
@@ -34,11 +34,11 @@ def parameter_catalog() -> CompiledCatalog:
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"result": pa.DataFrameSchema({}, strict=True)},
+        outputs={"result": value_schema()},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         assert parameters.options.model_dump()
-        return pd.DataFrame()
+        return value_frame()
 
     return compile_live_catalog({"fixture": PluginDefinition(metrics=[root])})
 
@@ -141,7 +141,7 @@ def test_submission_rejects_nested_union_default_that_changes_type_on_replay() -
     @metric(
         name="root",
         description="Root",
-        outputs={"result": pa.DataFrameSchema(strict=True)},
+        outputs={"result": value_schema()},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         pytest.fail(f"Submission invoked the handler with {parameters!r}")
@@ -180,11 +180,11 @@ def test_local_adapter_captures_effective_values(*, explicit: bool) -> None:
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"result": pa.DataFrameSchema({}, strict=True)},
+        outputs={"result": value_schema()},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         assert parameters.number == 7
-        return pd.DataFrame()
+        return value_frame()
 
     runner = LocalRunner.from_definitions({"fixture": PluginDefinition(metrics=[root])})
     runner.run("root", parameters={} if explicit else None)
@@ -211,19 +211,19 @@ def test_empty_and_absent_models_remain_distinct_in_worker_requests() -> None:
     @metric(
         name="declared",
         description="Empty model",
-        outputs={"result": pa.DataFrameSchema(strict=True)},
+        outputs={"result": value_schema()},
     )
     def declared(parameters: Empty) -> pd.DataFrame:
         assert isinstance(parameters, Empty)
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         name="absent",
         description="No model",
-        outputs={"result": pa.DataFrameSchema(strict=True)},
+        outputs={"result": value_schema()},
     )
     def absent() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     runner = LocalRunner.from_definitions(
         {"fixture": PluginDefinition(metrics=[declared, absent])}

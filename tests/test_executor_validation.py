@@ -13,6 +13,7 @@ from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import metric
 from test_support.canonical_execution import canonical_workload
+from test_support.table_fixtures import value_frame
 from tests.graph_execution_helpers import TABLE, executor
 
 
@@ -75,7 +76,7 @@ def test_resolved_validation_precedes_cached_root(
     )
     def leaf() -> pd.DataFrame:
         calls.append("leaf")
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         code_revision="1",

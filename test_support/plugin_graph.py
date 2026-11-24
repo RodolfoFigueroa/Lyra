@@ -2,7 +2,7 @@
 
 from pydantic import Field
 
-from lyra.contracts.outputs import OutputMetadata
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.plugins import (
     LocationInputDeclaration,
     LocationOperationManifest,
@@ -50,7 +50,19 @@ def node(
             for key in spatial or ()
         },
         inputs=inputs or {},
-        outputs={key: OutputMetadata(columns=[]) for key in outputs or (name,)},
+        outputs={
+            key: OutputMetadata(
+                columns=[
+                    ColumnMetadata(
+                        name="value",
+                        dtype="int64",
+                        description="Sample value",
+                        unit=None,
+                    )
+                ]
+            )
+            for key in outputs or (name,)
+        },
     )
 
 

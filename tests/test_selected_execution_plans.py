@@ -8,7 +8,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from fastapi import HTTPException
 
@@ -22,6 +21,7 @@ from lyra.runtime.planning.preparation import PreparationError, prepare_executio
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server.registry import Catalog
 from lyra.server.routes.jobs import create_job
+from test_support.table_fixtures import value_schema
 from tests.live_graph_helpers import operation
 from tests.node_declaration_helpers import provider
 
@@ -44,7 +44,7 @@ def interacting_definitions(*, nested: bool = False) -> dict[str, PluginDefiniti
             "left": LocationDependency(provider="d"),
             "right": LocationDependency(provider="b"),
         },
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
     )
     def root(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> pd.DataFrame:
         del left, right
@@ -62,7 +62,7 @@ def interacting_definitions(*, nested: bool = False) -> dict[str, PluginDefiniti
                 "right": LocationDependency(provider="c"),
                 "data": Dependency("value", producer="root"),
             },
-            outputs={"value": pa.DataFrameSchema(strict=True)},
+            outputs={"value": value_schema()},
         )
         def wrapper(
             left: gpd.GeoDataFrame, right: gpd.GeoDataFrame, data: pd.DataFrame
@@ -181,7 +181,7 @@ def test_startup_work_does_not_multiply_input_choices(
             f"input_{i}": LocationDependency(provider=native)
             for i in range(input_count)
         },
-        outputs={"value": pa.DataFrameSchema(strict=True)},
+        outputs={"value": value_schema()},
     )(four)
     operations = [
         operation(f"select_{i}", source, native) for i, source in enumerate(sources)

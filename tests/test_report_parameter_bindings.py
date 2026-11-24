@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.dependencies import Dependency, Input
@@ -15,6 +14,7 @@ from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.report_collection import ReportCollection
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_frame, value_schema
 from tests.bound_invocation_helpers import bound
 from tests.report_parameter_helpers import (
     LeafParameters,
@@ -29,7 +29,7 @@ __all__ = ["database"]
 def test_direct_chains_shared_and_separate_uses_without_execution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    schema = pa.DataFrameSchema(strict=True)
+    schema = value_schema()
     handler = Mock(side_effect=AssertionError("capture executed a handler"))
 
     @metric(name="leaf", description="Leaf", outputs={"data": schema})
@@ -173,12 +173,12 @@ def test_nested_operation_forwarding_uses_declaring_caller(ids: list[str]) -> No
 @pytest.mark.usefixtures("database")
 def test_cached_root_retains_forwarding_for_bypassed_dependency(tmp_path: Path) -> None:
     events = []
-    schema = pa.DataFrameSchema(strict=True)
+    schema = value_schema()
 
     @metric(name="leaf", description="Leaf", outputs={"data": schema})
     def leaf(parameters: LeafParameters) -> pd.DataFrame:
         events.append(parameters.distance)
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         name="root",

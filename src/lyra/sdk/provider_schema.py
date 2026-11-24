@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
-from copy import copy, deepcopy
+from copy import copy
 from typing import TYPE_CHECKING
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 from pandera.engines import numpy_engine, pandas_engine
 
-from lyra.data.location_frames import validate_frame
 from lyra.sdk.location_schema import LocationOutputSchema
 
 if TYPE_CHECKING:
-    import geopandas as gpd
-
     from lyra.sdk.output_schema import OutputSchema
 
 
 class ProviderSchema:
     """Snapshot a strict provider declaration without acquiring resources.
 
-    Structural identity is checked before Pandera can coerce values. Executable
-    checks express geometry requirements; their Python names and implementation
-    do not determine their meaning. Scope is supplied separately by declarations.
+    Provider declarations supply the scope, opaque ID column, geometry CRS,
+    and predicates for each fresh batch of records.
     """
 
     def __init__(self, declaration: OutputSchema) -> None:
@@ -78,27 +75,31 @@ class ProviderSchema:
         Types, active geometry and CRS survive empty and all-null columns.
         Authors must rename columns and reproject before returning their frames.
         """
-        validate_frame(frame, "location_id")
+        if not isinstance(frame, gpd.GeoDataFrame) or not frame.columns.is_unique:
+            return self._compiled.prepare_frame(frame, lazy=lazy)
         compiled = self._compiled
         for name, column in self.schema.columns.items():
             if name not in frame:
                 continue
             dtype = frame[name].dtype
-            if (
+            string_storage = (
                 isinstance(dtype, pd.StringDtype)
                 and isinstance(column.dtype, pandas_engine.STRING)
                 and dtype.storage != column.dtype.storage
-            ):
-                frame = frame.assign(**{name: frame[name].astype(column.dtype.type)})
-            elif (
+            )
+            nullable_boolean = (
                 str(column.dtype) == "bool"
                 and column.nullable
                 and isinstance(dtype, pd.BooleanDtype)
-            ):
+            )
+            if string_storage or nullable_boolean:
                 if compiled is self._compiled:
                     compiled = copy(compiled)
-                    compiled.schema = deepcopy(compiled.schema)
-                compiled.schema.columns[name].dtype = "boolean"
+                    compiled.schema = copy(self.schema)
+                    compiled.schema.columns = self.schema.columns.copy()
+                compatible = copy(column)
+                compatible.dtype = dtype
+                compiled.schema.columns[name] = compatible
         return compiled.prepare_frame(frame, lazy=lazy)
 
     def empty_frame(self) -> gpd.GeoDataFrame:

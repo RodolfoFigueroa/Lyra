@@ -9,6 +9,7 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import pandas as pd
 import pandera.pandas as pa
 from pandera.engines import geopandas_engine, numpy_engine, pandas_engine
 
@@ -31,7 +32,7 @@ _SUPPORTED_DTYPES = frozenset(
         "str",
         "string",
     )
-) | {numpy_engine.String, geopandas_engine.Geometry}
+) | {geopandas_engine.Geometry}
 
 
 def _json_value(value: object) -> object:
@@ -83,27 +84,24 @@ def _checks(
     return result
 
 
-def _dtype(component: pa.Column | pa.DataFrameSchema) -> str:
-    dtype = component.dtype
-    name = str(dtype)
-    if type(dtype) not in _SUPPORTED_DTYPES:
-        msg = f"Unsupported output dtype: {dtype}"
-        raise ValueError(msg)
-    return name
-
-
-def _component(component: pa.Column) -> dict[str, Any]:
-    if component.parsers or component.drop_invalid_rows:
+def _compile_column(column: pa.Column) -> dict[str, Any]:
+    if column.parsers or column.drop_invalid_rows:
         msg = "Output schemas cannot parse data or drop rows"
         raise ValueError(msg)
+    # The NumPy engine accepts any object array. The pandas engine also
+    # checks that its non-null cells are strings.
+    if type(column.dtype) is numpy_engine.String:
+        column.dtype = "string"
+    if type(column.dtype) not in _SUPPORTED_DTYPES:
+        msg = f"Unsupported output dtype: {column.dtype}"
+        raise ValueError(msg)
     return {
-        "dtype": _dtype(component),
-        "nullable": component.nullable,
-        "unique": component.unique,
-        "coerce": component.coerce,
-        "checks": _checks(component),
+        "dtype": str(column.dtype),
+        "nullable": column.nullable,
+        "unique": column.unique,
+        "checks": _checks(column),
         "parameters": {
-            key: _json_value(getattr(component.dtype, key))
+            key: _json_value(getattr(column.dtype, key))
             for key in (
                 "categories",
                 "ordered",
@@ -111,12 +109,12 @@ def _component(component: pa.Column) -> dict[str, Any]:
                 "storage",
                 "time_zone_agnostic",
             )
-            if getattr(component.dtype, key, None) is not None
+            if getattr(column.dtype, key, None) is not None
         }
         | {
-            key: str(getattr(component.dtype, key))
+            key: str(getattr(column.dtype, key))
             for key in ("tz", "crs")
-            if getattr(component.dtype, key, None) is not None
+            if getattr(column.dtype, key, None) is not None
         },
     }
 
@@ -144,7 +142,7 @@ def compile_output(
             "declare identity and uniqueness in columns"
         )
         raise ValueError(msg)
-    _validate_strictness(declaration)
+    _validate_producer_schema(declaration)
     schema = deepcopy(declaration)
     if (
         schema.strict == "filter"
@@ -174,7 +172,7 @@ def compile_output(
         ):
             msg = f"Column {name!r} requires a description and metadata['unit']"
             raise ValueError(msg)
-        data = _component(column)
+        data = _compile_column(column)
         if data["dtype"] == "geometry":
             if geometry is not None:
                 msg = "Only one geometry column is supported"
@@ -196,7 +194,6 @@ def compile_output(
         geometry=geometry,
         checks=_checks(schema),
         ordered=schema.ordered,
-        coerce=schema.coerce,
         unique=schema.unique,
     )
 
@@ -211,7 +208,19 @@ def _validate_geometry(name: str, column: pa.Column) -> None:
         raise ValueError(msg)
 
 
-def _validate_strictness(declaration: pa.DataFrameSchema) -> None:
+def _validate_producer_schema(declaration: pa.DataFrameSchema) -> None:
+    if declaration.coerce or any(col.coerce for col in declaration.columns.values()):
+        msg = "Producer schemas and columns cannot use coerce=True"
+        raise ValueError(msg)
+    if not declaration.columns:
+        msg = "Each output must declare at least one column"
+        raise ValueError(msg)
+    if any(
+        not pd.api.types.is_scalar(col.default) or not pd.isna(col.default)
+        for col in declaration.columns.values()
+    ):
+        msg = "Producer columns cannot supply fill defaults"
+        raise ValueError(msg)
     if declaration.strict is not True:
         msg = "Output schemas require strict=True"
         raise ValueError(msg)

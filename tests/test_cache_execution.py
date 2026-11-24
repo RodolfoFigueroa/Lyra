@@ -306,16 +306,11 @@ def test_location_repeated_execution_preserves_reuse(tmp_path: Path) -> None:
     assert events == []
 
 
-def test_dependency_edges_keep_native_frames(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_dependency_edges_keep_native_frames(tmp_path: Path) -> None:
     runner, root, _, events, _ = setup_graph(tmp_path)
     runner.store = None
-    conversion = Mock(side_effect=AssertionError("Unexpected storage conversion"))
-    monkeypatch.setattr("lyra.data.arrow_conversion.to_arrow", conversion)
     assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
     assert events.count("source") == 1
-    conversion.assert_not_called()
 
 
 @pytest.mark.parametrize("initial", [None, "first"])

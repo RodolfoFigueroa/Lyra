@@ -94,7 +94,7 @@ Build and register the adapter with these steps:
 
    Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers.
 
-   Follow [capability contracts](references/capabilities.md) for metric factories and revision decisions. Change the node ID or optional `code_revision` when outputs change; an operation’s revision covers both selector and mapper. Use [persistent result access](references/authoring.md#persist-and-reopen-local-results) to configure local storage and reopen results.
+   Follow [capability contracts](references/capabilities.md) for metric factories and revision decisions. Change the node ID or optional `code_revision` when outputs change; an operation’s revision covers both selector and mapper. Change the metric’s `code_revision` when a validation change can reject previously accepted output. Use [persistent result access](references/authoring.md#persist-and-reopen-local-results) to configure local storage and reopen results.
 
    Managed execution attaches a complete report automatically. Keep ordinary table and mapping returns without adding reporting wrappers, reporting columns, or extra acquisition. Inspect `result.report` alongside `.tables` and `.metadata` to check the managed contract.
 

@@ -20,6 +20,7 @@ from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import job_submission
 from lyra.server.routes.jobs import create_job
 from test_support.location_resolution import Blocks, Provider, features, selection
+from test_support.table_fixtures import value_frame
 from tests.queue_helpers import submitted_input
 from tests.worker_graph_integration_helpers import TABLE, install, install_definitions
 
@@ -65,7 +66,7 @@ def test_submission_lifecycle(
     def root(blocks: gpd.GeoDataFrame, lots: gpd.GeoDataFrame) -> pd.DataFrame:
         assert not blocks.empty
         assert not lots.empty
-        return pd.DataFrame()
+        return value_frame()
 
     resources = {"locations": Provider, "blocks": Blocks}
     definitions = (
@@ -156,7 +157,7 @@ def test_location_free_submission_never_loads_provider(
         code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
     )
     def root() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     runtime = install(tmp_path, monkeypatch, [root])[1]
     forbidden = Mock(

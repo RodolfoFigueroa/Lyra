@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 from typing_extensions import override
 
 from lyra.contracts.accepted import PreparedExecution
@@ -15,6 +14,7 @@ from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from test_support.location_resolution import Provider, frame_features, selection
+from test_support.table_fixtures import value_frame, value_schema
 
 
 @dataclass
@@ -57,10 +57,10 @@ def canonical_workload(
         name="one",
         description="One",
         inputs={"left": LocationDependency(provider=Target.id)},
-        outputs={"result": pa.DataFrameSchema({}, strict=True)},
+        outputs={"result": value_schema()},
     )
     def one(left: gpd.GeoDataFrame) -> pd.DataFrame:
-        return pd.DataFrame(index=range(len(left)))
+        return value_frame(len(left))
 
     @metric(
         cache="full",
@@ -71,10 +71,10 @@ def canonical_workload(
             "left": LocationDependency(provider=Target.id),
             "right": LocationDependency(provider=Target.id),
         },
-        outputs={"result": pa.DataFrameSchema({}, strict=True)},
+        outputs={"result": value_schema()},
     )
     def two(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> pd.DataFrame:
-        return pd.DataFrame(index=range(len(left) + len(right)))
+        return value_frame(len(left) + len(right))
 
     plugin = PluginDefinition(
         metrics=[one, two],

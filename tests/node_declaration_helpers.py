@@ -2,7 +2,6 @@ from typing import Any
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.origins import Origin
@@ -10,6 +9,7 @@ from lyra.runtime.planning.node_declarations import NodeDeclaration
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO
+from test_support.table_fixtures import value_frame, value_schema
 from tests.provider_helpers import FakeProvider
 from tests.provider_schema_helpers import declaration
 
@@ -31,14 +31,10 @@ def provider(**attributes: object) -> type[Tracts]:
     name="registry_placeholder",
     code_revision="1",
     description="Provider catalog.",
-    outputs={
-        "value": pa.DataFrameSchema(
-            strict=True,
-        )
-    },
+    outputs={"value": value_schema()},
 )
 def placeholder() -> pd.DataFrame:
-    return pd.DataFrame()
+    return value_frame()
 
 
 def plugin(**resources: type[BaseIO[Any]]) -> PluginDefinition:

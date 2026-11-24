@@ -15,6 +15,7 @@ from lyra.runtime.planning.native_bindings import bind_native_definitions
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.results import normalize_native_result
 from test_support.location_schema import column
+from test_support.table_fixtures import value_schema
 from tests.metric_scope_helpers import identity_schema
 from tests.node_declaration_helpers import Tracts
 
@@ -291,7 +292,7 @@ def test_captured_nested_bindings_are_revalidated() -> None:
             code_revision="1",
             description="Bad",
             inputs={"main": dependency},
-            outputs={"data": pa.DataFrameSchema(strict=True)},
+            outputs={"data": value_schema()},
         )(handler)
 
 

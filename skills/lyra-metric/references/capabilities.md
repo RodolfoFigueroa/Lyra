@@ -43,7 +43,7 @@ Import `Intervention` from `lyra.data.interventions`. Give each set a catalog, I
 
 For `add`, pass a GeoDataFrame in Python or an array of inline records over HTTP or MCP. Include every declared column, even nullable attributes. For `remove`, list distinct string IDs.
 
-The catalog, set ID, and revision identify immutable contents. Change the ID or revision when you change an action or attribute. Lyra includes the base scope and set identity in cache keys for dependent inputs and operation targets.
+The catalog, set ID, and revision identify immutable contents. Change the ID or revision when you change an action or attribute. Change the metric’s `code_revision` when a validation change can reject previously accepted output. Lyra includes the base scope and set identity in cache keys for dependent inputs and operation targets.
 
 HTTP `POST /jobs` accepts the shared request as its body; MCP `lyra_run_metric` accepts it as tool arguments. Lyra treats omitted mappings as empty mappings and still checks required selections and parameters.
 

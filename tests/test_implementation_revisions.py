@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
@@ -19,6 +18,7 @@ from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.table_fixtures import value_schema
 from tests.node_declaration_helpers import provider
 
 
@@ -26,7 +26,7 @@ def definitions(options: dict[str, Any], owner: str | None = None) -> PluginDefi
     @metric(
         name="root",
         description="Root",
-        outputs={"result": pa.DataFrameSchema({}, strict=True)},
+        outputs={"result": value_schema()},
         inputs={"places": LocationDependency(provider="tracts")},
         **(options if owner in {None, "metric"} else {}),
     )

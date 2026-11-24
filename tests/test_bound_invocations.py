@@ -15,6 +15,7 @@ from lyra.runtime.planning.bindings import bind_execution
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.table_fixtures import value_frame, value_schema
 from tests.bound_invocation_helpers import bound
 from tests.node_declaration_helpers import CENSUS, Tracts
 
@@ -98,7 +99,7 @@ def test_explicit_and_implicit_source_forwarding_are_equivalent() -> None:
             code_revision="1",
             description="Consumer",
             inputs={"seed": LocationDependency(provider="tracts"), "table": dependency},
-            outputs={"value": pa.DataFrameSchema(strict=True)},
+            outputs={"value": value_schema()},
         )
         def consumer(seed: gpd.GeoDataFrame, table: pd.DataFrame) -> pd.DataFrame:
             del seed, table
@@ -169,7 +170,7 @@ def test_resolved_targets_retain_upstream_computation_identity() -> None:
     with patch.object(
         type(plugin),
         "invoke",
-        return_value=plugin.normalize_result(producer.node, pd.DataFrame()),
+        return_value=plugin.normalize_result(producer.node, value_frame()),
     ) as invoke:
         executor.execute(invocation)
     effective = invoke.call_args.args[0]

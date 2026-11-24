@@ -25,6 +25,7 @@ from lyra.runtime.planning.provider_registry import (
 )
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from test_support.location_schema import column
+from test_support.table_fixtures import value_schema
 from tests.node_declaration_helpers import Tracts, provider
 
 INVALID_NODE_POLICIES = [True, False, None, 0, 1, "FULL", "per-location", [], {}]
@@ -183,7 +184,7 @@ def test_serialized_metric_rejects_invalid_policy_or_scope(cache: object) -> Non
     metric(
         name="summary",
         description="Summary",
-        outputs={"data": pa.DataFrameSchema(strict=True)},
+        outputs={"data": value_schema()},
     )(handler)
     manifest = PluginDefinition(metrics=[handler]).describe("summary").manifest
     payload = manifest.model_dump(mode="json") | {"cache": cache}
@@ -246,9 +247,7 @@ def test_serialized_metric_cannot_override_ownership(*, primary: bool) -> None:
         name="measure",
         description="Measure",
         inputs={"main": LocationDependency(provider="tracts", primary=primary)},
-        outputs={
-            "data": identity_schema() if primary else pa.DataFrameSchema(strict=True)
-        },
+        outputs={"data": identity_schema() if primary else value_schema()},
     )(handler)
     manifest = (
         PluginDefinition(metrics=[handler], resources={"places": Tracts})

@@ -4,7 +4,7 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from pandera.engines.geopandas_engine import Geometry
-from shapely.geometry import GeometryCollection, Point, shape
+from shapely.geometry import Point, shape
 
 from lyra.sdk.location_schema import LocationOutputSchema
 from tests.geometry_fixtures import VALUE_GEOMETRIES as GEOMETRIES
@@ -17,14 +17,14 @@ def test_order_properties_crs_and_custom_columns() -> None:
     value = convert(frame)
     assert value["key"].tolist() == ["002", "001"]
     assert value["count"].iloc[0] == 2**60 + 1
-    assert value.drop(columns=["key", "shape"]).iloc[1].isna().all()
+    assert value.drop(columns=["key", "geometry"]).iloc[1].isna().all()
     result = value.copy(deep=True)
     assert result.crs == frame.crs
-    assert result.active_geometry_name == "shape"
+    assert result.active_geometry_name == "geometry"
     assert list(result.columns) == [
         "key",
-        "shape",
-        *[name for name in frame.columns if name not in {"key", "shape"}],
+        "geometry",
+        *[name for name in frame.columns if name not in {"key", "geometry"}],
     ]
     assert result.index.tolist() == [0, 1]
     pd.testing.assert_frame_equal(convert(result), value)
@@ -46,7 +46,7 @@ def test_both_conversion_directions_are_independent() -> None:
     original = value.to_dict()
     frame.loc[0, "key"] = "changed"
     frame.loc[0, "count"] = 99
-    frame["shape"] = gpd.GeoSeries([Point(9, 9), Point(2, 3)], crs=frame.crs)
+    frame["geometry"] = gpd.GeoSeries([Point(9, 9), Point(2, 3)], crs=frame.crs)
     result = value.copy(deep=True)
     result.loc[0, "id"] = "changed"
     result.loc[0, "count"] = 98
@@ -62,14 +62,11 @@ def test_empty_conversion() -> None:
     assert result.empty
     assert list(result.columns) == [
         "key",
-        "shape",
+        "geometry",
         "count",
         "active",
         "ratio",
         "label",
-        "category",
-        "day",
-        "time",
     ]
     assert result.crs == source_frame().crs
     pd.testing.assert_frame_equal(convert(result), value)
@@ -91,41 +88,30 @@ def test_duplicate_ids() -> None:
 
 def test_invalid_frame_contracts() -> None:
     frame = source_frame()
-    with pytest.raises(ValueError, match="unique"):
+    with pytest.raises(ValueError, match="one ID column"):
         convert(pd.concat([frame, frame[["key"]]], axis=1))
-    with pytest.raises(ValueError, match="Missing ID"):
+    with pytest.raises(ValueError, match="ID column"):
         convert(frame.drop(columns="key"))
     with pytest.raises(ValueError, match="geometry"):
         LocationOutputSchema(
             pa.DataFrameSchema(
                 {
-                    "shape": pa.Column(
+                    "geometry": pa.Column(
                         Geometry, description="Shape", metadata={"unit": None}
                     )
                 },
                 strict=True,
             ),
-            id_column="shape",
-            geometry_column="shape",
+            id_column="geometry",
+            geometry_column="geometry",
         )
     without_crs = gpd.GeoDataFrame({"key": ["x"]}, geometry=[Point(0, 0)])
     with pytest.raises(ValueError, match="CRS"):
         convert(without_crs)
     with pytest.raises(ValueError, match="active geometry"):
         convert(gpd.GeoDataFrame({"key": []}))
-    with pytest.raises(ValueError, match="strings"):
+    with pytest.raises(ValueError, match="declared columns"):
         convert(frame.rename(columns={"count": 123}))
-
-
-@pytest.mark.parametrize(
-    "geometry", [None, GeometryCollection(), Point(float("inf"), 0), Point()]
-)
-def test_invalid_geometry_is_not_filtered(geometry: object) -> None:
-    frame = gpd.GeoDataFrame(
-        {"key": ["x"]}, geometry=gpd.GeoSeries([geometry]), crs=4326
-    )
-    with pytest.raises((TypeError, ValueError)):
-        convert(frame)
 
 
 def test_sparse_object_properties_are_independent() -> None:

@@ -4,7 +4,6 @@ from collections.abc import Callable
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field
 
@@ -12,6 +11,7 @@ from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.origins import Origin
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.table_fixtures import value_schema
 from tests.node_declaration_helpers import provider
 
 
@@ -55,7 +55,7 @@ def definitions(
     initial = operation("initial", "source", middle, canonical=False)
     explicit = operation("explicit", "target", middle, canonical=False)
     unused = operation("unused", "reference", "reference", canonical=False)
-    table = pa.DataFrameSchema(strict=True)
+    table = value_schema()
 
     @metric(
         name="producer",

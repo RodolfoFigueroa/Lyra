@@ -31,12 +31,13 @@ from lyra.sdk.plugin import (
     metric,
 )
 from lyra.sdk.resources import BaseIO, Resource
+from test_support.table_fixtures import value_frame, value_schema
 from tests.provider_helpers import FakeProvider
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
-OUTPUT = pa.DataFrameSchema({}, strict=True)
+OUTPUT = value_schema()
 
 
 class Parameters(MetricParameters):
@@ -62,7 +63,7 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     )
     def producer() -> pd.DataFrame:
         calls()
-        return pd.DataFrame()
+        return value_frame()
 
     @metric(
         code_revision="1",
@@ -127,7 +128,7 @@ def test_metric_can_declare_database_context() -> None:
 @pytest.mark.parametrize("decorate", [metric])
 def test_outputs_required_and_spatial_inputs_optional(decorate: Callable) -> None:
     def handler() -> pd.DataFrame:
-        return pd.DataFrame()
+        return value_frame()
 
     with pytest.raises(PluginDefinitionError):
         decorate(code_revision="1", name="test", description="Test.", outputs={})(

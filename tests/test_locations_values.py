@@ -6,7 +6,6 @@ from pyproj.exceptions import CRSError
 
 from lyra.contracts.geometry import Feature
 from lyra.contracts.locations import LocationSelection
-from lyra.data import geometry_buffers
 from test_support.location_helpers import stored_locations
 from tests.geometry_fixtures import VALUE_GEOMETRIES as GEOMETRIES
 
@@ -90,7 +89,7 @@ def test_invalid_coordinates_at_every_depth(kind: str, coordinate: object) -> No
     coordinates[0] = coordinate
     original["features"] = [feature]
     with pytest.raises(ValidationError, match="coordinates"):
-        geometry_buffers.encode(row["geometry"] for row in original["features"])
+        Feature.model_validate(original["features"][0])
 
 
 @pytest.mark.parametrize(
@@ -113,7 +112,7 @@ def test_malformed_geometries(kind: str, coordinates: list) -> None:
     original = payload()
     original["features"][0]["geometry"] = {"type": kind, "coordinates": coordinates}
     with pytest.raises(ValidationError):
-        geometry_buffers.encode(row["geometry"] for row in original["features"])
+        Feature.model_validate(original["features"][0])
 
 
 @pytest.mark.parametrize("value", [[], {}, b"bytes", float("inf")])

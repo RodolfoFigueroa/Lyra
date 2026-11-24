@@ -6,7 +6,6 @@ from dataclasses import dataclass, replace
 from unittest.mock import Mock
 
 import geopandas as gpd
-import pandera.pandas as pa
 import pytest
 from pydantic import Field
 from typing_extensions import override
@@ -32,6 +31,7 @@ from lyra.sdk import (
 from lyra.sdk.parameters import MetricParameters
 from test_support.location_operations import Places
 from test_support.operation_execution import OperationExecutor
+from test_support.table_fixtures import value_schema
 
 
 class Parameters(MetricParameters):
@@ -259,7 +259,7 @@ def test_declared_binding_and_forwarded_fields_between_distinct_models() -> None
                 "choose", parameters={"targets": Input("parameters.requested")}
             ).bind(declared=Input("seed")),
         },
-        outputs={"data": pa.DataFrameSchema({}, strict=True)},
+        outputs={"data": value_schema()},
     )
     def caller(
         seed: gpd.GeoDataFrame,

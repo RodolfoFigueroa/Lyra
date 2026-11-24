@@ -29,6 +29,7 @@ from lyra.server import job_submission, worker
 from test_support.location_operations import Places
 from test_support.location_resolution import Provider, Roads, frame_features, selection
 from test_support.runtime_inputs import frame_ids
+from test_support.table_fixtures import value_frame
 from tests.frame_assertions import assert_logical_equal
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.worker_graph_integration_helpers import (
@@ -426,7 +427,7 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         def consume(location: gpd.GeoDataFrame) -> pd.DataFrame:
             calls.append(f"example:places{count}")
             assert len(frame_ids(location)) == (0 if empty else 1)
-            return pd.DataFrame()
+            return value_frame()
 
         return consume
 
@@ -520,7 +521,7 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
         assert frame_ids(location) == ["0"]
         calls.append("consume")
         assert parameters.count == 2
-        return pd.DataFrame()
+        return value_frame()
 
     @native_metric(
         cache="full",
