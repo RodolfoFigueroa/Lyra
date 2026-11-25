@@ -31,15 +31,15 @@ def _valid_toml(
 ) -> str:
     return (
         f"""
-schema_version = 7
+schema_version = 8
 
 [api]
 host = "0.0.0.0"
 port = {api_port}
 public_base_url = "http://127.0.0.1:{api_port}"
 
-[redis]
-url = "redis://redis:6379/0"
+[valkey]
+url = "redis://valkey:6379/0"
 
 [logging]
 level = "INFO"

@@ -1,4 +1,4 @@
-"""Exercise development sessions with isolated Redis and child processes."""
+"""Exercise development sessions with isolated Valkey and child processes."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import tomllib
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from redis.exceptions import RedisError
@@ -48,10 +48,14 @@ class Child:
         self.signals.append(signal.SIGKILL)
         self.code = -signal.SIGKILL
 
+    def terminate(self) -> None:
+        self.send_signal(signal.SIGTERM)
+
     def poll(self) -> int | None:
         return self.code
 
-    def wait(self) -> int:
+    def wait(self, timeout: float | None = None) -> int:
+        assert timeout is None or timeout > 0
         assert self.code is not None
         self.reaped = True
         return self.code
@@ -67,7 +71,14 @@ class Session:
         self.queues: defaultdict[str, list[str]] = defaultdict(list)
         self.client = MagicMock()
         self.client.__enter__.return_value = self.client
-        self.client.ping.side_effect = lambda: self.events.append("ping")
+        self.probe = MagicMock()
+        self.probe.__aenter__.return_value = self.probe
+        self.probe.ping = AsyncMock(
+            side_effect=lambda: self.events.append("ping") is None
+        )
+        monkeypatch.setattr(
+            dev_queue, "create_async_client", Mock(return_value=self.probe)
+        )
         self.duplicate = False
         self.failure = ""
         self.ticks = 0
@@ -75,7 +86,7 @@ class Session:
         self.origin: dict = {"url": Path(__file__).parents[1].as_uri(), "dir_info": {}}
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
         monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(self.checkout / ".venv"))
-        monkeypatch.setattr(dev.shutil, "which", lambda _: "/bin/uv")
+        monkeypatch.setattr(dev.shutil, "which", lambda binary: f"/bin/{binary}")
         monkeypatch.setattr(
             dev,
             "subprocess",
@@ -130,22 +141,6 @@ class Session:
             ]
             path = Path(sources["local-plugin"]["path"]) / "pyproject.toml"
             self.synced.append((cwd, path.read_text()))
-        else:
-            assert argv == [
-                self.directory / ".venv/bin/python",
-                "-I",
-                "-u",
-                "-m",
-                "lyra.server.dev_queue",
-                self.directory / "lyra.toml",
-            ]
-            with pytest.MonkeyPatch.context() as settings, patch.dict(os.environ, env):
-                settings.chdir(cwd)
-                try:
-                    dev_queue.prepare(argv[-1])
-                except (ValueError, RuntimeError) as exc:
-                    sys.stderr.write(f"{exc}\n")
-                    return SimpleNamespace(returncode=1)
         return SimpleNamespace(returncode=0)
 
     def spawn(
@@ -154,6 +149,22 @@ class Session:
         assert env["PATH"].split(os.pathsep)[0] == str(self.directory / ".venv/bin")
         assert env["VIRTUAL_ENV"] == str(self.directory / ".venv")
         assert start_new_session
+        if argv[0] == "/bin/valkey-server":
+            self.events.append("broker")
+            child = self.children["broker"] = Child()
+            assert argv[argv.index("--unixsocket") + 1] == str(cwd / "sock")
+            return child
+        if argv[4] == "lyra.server.dev_queue":
+            child = Child()
+            with pytest.MonkeyPatch.context() as settings, patch.dict(os.environ, env):
+                settings.chdir(cwd)
+                try:
+                    dev_queue.prepare(argv[5], clear_waiting="--clear-waiting" in argv)
+                    child.code = 0
+                except (ValueError, RuntimeError) as exc:
+                    sys.stderr.write(f"{exc}\n")
+                    child.code = 1
+            return child
         assert argv[:4] == [self.directory / ".venv/bin/python", "-I", "-u", "-m"]
         assert argv[5:] == ["--config", self.directory / "lyra.toml"]
         module = argv[4].removeprefix("lyra.server.")
@@ -176,6 +187,10 @@ class Session:
 
     def tick(self, _delay: float) -> None:
         self.ticks += 1
+        if self.failure == "broker" and self.ticks == 1:
+            self.children["broker"].code = 9
+        if self.failure == "drain":
+            assert self.children["broker"].code is None
         if self.failure == "drain" and self.ticks == 4:
             worker = self.children["worker_launcher"]
             assert worker.signals == [signal.SIGINT]
@@ -218,7 +233,7 @@ def test_editable_session_and_restart(
         str(resources),
         "--port",
         "5220",
-        "--redis-url",
+        "--valkey-url",
         "redis://user:secret@localhost:6379/0",
     )
     assert session.launch(*args) == 0
@@ -228,7 +243,7 @@ def test_editable_session_and_restart(
     assert config.api.host == "127.0.0.1"
     assert config.api.port == 5220
     assert config.worker_temp_dir().is_dir()
-    assert config.redis.url == args[-1]
+    assert config.valkey.url == args[-1]
     assert [p.distribution for p in config.plugins.installed] == [
         "local-plugin",
         "provider",
@@ -282,10 +297,11 @@ def test_checkout_isolation(
     session.duplicate = True
     assert session.launch() == 0
     assert "already running" in capsys.readouterr().err
-    assert session.events == ["sync", "ping", "empty", "main", "worker_launcher"]
+    assert session.events == ["sync", "broker", "ping", "main", "worker_launcher"]
     initial = load_config(session.directory / "lyra.toml")
     assert initial.api.port == 5219
-    assert initial.redis.url == "redis://127.0.0.1:6379/0"
+    assert initial.valkey.url.startswith("unix:///")
+    assert not Path(initial.valkey.url.removeprefix("unix://")).parent.exists()
     session.queues[initial.jobs.queue].append("first checkout")
     keys = (session.directory / "keys.env").read_bytes()
     other = project(tmp_path / "second")
@@ -307,6 +323,7 @@ def test_checkout_isolation(
         ("busy", 0),
         ("spawn", 2),
         ("main", 9),
+        ("broker", 9),
         ("worker_launcher", 9),
     ],
 )
@@ -317,6 +334,9 @@ def test_service_lifecycle(session: Session, mode: str, code: int) -> None:
     assert signal.getsignal(signal.SIGINT) == previous
     for name, child in session.children.items():
         assert child.reaped
+        if name == "broker":
+            assert child.signals == ([] if mode == "broker" else [signal.SIGTERM])
+            continue
         count = 2 if mode == "busy" and name == "worker_launcher" else int(mode != name)
         assert child.signals == [signal.SIGINT] * count
     session.failure = ""
@@ -337,6 +357,7 @@ def test_stuck_sibling_is_reaped_after_failed_start(session: Session) -> None:
 def test_failed_preparation_preserves_waiting_jobs(
     session: Session, failure: str
 ) -> None:
+    session.args.extend(["--valkey-url", "redis://valkey:6379/0"])
     assert session.launch() == 0
     queue = load_config(session.directory / "lyra.toml").jobs.queue
     session.queues[queue].append("waiting")
@@ -356,17 +377,17 @@ def test_errors_before_services(
 ) -> None:
     assert session.launch("--plugin", str(session.checkout)) == 2
     assert "Duplicate" in capsys.readouterr().err
-    assert session.launch("--redis-url", "invalid://user:password@localhost") == 2
+    assert session.launch("--valkey-url", "invalid://user:password@localhost") == 2
     assert "password" not in capsys.readouterr().err
     assert session.events == []
-    session.client.ping.side_effect = RedisError("user:secret@redis")
-    assert session.launch("--redis-url", "redis://user:secret@redis") == 2
+    session.probe.__aenter__.side_effect = RedisError("user:secret@valkey")
+    assert session.launch("--valkey-url", "redis://user:secret@valkey") == 2
     assert session.events == ["sync"]
     error = capsys.readouterr().err
-    assert "Redis" in error
+    assert "Valkey" in error
     assert "secret" not in error
-    session.client.__exit__.assert_called_once()
-    session.client.ping.side_effect = None
+    session.probe.__aenter__.assert_called_once()
+    session.probe.__aenter__.side_effect = None
     assert session.launch() == 0
 
 
@@ -387,3 +408,46 @@ def test_environment_matches_installed_sdk(
     assert session.launch() == 0
     settings = tomllib.loads((session.directory / "pyproject.toml").read_text())
     assert settings["tool"]["uv"]["sources"]["lyra"] == source
+
+
+def test_external_server_without_local_install(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        dev.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None
+    )
+    assert session.launch() == 2
+    assert "--valkey-url" in capsys.readouterr().err
+    assert session.events == []
+    assert session.launch("--valkey-url", "redis://external/0") == 0
+    assert "broker" not in session.children
+
+
+def test_transient_broker_startup(session: Session) -> None:
+    session.probe.ping.side_effect = [RedisError("starting"), True]
+    assert session.launch() == 0
+    assert session.children["broker"].reaped
+
+
+def test_readiness_deadline_preserves_external_queue(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    timeout = dev_queue.asyncio.timeout
+    monkeypatch.setattr(dev_queue.asyncio, "timeout", lambda _seconds: timeout(0))
+    session.probe.ping.side_effect = RedisError("private")
+    assert session.launch("--valkey-url", "redis://user:private@host/0") == 2
+    assert session.events == ["sync"]
+    assert "private" not in capsys.readouterr().err
+
+
+def test_failed_managed_preflight_releases_checkout(session: Session) -> None:
+    resource = session.checkout / "resource.toml"
+    resource.write_text('[resources.db.secrets.key]\nfile="missing"')
+    assert session.launch("--resources", str(resource)) == 2
+    assert session.events == ["sync", "broker"]
+    assert session.children["broker"].reaped
+    assert session.launch() == 0

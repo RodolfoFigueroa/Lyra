@@ -23,7 +23,6 @@ DEFAULT_WORKER_CONCURRENCY = 1
 DEFAULT_LOG_DIR = LYRA_DATA_DIR / "logs"
 DEFAULT_MCP_MOUNT_PATH = "/mcp"
 
-_ALLOWED_REDIS_SCHEMES = frozenset({"redis", "rediss"})
 _ALLOWED_LOG_LEVELS = frozenset(logging.getLevelNamesMapping())
 
 
@@ -152,44 +151,47 @@ class ApiConfig(StrictConfigModel):
         return value.rstrip("/")
 
 
-class RedisConfig(StrictConfigModel):
-    """Configure the Redis endpoint used for queues and retained job state."""
+class ValkeyConfig(StrictConfigModel):
+    """Configure the Valkey endpoint used for queues and retained job state."""
 
     readiness_timeout_seconds: float = Field(
-        default=1.0, gt=0, description="Redis readiness probe deadline."
+        default=1.0, gt=0, description="Valkey readiness probe deadline."
     )
 
     url: str = Field(
         min_length=1,
-        description="Redis URL used by native RQ jobs and results.",
+        description="Valkey endpoint used by native RQ jobs and results.",
     )
 
     @field_validator("url")
     @classmethod
     def normalize_url(cls, value: str) -> str:
-        """Strip surrounding whitespace from the Redis URL.
+        """Strip surrounding whitespace from the Valkey URL.
 
         Returns:
-            The normalized, nonblank Redis URL.
+            The normalized, nonblank Valkey URL.
         """
         return _strip_required_string(value)
 
     @field_validator("url")
     @classmethod
     def validate_url(cls, value: str) -> str:
-        """Require a complete Redis URL with a supported scheme.
+        """Require a complete Valkey URL with a supported scheme.
 
         Returns:
-            The validated Redis URL unchanged.
+            The validated Valkey URL unchanged.
 
         Raises:
-            ValueError: If the URL lacks a host or does not use ``redis`` or
-                ``rediss``.
+            ValueError: If the transport or endpoint is invalid.
         """
         parsed = urlparse(value)
-        if parsed.scheme not in _ALLOWED_REDIS_SCHEMES or not parsed.netloc:
-            msg = "redis.url must be a redis:// or rediss:// URL"
+        if value.startswith("unix:///"):
+            return value
+        if not value.startswith(("redis://", "rediss://")) or not parsed.hostname:
+            msg = "valkey.url requires a network host or an absolute Unix socket path"
             raise ValueError(msg)
+        # Accessing the port validates its range and numeric representation.
+        _ = parsed.port
         return value
 
 
@@ -410,11 +412,11 @@ class LyraConfig(StrictConfigModel):
         default_factory=dict, description="Deployment-wide named I/O resource settings."
     )
 
-    schema_version: Literal[7] = Field(
+    schema_version: Literal[8] = Field(
         description="Server configuration schema version."
     )
     api: ApiConfig = Field(description="API bind and public URL settings.")
-    redis: RedisConfig = Field(description="Redis connection settings.")
+    valkey: ValkeyConfig = Field(description="Valkey connection settings.")
     mcp: McpConfig = Field(
         default_factory=McpConfig,
         description="MCP transport settings.",

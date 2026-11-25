@@ -97,17 +97,17 @@ def _check_admin_observations(
 ) -> None:
     runtime = app.state.runtime
     now = datetime.now(UTC)
-    redis = runtime.redis
-    assert isinstance(redis, Mock)
-    queue_key = Queue(expected, connection=redis).key
-    redis.llen.side_effect = {queue_key: len(ids)}.__getitem__
-    redis.lrange.side_effect = lambda key, start, end: {queue_key: ids}[key][
+    valkey = runtime.valkey
+    assert isinstance(valkey, Mock)
+    queue_key = Queue(expected, connection=valkey).key
+    valkey.llen.side_effect = {queue_key: len(ids)}.__getitem__
+    valkey.lrange.side_effect = lambda key, start, end: {queue_key: ids}[key][
         start : end + 1
     ]
-    redis.smembers.side_effect = {
+    valkey.smembers.side_effect = {
         f"rq:workers:{expected}": {"rq:worker:ready", "rq:worker:stale"}
     }.__getitem__
-    redis.hgetall.side_effect = {
+    valkey.hgetall.side_effect = {
         "rq:worker:ready": {"last_heartbeat": now.isoformat(), "state": "idle"},
         "rq:worker:stale": {"state": "idle"},
     }.__getitem__

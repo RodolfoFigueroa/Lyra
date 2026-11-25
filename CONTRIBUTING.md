@@ -31,7 +31,7 @@ Use uv for Python environment and package management:
 uv sync
 ```
 
-Start Redis locally on Linux, macOS, or Windows Subsystem for Linux (WSL). From the repository root, launch the API and worker with the city plugin.
+On Linux, macOS, or Windows Subsystem for Linux (WSL), make sure `valkey-server` is on your `PATH`. From the repository root, start the city plugin’s API, worker, and private Valkey server.
 
 ```bash
 uv run lyra-plugin dev --project examples/city-plugin

@@ -83,8 +83,8 @@ def installed_plugin_metadata(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
 
 
 @pytest.fixture
-def dummy_redis_clients(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock]:
-    """Supply independently closeable Redis clients without service access."""
+def dummy_valkey_clients(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock]:
+    """Supply independently closeable Valkey clients without service access."""
     synchronous = Mock()
     asynchronous = Mock(aclose=AsyncMock(), ping=AsyncMock(return_value=True))
     monkeypatch.setattr(main, "create_sync_client", Mock(return_value=synchronous))

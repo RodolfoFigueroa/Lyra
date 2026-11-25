@@ -11,8 +11,8 @@ from redis.exceptions import RedisError
 from lyra.contracts.observability import (
     LivenessResponse,
     ReadinessResponse,
-    RedisHealth,
     StorageHealth,
+    ValkeyHealth,
 )
 from lyra.runtime.terminal_history import probe_storage
 from lyra.server.runtime import RuntimeDependency
@@ -21,18 +21,18 @@ from lyra.version import APP_VERSION
 router = APIRouter(tags=["Health"])
 
 
-async def redis_health(connection: Redis, timeout_seconds: float) -> RedisHealth:
-    """Probe Redis within a bounded readiness deadline.
+async def valkey_health(connection: Redis, timeout_seconds: float) -> ValkeyHealth:
+    """Probe Valkey within a bounded readiness deadline.
 
     Returns:
-        ``ok`` when Redis responds truthfully, otherwise ``unavailable``.
+        ``ok`` when Valkey responds truthfully, otherwise ``unavailable``.
     """
     try:
         async with asyncio.timeout(timeout_seconds):
             pong = await connection.ping()
     except (TimeoutError, RedisError):
-        return RedisHealth(status="unavailable")
-    return RedisHealth(status="ok" if pong else "unavailable")
+        return ValkeyHealth(status="unavailable")
+    return ValkeyHealth(status="ok" if pong else "unavailable")
 
 
 async def sqlite_health(
@@ -71,14 +71,14 @@ async def readiness(
     response: Response,
     runtime: RuntimeDependency,
 ) -> ReadinessResponse:
-    """Report SQLite and Redis availability.
+    """Report SQLite and Valkey availability.
 
     Returns:
         Dependency statuses and an HTTP status reflecting aggregate readiness.
     """
-    timeout = runtime.config.redis.readiness_timeout_seconds
-    redis, sqlite = await asyncio.gather(
-        redis_health(runtime.async_redis, timeout),
+    timeout = runtime.config.valkey.readiness_timeout_seconds
+    valkey, sqlite = await asyncio.gather(
+        valkey_health(runtime.async_valkey, timeout),
         sqlite_health(
             partial(probe_storage, runtime.config.result_store_path), timeout
         ),
@@ -89,10 +89,10 @@ async def readiness(
     )
     response.headers["Cache-Control"] = "no-store"
     return ReadinessResponse(
-        status=("ready" if redis.status == "ok" else "degraded")
+        status=("ready" if valkey.status == "ok" else "degraded")
         if is_ready
         else "not_ready",
         sqlite=sqlite,
         api_version=APP_VERSION,
-        redis=redis,
+        valkey=valkey,
     )

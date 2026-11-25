@@ -16,7 +16,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
@@ -31,7 +31,6 @@ if sys.platform != "win32":
 if TYPE_CHECKING:
     from types import FrameType
 
-DEFAULT_REDIS_URL = "redis://127.0.0.1:6379/0"
 REPO = "https://github.com/RodolfoFigueroa/Lyra.git"
 
 
@@ -117,7 +116,7 @@ def _configuration(
     directory: Path,
     projects: dict[str, Path],
     port: int,
-    redis_url: str,
+    valkey_url: str,
     resources: Path | None,
 ) -> Path:
     bindings = ""
@@ -126,14 +125,14 @@ def _configuration(
         if set(tomllib.loads(bindings)) - {"resources"}:
             msg = "--resources accepts only [resources.*] settings"
             raise ValueError(msg)
-    config = f"""schema_version = 7
+    config = f"""schema_version = 8
 result_store_path = {json.dumps(str(directory / "results.sqlite3"), ensure_ascii=False)}
 [api]
 host = "127.0.0.1"
 port = {port}
 public_base_url = "http://127.0.0.1:{port}"
-[redis]
-url = {json.dumps(redis_url, ensure_ascii=False)}
+[valkey]
+url = {json.dumps(valkey_url, ensure_ascii=False)}
 [jobs]
 queue = "{directory.name}"
 [worker]
@@ -146,7 +145,7 @@ temp_dir = {json.dumps(str(directory / "scratch"), ensure_ascii=False)}
     try:
         LyraConfig.model_validate(tomllib.loads(config))
     except ValidationError as exc:
-        # Input values may contain Redis or resource credentials.
+        # Input values may contain Valkey or resource credentials.
         errors = ", ".join(".".join(map(str, error["loc"])) for error in exc.errors())
         msg = f"Invalid development configuration at {errors}"
         raise ValueError(msg) from None
@@ -158,6 +157,7 @@ temp_dir = {json.dumps(str(directory / "scratch"), ensure_ascii=False)}
 @dataclass
 class _Session:
     children: dict[str, subprocess.Popen] = field(default_factory=dict)
+    broker: subprocess.Popen | None = None
     interrupts: int = 0
     status: int = 0
 
@@ -165,6 +165,11 @@ class _Session:
         self.interrupts += 1
 
     def reap(self, *, stopping: bool) -> None:
+        if self.broker is not None and self.broker.poll() is not None:
+            code = self.broker.wait()
+            self.broker = None
+            sys.stderr.write(f"Valkey exited unexpectedly (status {code})\n")
+            self.status = code if code > 0 else 1
         for service, child in self.children.copy().items():
             code = child.poll()
             if code is None:
@@ -210,35 +215,103 @@ class _Session:
                 time.sleep(0.1)
 
 
-def _serve(
-    python: Path, config: Path, cwd: Path, env: dict[str, str], keys: dict[str, str]
-) -> int:
+@dataclass
+class _ServerEnvironment:
+    python: Path
+    config: Path
+    cwd: Path
+    env: dict[str, str]
+    keys: dict[str, str]
+
+    def spawn(
+        self, module: str, *args: str | Path, credentials: bool = False
+    ) -> subprocess.Popen:
+        return subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- prepared interpreter and literal arguments
+            [self.python, "-I", "-u", "-m", f"lyra.server.{module}", *args],
+            cwd=self.cwd,
+            env={**self.env, **self.keys} if credentials else self.env,
+            start_new_session=True,
+        )
+
+
+@dataclass
+class _LocalBroker:
+    executable: str
+    directory: Path
+
+    def start(self, env: dict[str, str]) -> subprocess.Popen:
+        return subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- resolved local executable
+            [
+                self.executable,
+                "--port",
+                "0",
+                "--unixsocket",
+                str(self.directory / "sock"),
+                "--unixsocketperm",
+                "700",
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+                "--daemonize",
+                "no",
+            ],
+            cwd=self.directory,
+            env=env,
+            start_new_session=True,
+        )
+
+
+def _stop_broker(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        process.wait()
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _start_services(session: _Session, server: _ServerEnvironment, port: int) -> None:
+    options = ["--clear-waiting"] if session.broker is None else []
+    preflight = server.spawn("dev_queue", server.config, *options, credentials=True)
+    session.children["preflight"] = preflight
+    while preflight.poll() is None:
+        if session.interrupts or (session.broker and session.broker.poll() is not None):
+            return
+        time.sleep(0.1)
+    del session.children["preflight"]
+    if preflight.wait():
+        msg = "Development session preparation failed."
+        raise ValueError(msg)
+    if session.interrupts:
+        return
+    sys.stdout.write(
+        f"API: http://127.0.0.1:{port}\n"
+        f"Credentials: {server.config.parent / 'keys.env'}\n"
+    )
+    sys.stdout.flush()
+    for name, module in (("API", "main"), ("worker", "worker_launcher")):
+        if session.interrupts:
+            break
+        session.children[name] = server.spawn(
+            module, "--config", server.config, credentials=name == "API"
+        )
+
+
+def _serve(server: _ServerEnvironment, local: _LocalBroker | None, port: int) -> int:
     session = _Session()
     with ExitStack() as stack:
         for sig in (signal.SIGINT, signal.SIGTERM):
             stack.callback(signal.signal, sig, signal.signal(sig, session.stop))
+        if local:
+            session.broker = local.start(server.env)
+            stack.callback(_stop_broker, session.broker)
         try:
-            for name, module, service_env in (
-                ("API", "main", {**env, **keys}),
-                ("worker", "worker_launcher", env),
-            ):
-                if session.interrupts:
-                    break
-                session.children[name] = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- signal only the isolated service leader
-                    [
-                        python,
-                        "-I",
-                        "-u",
-                        "-m",
-                        f"lyra.server.{module}",
-                        "--config",
-                        config,
-                    ],
-                    cwd=cwd,
-                    env=service_env,
-                    start_new_session=True,
-                )
-        except OSError:
+            _start_services(session, server, port)
+        except (OSError, ValueError):
             session.status = 1
             raise
         finally:
@@ -247,7 +320,10 @@ def _serve(
 
 
 def launch(
-    projects: dict[str, Path], port: int, resources: Path | None, redis_url: str
+    projects: dict[str, Path],
+    port: int,
+    resources: Path | None,
+    valkey_url: str | None = None,
 ) -> int:
     """Synchronize and supervise one checkout's development session.
 
@@ -265,13 +341,25 @@ def launch(
     cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache").resolve()
     directory = cache / "lyra" / f"lyra-dev-{identity}"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (directory / "session.lock").open("a") as lock:
+    with (directory / "session.lock").open("a") as lock, ExitStack() as stack:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             msg = f"A development session is already running for {primary}"
             raise ValueError(msg) from None
-        config = _configuration(directory, projects, port, redis_url, resources)
+        local = None
+        if valkey_url is None:
+            executable = shutil.which("valkey-server")
+            if executable is None:
+                msg = "Install valkey-server on PATH or supply --valkey-url."
+                raise ValueError(msg)
+            # A short base path fits the Unix socket address limit even on macOS.
+            socket_dir = Path(
+                stack.enter_context(TemporaryDirectory(prefix="lyra-", dir="/tmp"))
+            )
+            local = _LocalBroker(executable, socket_dir)
+            valkey_url = f"unix://{socket_dir}/sock"
+        config = _configuration(directory, projects, port, valkey_url, resources)
         keys_path = directory / "keys.env"
         keys = _credentials(keys_path)
         python = _sync(directory, projects)
@@ -283,15 +371,4 @@ def launch(
             + os.environ.get("PATH", os.defpath),
         }
         cwd = resources.absolute().parent if resources else primary
-        preflight = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- prepared interpreter and explicit config path
-            [python, "-I", "-u", "-m", "lyra.server.dev_queue", config],
-            cwd=cwd,
-            env={**env, **keys},
-            check=False,
-        )
-        if preflight.returncode:
-            msg = "Development session preparation failed."
-            raise ValueError(msg)
-        sys.stdout.write(f"API: http://127.0.0.1:{port}\nCredentials: {keys_path}\n")
-        sys.stdout.flush()
-        return _serve(python, config, cwd, env, keys)
+        return _serve(_ServerEnvironment(python, config, cwd, env, keys), local, port)

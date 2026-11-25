@@ -33,7 +33,7 @@ Choose a command for the part of the deployment you need to inspect:
 
 | Command | What it tells you |
 | --- | --- |
-| `health` | Redis readiness |
+| `health` | API readiness, including Valkey and SQLite status |
 | `health --live` | API process liveness |
 | `status` | Administrative service summary |
 | `config-summary` | Loaded configuration with secrets omitted |

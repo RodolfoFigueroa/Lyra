@@ -129,7 +129,7 @@
     },
     "operate/deployment": {
       "contentType": "How-to",
-      "overview": "Start the city example deployment with a shared image, configuration, and Redis.",
+      "overview": "Start the city example deployment with a shared image, configuration, and Valkey.",
       "goal": "Deploy the finished city plugin and verify that a worker can take jobs",
       "audience": "Deployment operators",
       "contentPlan": [

@@ -48,40 +48,40 @@ def _configure_admin(
 
 
 def test_readiness_reports_healthy_dependencies() -> None:
-    runtime = cast("Any", SimpleNamespace(async_redis=FakeRedisAsync()))
+    runtime = cast("Any", SimpleNamespace(async_valkey=FakeRedisAsync()))
 
     http_response = Response()
 
     runtime.config = SimpleNamespace(
         result_store_path=Path("results.sqlite"),
-        redis=SimpleNamespace(readiness_timeout_seconds=1.0),
+        valkey=SimpleNamespace(readiness_timeout_seconds=1.0),
     )
     response = asyncio.run(health.readiness(http_response, runtime))
 
     assert http_response.status_code == 200
     assert http_response.headers["Cache-Control"] == "no-store"
     assert response.status == "ready"
-    assert response.redis.status == "ok"
-    assert set(response.model_dump()) == {"status", "api_version", "redis", "sqlite"}
+    assert response.valkey.status == "ok"
+    assert set(response.model_dump()) == {"status", "api_version", "valkey", "sqlite"}
 
 
-def test_readiness_reports_unavailable_redis() -> None:
-    runtime = cast("Any", SimpleNamespace(async_redis=FakeRedisAsync(fail=True)))
+def test_readiness_reports_unavailable_valkey() -> None:
+    runtime = cast("Any", SimpleNamespace(async_valkey=FakeRedisAsync(fail=True)))
 
     http_response = Response()
 
     runtime.config = SimpleNamespace(
         result_store_path=Path("results.sqlite"),
-        redis=SimpleNamespace(readiness_timeout_seconds=1.0),
+        valkey=SimpleNamespace(readiness_timeout_seconds=1.0),
     )
     response = asyncio.run(health.readiness(http_response, runtime))
 
     assert http_response.status_code == 200
     assert response.status == "degraded"
-    assert response.redis.status == "unavailable"
+    assert response.valkey.status == "unavailable"
 
 
-def test_stalled_redis_check_does_not_block_liveness() -> None:
+def test_stalled_valkey_check_does_not_block_liveness() -> None:
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -93,26 +93,26 @@ def test_stalled_redis_check_does_not_block_liveness() -> None:
             return True
 
     async def exercise() -> None:
-        redis_check = asyncio.create_task(
-            health.redis_health(cast("Any", SlowRedis()), timeout_seconds=10.0)
+        valkey_check = asyncio.create_task(
+            health.valkey_health(cast("Any", SlowRedis()), timeout_seconds=10.0)
         )
         await entered.wait()
         live = await asyncio.wait_for(health.liveness(), timeout=0.1)
         assert live.status == "ok"
         release.set()
-        await redis_check
+        await valkey_check
 
     asyncio.run(exercise())
 
 
 def test_admin_status_excludes_secrets(tmp_path: Path) -> None:
     runtime = _configure_admin(tmp_path)
-    runtime.redis = cast("Any", FakeRedisSync())
+    runtime.valkey = cast("Any", FakeRedisSync())
 
     response = admin.get_status(runtime)
     payload = response.model_dump_json()
 
-    assert response.redis.status == "ok"
+    assert response.valkey.status == "ok"
     assert response.metric_count == 0
     assert "admin-secret" not in payload
     assert "postgres-secret" not in payload

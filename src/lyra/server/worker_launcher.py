@@ -18,7 +18,7 @@ with command_imports(__name__):
 
     from lyra.contracts.config import DEFAULT_CONFIG_PATH
     from lyra.server.config import ensure_runtime_directories, load_config
-    from lyra.server.db.redis import create_sync_client
+    from lyra.server.db.valkey import create_sync_client
     from lyra.server.logging_config import configure_logging
     from lyra.server.worker import (
         initialize_worker,
@@ -113,7 +113,7 @@ def launch_worker(*, config: LyraConfig) -> None:
     """Initialize dependencies, load plugins, and enter the RQ worker process."""
     ensure_runtime_directories(config)
     configure_logging(config)
-    connection = create_sync_client(config.redis)
+    connection = create_sync_client(config.valkey)
     try:
         initialize_worker(config=config)
         pool = WorkerPool(

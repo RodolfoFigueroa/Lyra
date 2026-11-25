@@ -26,7 +26,7 @@ A server exposes a metric catalog and background jobs through three interfaces:
 
 With a server address and an agent key, [submit your first server job](https://rodolfofigueroa.github.io/Lyra/latest/quickstart/).
 
-To operate your own server, start with the [deployment requirements](https://rodolfofigueroa.github.io/Lyra/latest/operate/requirements/) and [deployment guide](https://rodolfofigueroa.github.io/Lyra/latest/operate/deployment/). Server execution requires Redis. PostGIS, Earth Engine, and other data sources depend on your configured plugins and resources.
+To operate your own server, start with the [deployment requirements](https://rodolfofigueroa.github.io/Lyra/latest/operate/requirements/) and [deployment guide](https://rodolfofigueroa.github.io/Lyra/latest/operate/deployment/). Lyra uses Valkey for its job queue. Your plugins determine which data sources you need, such as PostGIS or Earth Engine.
 
 ## Find a guide
 

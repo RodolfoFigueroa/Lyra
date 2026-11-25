@@ -374,7 +374,7 @@ def test_every_leaf_config_field_is_documentable() -> None:
 
     assert rows
     assert all(row.description for row in rows)
-    assert "redis.url" in paths
+    assert "valkey.url" in paths
     assert {
         "plugins.installed[].distribution",
         "plugins.installed[].enabled",

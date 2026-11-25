@@ -53,7 +53,7 @@ class UnknownMetricError(Exception):
 
 
 class SubmissionUnavailableError(Exception):
-    """Indicate that submission cannot proceed because Redis is unavailable."""
+    """Indicate that submission cannot proceed because Valkey is unavailable."""
 
     def __init__(self) -> None:
         """Initialize the standard temporary-unavailability error."""

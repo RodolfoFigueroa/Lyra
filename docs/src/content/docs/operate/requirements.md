@@ -6,7 +6,7 @@ contentPlan: operate/requirements
 sidebar: { label: "Prepare A Deployment" }
 ---
 
-Prepare the API and worker service to share one Redis instance before you start the containers. Add a data service, such as PostgreSQL with PostGIS, if one of your plugins needs it.
+Configure the API and workers to use the same Valkey instance. Add a data service, such as PostgreSQL with PostGIS, if one of your plugins needs it.
 
 If you only want to try a calculation, the [local tutorial](../../start/local/) needs none of this infrastructure.
 
@@ -18,13 +18,13 @@ Prepare the services, credentials, and storage that the API and workers share:
 | --- | --- |
 | Container tools | Docker with Compose and support for named build contexts |
 | Application image | Lyra and selected plugins installed from a locked dependency set |
-| Redis | One instance that the API and workers can reach. It stores queued work, live progress, worker heartbeats, and temporary diagnostics. |
+| Valkey | Version 7.2 or later, reachable from the API and workers. Valkey stores queued jobs, progress, worker heartbeats, and temporary diagnostics. |
 | PostGIS | A reachable database when a plugin-owned resource requires it |
 | API credentials | A random agent key and a different random administrator key |
 | Configuration | A `lyra.toml` shared by API and workers |
 | Storage | A writable, persistent `/lyra_data` volume shared by the API and workers for durable job history, execution reports, and result tables |
 
-The example Compose project starts Redis. Configure plugin data sources through [named resources](../configuration/#configure-plugin-resources); workers connect to those sources during job execution.
+The example Compose project starts Valkey for you. Configure any plugin data sources through [named resources](../configuration/#configure-plugin-resources). Workers connect to those sources when they run a job.
 
 ## Prepare spatial data
 

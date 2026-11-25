@@ -20,8 +20,8 @@ class ApplicationRuntime:
 
     config: LyraConfig
     catalog: Catalog
-    redis: Redis
-    async_redis: AsyncRedis
+    valkey: Redis
+    async_valkey: AsyncRedis
     jobs: JobStore
     credentials: ApiCredentials
     results: ResultService

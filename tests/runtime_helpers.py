@@ -19,8 +19,8 @@ def make_runtime(
     return ApplicationRuntime(
         config=config,
         catalog=catalog if catalog is not None else Catalog.load(config.plugins),
-        redis=connection,
-        async_redis=asynchronous,
+        valkey=connection,
+        async_valkey=asynchronous,
         jobs=jobs,
         results=ResultService(jobs, config.result_store_path),
         credentials=api_credentials(),

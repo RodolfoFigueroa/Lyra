@@ -41,4 +41,6 @@ Choose the guide that matches what you want to accomplish:
 
 ## What you bring
 
-To try the tutorials, you need Python, uv, and a Lyra checkout; the city example includes its data. Your own plugins declare the data sources, calculation dependencies, and credentials they need. A server deployment also needs Redis and access to those sources. Follow [Prepare a deployment](./operate/requirements/) before starting containers.
+To try the tutorials, install Python and uv, then check out Lyra. The city example includes its data. Your own plugins declare their calculation dependencies, data sources, and required credentials.
+
+For a server deployment, configure Valkey for the job queue and give workers access to those data sources. Follow [Prepare a deployment](./operate/requirements/) before starting containers.

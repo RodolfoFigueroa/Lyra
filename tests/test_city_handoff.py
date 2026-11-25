@@ -155,7 +155,7 @@ class CityServer:
 def city_server(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    dummy_redis_clients: tuple[Mock, Mock],
+    dummy_valkey_clients: tuple[Mock, Mock],
 ) -> Iterator[CityServer]:
     """Load the authored capstone with the actual deployment plugin configuration.
 
@@ -173,7 +173,7 @@ def city_server(
         workspace.setattr(worker, "_WORKER_RUNTIME", None)
         workspace.setattr(worker, "_RUNNER_TEMP_BASE", None)
         worker.initialize_worker(config=config)
-        dummy_redis_clients[0].ttl.return_value = 60
+        dummy_valkey_clients[0].ttl.return_value = 60
         app = main.create_app(config, credentials=api_credentials())
         client = ManagedTestClient(app)
         server = CityServer(client, config)

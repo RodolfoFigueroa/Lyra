@@ -61,9 +61,9 @@ def test_concurrent_applications_own_resources(
                 assert runtime_a.credentials.agent_api_key == "first-key"
                 assert runtime_a.config.jobs.queue == "lyra"
                 assert runtime_a.catalog is not runtime_b.catalog
-                assert runtime_a.jobs.connection is runtime_a.redis
+                assert runtime_a.jobs.connection is runtime_a.valkey
                 assert runtime_a.jobs.settings is runtime_a.config.jobs
-                assert runtime_a.redis is not runtime_b.redis
+                assert runtime_a.valkey is not runtime_b.valkey
                 backend = InProcessLyraBackend(lambda: require_runtime(app_a))
                 assert await backend.get_discovery() is runtime_a.catalog.discovery
                 observation = object()
@@ -247,11 +247,12 @@ def test_distinct_catalogs_and_mounted_mcp_share_application_dependencies(
                 await _exercise_submission(apps[0], "alpha")
                 await _exercise_submission(apps[1], "beta")
                 assert (
-                    require_runtime(apps[0]).redis is not require_runtime(apps[1]).redis
+                    require_runtime(apps[0]).valkey
+                    is not require_runtime(apps[1]).valkey
                 )
                 assert (
-                    require_runtime(apps[0]).async_redis
-                    is not require_runtime(apps[1]).async_redis
+                    require_runtime(apps[0]).async_valkey
+                    is not require_runtime(apps[1]).async_valkey
                 )
             await _exercise_submission(apps[1], "beta")
 

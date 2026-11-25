@@ -43,7 +43,7 @@ from tests.mcp_helpers import (
 from tests.queue_helpers import submitted_input
 
 
-@pytest.mark.usefixtures("dummy_redis_clients")
+@pytest.mark.usefixtures("dummy_valkey_clients")
 @pytest.mark.parametrize(
     "scenario",
     [
@@ -233,7 +233,7 @@ def _assert_submissions(
         enqueue.assert_not_called()
 
 
-@pytest.mark.usefixtures("dummy_redis_clients")
+@pytest.mark.usefixtures("dummy_valkey_clients")
 def test_catalog_inspection_is_service_free(
     client_runtime: ClientRuntime,
     tmp_path: Path,

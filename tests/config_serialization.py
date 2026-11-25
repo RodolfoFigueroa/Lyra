@@ -14,7 +14,7 @@ from lyra.contracts.config import (
     LyraConfig,
     McpConfig,
     PluginsConfig,
-    RedisConfig,
+    ValkeyConfig,
     WorkerConfig,
 )
 
@@ -53,10 +53,10 @@ def _append_api_section(lines: list[str], api: ApiConfig) -> None:
     lines.append("")
 
 
-def _append_redis_section(lines: list[str], redis: RedisConfig) -> None:
-    lines.append("[redis]")
-    _append_key(lines, "url", redis.url)
-    _append_key(lines, "readiness_timeout_seconds", redis.readiness_timeout_seconds)
+def _append_valkey_section(lines: list[str], valkey: ValkeyConfig) -> None:
+    lines.append("[valkey]")
+    _append_key(lines, "url", valkey.url)
+    _append_key(lines, "readiness_timeout_seconds", valkey.readiness_timeout_seconds)
     lines.append("")
 
 
@@ -117,7 +117,7 @@ def render_config_toml(config: LyraConfig) -> str:
         _append_key(lines, "result_store_path", config.result_store_path)
         lines.append("")
     _append_api_section(lines, config.api)
-    _append_redis_section(lines, config.redis)
+    _append_valkey_section(lines, config.valkey)
     _append_mcp_section(lines, config.mcp)
     _append_logging_section(lines, config.logging)
     _append_jobs_section(lines, config.jobs)

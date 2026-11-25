@@ -182,15 +182,15 @@ def _readiness_response() -> dict[str, Any]:
         "status": "ready",
         "sqlite": {"status": "ok"},
         "api_version": "0.1.0",
-        "redis": {"status": "ok"},
+        "valkey": {"status": "ok"},
     }
 
 
-def _redis_unavailable_response() -> dict[str, Any]:
+def _valkey_unavailable_response() -> dict[str, Any]:
     return {
         "detail": {
-            "code": "redis_unavailable",
-            "message": "Redis is temporarily unavailable.",
+            "code": "valkey_unavailable",
+            "message": "Valkey is temporarily unavailable.",
             "retryable": True,
         }
     }
@@ -199,7 +199,7 @@ def _redis_unavailable_response() -> dict[str, Any]:
 def _admin_status_response() -> dict[str, Any]:
     return {
         "api_version": "0.1.0",
-        "redis": {"status": "ok"},
+        "valkey": {"status": "ok"},
         "metric_count": 1,
         "queue": "lyra",
         "worker_concurrency": 1,

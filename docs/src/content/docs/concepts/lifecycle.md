@@ -41,7 +41,7 @@ Every submission creates a new job. There is no automatic deduplication or submi
 
 ## Execution has its own deadline
 
-Queued jobs do not expire because of queue age. Running jobs use the Redis Queue (RQ) execution timeout. Set it with `jobs.execution_timeout_seconds`; the default is 18000s (five hours).
+Jobs can wait in the queue indefinitely. Once a worker starts a job, Redis Queue (RQ) enforces the execution timeout. Set `jobs.execution_timeout_seconds` to change the default of 18000s (five hours).
 
 During execution, the worker runs the calculation and validates its output tables. The API and worker use the same Pydantic parameter models to validate your request.
 
@@ -67,6 +67,6 @@ Execution failure does not automatically replay the job. Operators inspect the f
 
 ## Terminal job history
 
-SQLite retains successful outcomes and structured failures indefinitely. Look up a completed job by ID or list terminal jobs by status in the admin CLI. Both work during a Redis outage.
+SQLite retains successful outcomes and structured failures indefinitely. Look up a completed job by ID or list terminal jobs by status in the admin CLI. Both work during a Valkey outage.
 
-RQ retains native job records and admin tracebacks for `jobs.rq_retention_seconds`, which defaults to one day. Queued jobs, running jobs, progress, and new submissions require Redis. If SQLite is temporarily unavailable when a worker records a failure, worker maintenance retries while the RQ failure record remains available.
+RQ retains native job records and admin tracebacks for `jobs.rq_retention_seconds`, which defaults to one day. Queued jobs, running jobs, progress, and new submissions require Valkey. If SQLite is temporarily unavailable when a worker records a failure, worker maintenance retries while the RQ failure record remains available.

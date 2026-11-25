@@ -12,11 +12,11 @@ Use `lyra-plugin dev` to test your plugin through the local API and worker. The 
 
 ## Start the city example <span id="develop-with-editable-sources"></span>
 
-Use Linux, macOS, or Windows Subsystem for Linux (WSL). You’ll need [uv and the Lyra SDK](../../start/installation/) and a running Redis server. The launcher connects to `redis://127.0.0.1:6379/0` by default. Pass `--redis-url` to use another endpoint.
+Install [uv and the Lyra SDK](../../start/installation/) on Linux, macOS, or Windows Subsystem for Linux (WSL). For the default setup, install Valkey and make sure `valkey-server` is on your `PATH`. You can also [use an existing Valkey server](#use-an-existing-valkey-server) without installing Valkey locally.
 
 <Steps>
 
-1. From the Lyra repository root, start the API and worker with the city plugin. Startup clears jobs still waiting on this checkout’s queue.
+1. From the Lyra repository root, start the city plugin’s API and worker. The launcher starts a private Valkey server with an empty queue and stops it after the worker exits.
 
    ```sh
    cd examples/city-plugin
@@ -28,6 +28,16 @@ Use Linux, macOS, or Windows Subsystem for Linux (WSL). You’ll need [uv and th
 </Steps>
 
 For your own plugin, install `lyra[sdk]` in its checkout and run `uv run lyra-plugin dev` there.
+
+## Use an existing Valkey server
+
+From your plugin checkout, pass the server’s URL to `--valkey-url`. After startup checks pass, the launcher **discards waiting jobs from this checkout’s queue**. Other queues on the server keep their jobs.
+
+For a Valkey server running on your machine at port 6379, run this command. The server keeps running when you stop the dev session.
+
+```sh
+uv run lyra-plugin dev --valkey-url redis://localhost:6379/0
+```
 
 ## Load your edits
 
@@ -45,7 +55,7 @@ Stop the session, then relaunch with `--plugin` for each additional checkout. If
 uv run lyra-plugin dev --plugin ../city-providers
 ```
 
-Run the command in the primary plugin’s directory, or pass its path with `--project`. For an independent session, start a different primary checkout with `--port 5220`. Each checkout has its own waiting queue on the shared Redis server.
+Run the command in the primary plugin’s directory, or pass its path with `--project`. For an independent session, start a different primary checkout with `--port 5220`. Each checkout has its own waiting queue.
 
 ## Supply plugin settings and credentials
 

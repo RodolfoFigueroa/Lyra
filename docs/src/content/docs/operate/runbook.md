@@ -17,11 +17,11 @@ Use liveness to check the API process. Use readiness to check whether it can acc
 | `GET /live` | The API process is alive | Process restart decisions |
 | `GET /ready` | SQLite is readable | Admission of new traffic |
 
-Readiness returns HTTP 200 with `degraded` when Redis is unavailable and HTTP 503 when SQLite is unreadable. Completed jobs remain accessible during a Redis outage. Check workers separately to confirm that they can execute the published metrics.
+If Valkey goes offline and SQLite remains readable, `/ready` returns HTTP 200 with `status` set to `degraded`. You can still retrieve completed jobs. If the API can’t read SQLite, `/ready` returns HTTP 503. Check workers separately to confirm that they can execute the published metrics.
 
 ## Inspect workers and the queue
 
-[Connect the CLI to your server](../admin-cli/#connect-to-the-server). Check Redis health, then list the workers and count the waiting jobs.
+[Connect the CLI to your server](../admin-cli/#connect-to-the-server). Check Valkey health, then list the workers and count the waiting jobs.
 
 ```sh
 uv run lyra-admin health
@@ -31,7 +31,7 @@ uv run lyra-admin --json queue show
 
 In `workers list`, check each worker’s current job and heartbeat age (time since its last check-in). Compare the number of workers with the process count in `lyra-admin config-summary`.
 
-In `queue show`, `pending_depth` counts waiting jobs. If jobs are waiting and `observed_workers` is empty, check the worker service’s startup logs. If the health check reports Redis is unavailable, restore the connection first.
+In `queue show`, `pending_depth` counts waiting jobs. If jobs are waiting and `observed_workers` is empty, check the worker service’s startup logs. If the health check reports Valkey is unavailable, restore the connection first.
 
 Before updating packages or configuration, follow the [deployment update procedure](../updates/#drain-and-restart) to empty the queue during downtime.
 
@@ -68,13 +68,13 @@ Check these settings when investigating a timeout or missing result:
 | --- | --- |
 | Queued | No queue-age expiration |
 | Running | `jobs.execution_timeout_seconds`, default 18000s (five hours) |
-| RQ records and admin tracebacks | `jobs.rq_retention_seconds`, default 86400s (one day) |
+| Redis Queue (RQ) records and admin tracebacks | `jobs.rq_retention_seconds`, default 86400s (one day) |
 
 SQLite retains terminal status, structured failures, and [stored results](../caching/#preserve-stored-results) indefinitely. Preserve the shared file across deployments. Arrange separate cleanup for temporary scratch files.
 
 ## Respond to a worker interruption
 
-Redis Queue (RQ) supervises worker processes and execution children. Workers use these intervals:
+RQ supervises workers and the child processes that run their jobs. Workers use these intervals:
 
 - Worker time to live (TTL): 30s
 - Execution checks: every 5s

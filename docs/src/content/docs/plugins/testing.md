@@ -6,7 +6,7 @@ contentPlan: plugins/testing
 sidebar: { label: "Test A Plugin" }
 ---
 
-Test the original calculation and its adapter against known values, then exercise the graph with isolated acquisition. The following tests run in the [city project](../tutorial/). Database, Redis, HTTP, cloud, and connection acquisition must use mocks or in-process fakes.
+Test the calculation and its adapter against known values. When testing the graph, use mocks or in-process fakes wherever it acquires resources or connects to external services, including Valkey. Run the examples in the [city project](../tutorial/).
 
 ## Test the adapter directly
 
