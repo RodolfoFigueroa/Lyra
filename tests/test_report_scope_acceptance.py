@@ -20,17 +20,16 @@ from lyra.sdk import LocationDependency, PluginDefinition, metric
 from test_support.location_operations import Places
 from test_support.location_schema import column
 from tests.cache_helpers import SCHEMA
-from tests.geoparquet_integration_helpers import assert_exports, assert_remote_outputs
+from tests.geoparquet_integration_helpers import assert_both_clients, assert_exports
 from tests.metric_execution_helpers import schema
-from tests.retrieval_client_helpers import NativeAPI, native_api
 from tests.sqlite_helpers import database
 
-__all__ = ["database", "native_api"]
+__all__ = ["database"]
 pytestmark = pytest.mark.usefixtures("database")
 
 
 def test_concrete_metrics_and_shared_origin_revisions(
-    tmp_path: Path, native_api: NativeAPI, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, subtests: pytest.Subtests, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "results.sqlite"
     retained, calls = [], []
@@ -138,7 +137,7 @@ def test_concrete_metrics_and_shared_origin_revisions(
     assert next(
         n for n in reports[0].nodes if n.use_id == reports[0].root_use_id
     ).origins == [Origin(id="census", revision="1", description="Census records")]
-    assert_remote_outputs(path, retained, native_api, monkeypatch)
+    assert_both_clients(path, retained, monkeypatch, subtests)
 
 
 def assert_retained_outputs(path: Path, retained: list) -> None:

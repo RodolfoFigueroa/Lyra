@@ -11,11 +11,10 @@ from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_store import ResultStore
 from lyra.runtime.sqlite_schema import Registration
 from test_support.retained_input_workloads import retained_inputs, retained_workload
-from tests.geoparquet_integration_helpers import assert_exports, assert_remote_outputs
-from tests.retrieval_client_helpers import NativeAPI, native_api
+from tests.geoparquet_integration_helpers import assert_both_clients, assert_exports
 from tests.sqlite_helpers import Database, database
 
-__all__ = ["database", "native_api"]
+__all__ = ["database"]
 pytestmark = pytest.mark.usefixtures("database")
 
 
@@ -24,7 +23,7 @@ def test_shared_membership_and_dense_pairs(
     tmp_path: Path,
     database: Database,
     policy: CachePolicy,
-    native_api: NativeAPI,
+    subtests: pytest.Subtests,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     work = retained_workload(derived=True, policy=policy)
@@ -84,8 +83,8 @@ def test_shared_membership_and_dense_pairs(
         }
         assert len(reader.read_location_input(mixed.metadata.job_id, "reference")) == 20
 
-    assert_remote_outputs(
-        path, [fresh, mixed, reused], native_api, monkeypatch, exports_only=True
+    assert_both_clients(
+        path, [fresh, mixed, reused], monkeypatch, subtests, exports_only=True
     )
     assert work.calls == []
 

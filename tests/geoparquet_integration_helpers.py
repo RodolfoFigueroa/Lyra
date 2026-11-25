@@ -1,5 +1,6 @@
 """Retained export assertions shared by execution integration scenarios."""
 
+import asyncio
 import json
 from collections.abc import Awaitable
 from datetime import UTC, datetime
@@ -33,6 +34,29 @@ from tests.mcp_helpers import mcp_headers, tool_call_payload
 from tests.retrieval_client_helpers import BASE, NativeAPI
 
 _T = TypeVar("_T", bound=BaseModel | pd.DataFrame | None)
+
+
+def assert_both_clients(
+    path: Path,
+    retained: list[RunResult],
+    monkeypatch: pytest.MonkeyPatch,
+    subtests: pytest.Subtests,
+    *,
+    exports_only: bool = False,
+) -> None:
+    for mode in ("sync", "async"):
+        with (
+            subtests.test(client=mode),
+            asyncio.Runner() as runner,
+            monkeypatch.context() as patch,
+        ):
+            assert_remote_outputs(
+                path,
+                retained,
+                NativeAPI(mode, runner),
+                patch,
+                exports_only=exports_only,
+            )
 
 
 def assert_remote_outputs(
@@ -117,7 +141,9 @@ def assert_remote_outputs(
                 for result in retained:
                     await assert_scope_tools(http, result)
 
-        native.resolve(check_tools())
+        # MCP uses the direct ASGI transport shared by both client modes.
+        if native.mode == "async":
+            native.resolve(check_tools())
 
 
 def assert_remote_run(result: RunResult, native: NativeAPI, directory: Path) -> None:
