@@ -29,7 +29,7 @@ def test_concurrent_applications_own_resources(
     first = load_test_config(tmp_path / "first")
     second = load_test_config(tmp_path / "second")
     first.mcp.enabled = second.mcp.enabled = False
-    second.jobs.result_retention_seconds += 1
+    second.jobs.rq_retention_seconds += 1
     connections = [Mock(), Mock()]
     asynchronous = [Mock(aclose=AsyncMock()), Mock(aclose=AsyncMock())]
     sync_factory = Mock(side_effect=connections)

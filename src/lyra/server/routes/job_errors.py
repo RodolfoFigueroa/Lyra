@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 
 JOB_LOOKUP_RESPONSES: dict[int | str, dict[str, Any]] = {
-    404: {"description": "Job expired or not found."},
+    404: {"description": "Job not found."},
     500: {
         "description": "A required stored job relationship is invalid.",
         "content": {

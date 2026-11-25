@@ -36,6 +36,7 @@ WORKER: dict[str, JsonValue] = {
 }
 READINESS: dict[str, JsonValue] = {
     "status": "ready",
+    "sqlite": {"status": "ok"},
     "api_version": "1.0.0",
     "redis": {"status": "ok"},
 }
@@ -64,7 +65,7 @@ CASES = (
             "metric_count": 1,
             "queue": "batch",
             "worker_concurrency": 1,
-            "result_retention_seconds": 600,
+            "rq_retention_seconds": 600,
             "catalog_fingerprint": "catalog",
         },
     ),
@@ -77,7 +78,7 @@ CASES = (
             "api_port": 5219,
             "queue": "batch",
             "worker": {"concurrency": 1, "temp_dir": "/lyra_data/cache/jobs"},
-            "result_retention_seconds": 600,
+            "rq_retention_seconds": 600,
         },
     ),
     Case(
@@ -324,6 +325,7 @@ def test_unhealthy_readiness_preserves_response(
     http.payload = {
         **READINESS,
         "status": "not_ready",
+        "sqlite": {"status": "unavailable"},
         "redis": {"status": "unavailable"},
     }
     assert admin_cli.main(["--json", "health"]) == 1

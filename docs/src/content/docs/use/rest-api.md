@@ -117,23 +117,23 @@ During execution, Lyra resolves your IDs to location data using the revisions re
 
 Pass the 32 lowercase hexadecimal characters you received at submission. On a matching route, an authorized request with a malformed ID returns HTTP 422. The validation error identifies `["path", "job_id"]`. A valid ID with no matching resource returns HTTP 404.
 
-All job lookup endpoints return `404` when the job is missing or expired. Lyra returns `500` when data required by a lookup is missing or invalid. The error includes `detail.code: invalid_job_result` and `detail.retryable: false`, without exposing stored data. You can still check status and administrator details when successful result files are unavailable.
+All job lookup endpoints return `404` when the job is unknown. Lyra returns `500` when data required by a lookup is missing or invalid. The error includes `detail.code: invalid_job_result` and `detail.retryable: false`, without exposing stored data. You can still check status and administrator details when successful result files are unavailable.
 
 Result endpoints return `202` while the job is queued or running. Choose a route based on what you need:
 
 | Route | Use |
 | --- | --- |
-| `GET /jobs/{job_id}/result/inspection` | Inspect bounded summaries, previews, compact provenance, and remaining lifetime |
+| `GET /jobs/{job_id}/result/inspection` | Inspect bounded summaries, previews, and compact provenance |
 | `GET /jobs/{job_id}/result` | Read the complete terminal JSON result |
 | `GET /jobs/{job_id}/result/download` | Download the complete terminal JSON result |
 
-Both `/result` and `/result/download` return the complete job result as JSON. Integers are JSON numbers, Booleans are booleans, and missing cells are null. Spatial outputs use WGS84 GeoJSON, where empty and missing geometries can both appear as null. A successful job includes every named output of the requested metric. A failed job includes failure details. Download the job result before its queue record expires.
+Both `/result` and `/result/download` return the complete job result as JSON. Integers are JSON numbers, Booleans are booleans, and missing cells are null. Spatial outputs use WGS84 GeoJSON, where empty and missing geometries can both appear as null. A successful job includes every named output of the requested metric. A failed job includes failure details.
 
 To read the complete report, send an authenticated `GET /executions/{job_id}/report/download` request. This route accepts the submission’s job ID even after queue expiry.
 
 ## Download a retained table
 
-Download one saved output using its `job_id` and `output_name`, even after the job expires. Choose the output name from the [result description](../results/#read-a-retained-description).
+Download one saved output using its `job_id` and `output_name`, even after the queue entry expires. Choose the output name from the [result description](../results/#read-a-retained-description).
 
 Send `GET /results/{job_id}/tables/download?output_name=maintenance` with your agent Bearer credential. Encode the exact output name as a query value, for example with `urllib.parse.urlencode({"output_name": name})`. A successful response uses `application/vnd.apache.arrow.stream`.
 
@@ -187,7 +187,7 @@ Inspect each input’s schema and `availability` before reading its rows. Its [p
 
 Authenticated `GET /results/{job_id}` returns the complete description, including empty and unavailable inputs. To download an available selection, request `GET /results/{job_id}/location-inputs/download?input_name=streets`. Encode the exact input name as a query value. Omitting the parameter returns HTTP 422.
 
-Downloads use `application/vnd.apache.arrow.stream`, preserving the declared schema and CRS even for empty selections. Open the stream with [PyArrow or GeoPandas](#download-a-retained-table). You can retrieve these inputs after job expiry or plugin registration changes while the retained store remains available.
+Downloads use `application/vnd.apache.arrow.stream`, preserving the declared schema and CRS even for empty selections. Open the stream with [PyArrow or GeoPandas](#download-a-retained-table). You can retrieve these inputs after queue expiry or plugin registration changes while the retained store remains available.
 
 Direct inputs contain unique provider records. Correspondences contain each immediate source/target pair, including repeated targets under different sources. Input rows have no metric `row_key`.
 

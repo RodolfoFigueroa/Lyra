@@ -15,7 +15,7 @@ from lyra.contracts.config import (
     DEFAULT_FORWARDED_ALLOW_IPS,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MCP_MOUNT_PATH,
-    DEFAULT_RESULT_RETENTION_SECONDS,
+    DEFAULT_RQ_RETENTION_SECONDS,
     LYRA_DATA_DIR,
     LyraConfig,
 )
@@ -46,7 +46,7 @@ def _valid_config(base: Path) -> dict[str, Any]:
             "file": str(base / "logs" / "lyra.log"),
         },
         "jobs": {
-            "result_retention_seconds": 600,
+            "rq_retention_seconds": 600,
         },
         "plugins": {},
         "worker": {"concurrency": 32, "temp_dir": str(base / "cache" / "jobs")},
@@ -82,7 +82,7 @@ def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     assert config.mcp.mount_path == DEFAULT_MCP_MOUNT_PATH
     assert config.logging.level == "INFO"
     assert config.logging.file == tmp_path / "logs" / "lyra.log"
-    assert config.jobs.result_retention_seconds == 600
+    assert config.jobs.rq_retention_seconds == 600
     assert config.jobs.queue == "lyra"
     assert config.worker.concurrency == 32
 
@@ -104,7 +104,7 @@ def test_config_contract_applies_documented_field_defaults(tmp_path: Path) -> No
     assert config.mcp.mount_path == DEFAULT_MCP_MOUNT_PATH
     assert config.logging.level == DEFAULT_LOG_LEVEL
     assert config.logging.file is None
-    assert config.jobs.result_retention_seconds == DEFAULT_RESULT_RETENTION_SECONDS
+    assert config.jobs.rq_retention_seconds == DEFAULT_RQ_RETENTION_SECONDS
     assert config.worker.concurrency == 1
     assert config.worker_temp_dir() == LYRA_DATA_DIR / "cache" / "jobs"
 
@@ -189,7 +189,7 @@ def test_config_contract_requires_known_schema_version(tmp_path: Path) -> None:
         ("api", "port", 0, "greater than or equal to 1"),
         ("redis", "url", "postgres://db:5432/lyra", "redis.url"),
         ("logging", "level", "NOPE", "logging.level"),
-        ("jobs", "result_retention_seconds", 0, "greater than 0"),
+        ("jobs", "rq_retention_seconds", 0, "greater than 0"),
         ("jobs", "execution_timeout_seconds", 0, "greater than 0"),
         ("jobs", "queue", " ", "non-empty"),
         ("worker", "concurrency", 0, "greater than 0"),

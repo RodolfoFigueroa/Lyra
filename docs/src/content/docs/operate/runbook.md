@@ -15,9 +15,9 @@ Use liveness to check the API process. Use readiness to check whether it can acc
 | Check | Meaning | Typical use |
 | --- | --- | --- |
 | `GET /live` | The API process is alive | Process restart decisions |
-| `GET /ready` | Redis is available | Admission of new traffic |
+| `GET /ready` | SQLite is readable | Admission of new traffic |
 
-Readiness returns 503 when Redis is unavailable. Check workers separately to confirm that they can execute the published metrics.
+Readiness returns HTTP 200 with `degraded` when Redis is unavailable and HTTP 503 when SQLite is unreadable. Completed jobs remain accessible during a Redis outage. Check workers separately to confirm that they can execute the published metrics.
 
 ## Inspect workers and the queue
 
@@ -46,7 +46,7 @@ Use `--offset` and `--limit` to page through jobs with the same status. The defa
 
 - Queued jobs: first-in, first-out (FIFO)
 - Running jobs: registry order
-- Completed jobs: descending registry order
+- Completed jobs: newest completion first, then descending job ID
 
 Transitions and stale entries can shorten a page. These views have no global chronological order or metric filter.
 
@@ -66,9 +66,9 @@ Check these settings when investigating a timeout or missing result:
 | --- | --- |
 | Queued | No queue-age expiration |
 | Running | `jobs.execution_timeout_seconds`, default 18000s (five hours) |
-| Succeeded or failed | `jobs.result_retention_seconds`, default 86400s (one day) |
+| RQ records and admin tracebacks | `jobs.rq_retention_seconds`, default 86400s (one day) |
 
-Job retention controls Redis records and API access. Preserve the SQLite file containing your [stored results](../caching/#preserve-stored-results), which remain after jobs expire. Arrange separate cleanup for temporary scratch files.
+SQLite retains terminal status, structured failures, and [stored results](../caching/#preserve-stored-results) indefinitely. Preserve the shared file across deployments. Arrange separate cleanup for temporary scratch files.
 
 ## Respond to a worker interruption
 

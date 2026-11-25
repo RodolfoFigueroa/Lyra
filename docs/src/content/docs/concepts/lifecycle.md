@@ -1,6 +1,6 @@
 ---
-title: How jobs execute and expire
-description: Understand background execution, worker failures, and access to saved results after job expiry.
+title: How jobs execute and complete
+description: Understand background execution, worker failures, and access to saved results after queue expiry.
 contentType: Conceptual
 contentPlan: concepts/lifecycle
 sidebar: { label: "Job Lifecycle And Retention" }
@@ -65,10 +65,8 @@ RQ supervises execution, tracks worker heartbeats, and detects failures. Worker 
 
 Execution failure does not automatically replay the job. Operators inspect the failed job and source condition before deciding whether to request new work.
 
-## Job access has a retention period
+## Terminal job history
 
-Successes and failures remain available for `jobs.result_retention_seconds`, which defaults to 86400s (one day). [Result inspections](../../use/results/#inspect-before-downloading) report the remaining lifetime.
+SQLite retains successful outcomes and structured failures indefinitely. Look up a completed job by ID or list terminal jobs by status in the admin CLI. Both work during a Redis outage.
 
-When the Redis record expires, a status lookup returns HTTP 404. Failure details and job-based JSON downloads also expire.
-
-Keep your submission’s job ID to read [saved reports, descriptions, and named tables](../../use/results/) after queue expiry. Use the API for remote reads or open the store file with `ResultStore`. Operators can check the [retention settings](../../operate/runbook/).
+RQ retains native job records and admin tracebacks for `jobs.rq_retention_seconds`, which defaults to one day. Queued jobs, running jobs, progress, and new submissions require Redis. If SQLite is temporarily unavailable when a worker records a failure, worker maintenance retries while the RQ failure record remains available.

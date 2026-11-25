@@ -89,7 +89,9 @@ def expired_result(
         )
     _, restarted = install_definitions(tmp_path, monkeypatch, definitions)
     monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=NoSuchJobError))
-    assert restarted.jobs.read_job(envelope.job_id) is None
+    status = restarted.jobs.read_status(envelope.job_id)
+    assert status is not None
+    assert status.status == "succeeded"
     return restarted, str(saved["job_id"])
 
 

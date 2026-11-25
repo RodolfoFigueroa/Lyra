@@ -155,7 +155,6 @@ def test_complete_json_round_trip(
         ]
         == "producer_id"
     )
-    assert descriptor["lifetime"]["expires_in_seconds"] == 60
     assert descriptor["download"] == f"/jobs/{TEST_JOB_ID}/result/download"
     assert "request-boundary" not in json.dumps(payload["outputs"])
     if not empty:

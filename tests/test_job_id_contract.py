@@ -56,7 +56,6 @@ def model_payload(request: pytest.FixtureRequest) -> tuple[type[BaseModel], dict
         DownloadResultOutput: {
             "format": "json",
             "media_type": "application/json",
-            "lifetime": {},
             "lyra_api": {
                 "method": "GET",
                 "url": "https://example.test/download",
@@ -93,7 +92,6 @@ def model_payload(request: pytest.FixtureRequest) -> tuple[type[BaseModel], dict
         TerminalResultOutput: {
             "status": "failed",
             "result_kind": "failed",
-            "lifetime": {},
             "download": f"/jobs/{TEST_JOB_ID}/result",
         },
     }

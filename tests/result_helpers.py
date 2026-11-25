@@ -10,7 +10,6 @@ from lyra.contracts.jobs import (
     FailedJobResult,
     JobRunProvenance,
     JobStatusInfo,
-    ResultLifetime,
     TableJobResult,
     TerminalJobResult,
 )
@@ -25,7 +24,6 @@ def result_observation(
     snapshot: JobStatusInfo,
     result: TerminalJobResult | None = None,
     provenance: JobRunProvenance | None = None,
-    lifetime: ResultLifetime | None = None,
 ) -> JobObservation:
     if isinstance(result, FailedJobResult):
         snapshot = snapshot.model_copy(update={"error": result.error})
@@ -49,7 +47,6 @@ def result_observation(
         if isinstance(result, TableJobResult)
         else {},
         provenance=provenance,
-        lifetime=lifetime or ResultLifetime(),
     )
 
 

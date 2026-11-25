@@ -65,7 +65,13 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
         message = "Benchmark requires a metric"
         raise ValueError(message)
     job_id = publish_fixture(work, rows, store_path, contract.outputs["root"])
-    native = Mock(id=job_id)
+    native = Mock(
+        id=job_id,
+        worker_name="benchmark",
+        origin="lyra",
+        started_at=None,
+        ended_at=None,
+    )
     plan = prepare_execution(catalog.compiled, {"metric": "root"})
     provenance = JobRunProvenance(
         accepted=AcceptedJob(

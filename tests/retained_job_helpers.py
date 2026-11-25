@@ -3,14 +3,17 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
-from rq.job import JobStatus
+from rq.job import Job, JobStatus
 
-from lyra.contracts.jobs import TableJobResult
+from lyra.contracts.jobs import FailedJobResult, JobRunProvenance, TableJobResult
 from lyra.runtime.results import ResultStore
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server import job_store
+from lyra.server.terminal_jobs import job_outcome
 from tests.job_id_helpers import TEST_JOB_ID
 from tests.provenance_helpers import result_provenance
 from tests.result_helpers import observed_tables
@@ -78,3 +81,23 @@ def retain(
     monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=job))
     jobs.connection = Mock(ttl=Mock(return_value=ttl))
     return job
+
+
+def publish_terminal(path: Path, job: SimpleNamespace) -> None:
+    """Finish the worker portion of a simulated RQ lifecycle."""
+    provenance = JobRunProvenance(
+        accepted=job.args[0]["accepted"], execution=job.meta.get("execution")
+    )
+    failure = None
+    if job.get_status() == JobStatus.FAILED:
+        payload = job.meta.get("failure") or {}
+        failure = FailedJobResult(
+            job_id=job.id,
+            error=payload.get(
+                "error", {"type": "worker", "message": "Job execution failed."}
+            ),
+        )
+    with SQLiteStore(path) as store, store.transaction() as connection:
+        job_outcome(cast("Job", job), provenance, failure=failure).publish(
+            connection, store.layout.terminal_jobs
+        )

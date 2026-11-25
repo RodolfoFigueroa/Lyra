@@ -9,7 +9,6 @@ from pydantic import Field
 from lyra.contracts.jobs import (
     JobId,
     JobProgress,
-    ResultLifetime,
     ResultOutputMetadata,
 )
 from lyra.contracts.plugins import PluginInfo
@@ -65,7 +64,6 @@ class TerminalResultOutput(StrictBaseModel):
     result_kind: Literal["table", "failed"]
     metric: str | None = None
     completed_at: datetime | None = None
-    lifetime: ResultLifetime
     download: str
     provenance: CompactProvenance | None = None
     outputs: dict[str, ResultOutputInspection] = Field(default_factory=dict)

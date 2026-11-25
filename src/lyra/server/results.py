@@ -193,7 +193,7 @@ class ResultService:
         return await asyncio.to_thread(self.read_report, job_id)
 
     def read_observation(self, job_id: str) -> JobObservation | None:
-        """Return the queue record after verifying its identity.
+        """Return the live or durable job observation after verifying its identity.
 
         Raises:
             InvalidJobResultError: If required retained data is missing or invalid.

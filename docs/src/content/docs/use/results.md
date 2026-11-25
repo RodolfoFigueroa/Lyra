@@ -56,7 +56,7 @@ client.results.download_table(job_id, "maintenance", "maintenance.arrow")
 print(maintenance)
 ```
 
-Run these calls inside your client context. With `AsyncLyraClient`, await each call. These lookups remain available after job expiry and plugin registration changes while the retained store is available.
+Run these calls inside your client context. With `AsyncLyraClient`, await each call. These lookups remain available after queue expiry and plugin registration changes while the retained store is available.
 
 `table()` returns an independent DataFrame or GeoDataFrame with declared columns and nullable string, integer, float, and boolean types. Spatial tables keep active `geometry` in the native CRS, including empty and all-null outputs. Missing geometry and empty geometry remain distinct. You can use the frame after closing the client. Editing its values, columns, geometry, CRS, or attributes cannot change stored data, another read, or the separate description.
 
@@ -100,7 +100,7 @@ client.reports.download(job_id, "report.json")
 
 Call `get()` for the complete [`ExecutionReport`](../../api/lyra/contracts/reports/), `inspect()` for a bounded response, or `download()` to save JSON. Use `await` for each operation with `AsyncLyraClient`.
 
-These methods work after job expiry or plugin changes, while the retained store remains available. They don’t load output tables or rerun the calculation. You can use returned models after closing the client; editing them doesn’t change later reads.
+These methods work after queue expiry or plugin changes, while the retained store remains available. They don’t load output tables or rerun the calculation. You can use returned models after closing the client; editing them doesn’t change later reads.
 
 Use the report to inspect these saved execution details:
 
@@ -155,7 +155,6 @@ Use `client.results.inspect(job_id)` or `GET /jobs/{job_id}/result/inspection` t
 - The durable `job_id`
 - Numeric summaries and preview rows
 - Compact [provenance](../../concepts/provenance/): a summary of the request and execution identity
-- The remaining result lifetime
 
 Use the relative path in `download` to fetch the full result. Truncation fields describe what inspection omits. The saved report stays complete, and both HTTP and Model Context Protocol (MCP) inspections include the job ID.
 
@@ -317,7 +316,7 @@ table = tables["maintenance"]
 print(table.head())
 ```
 
-`client.results.tables(job_id)` is equivalent. Both methods return a dictionary, including for a single output. Await either method when using an async client. The client checks job status once. Queued or running jobs raise `JobNotReadyError`, failed jobs raise `MetricRunError`, and a job that has already expired returns HTTP 404.
+`client.results.tables(job_id)` is equivalent. Both methods return a dictionary, including for a single output. Await either method when using an async client. The client checks job status once. Queued or running jobs raise `JobNotReadyError`, failed jobs raise `MetricRunError`, and an unknown job ID returns HTTP 404.
 
 Ordinary outputs become pandas DataFrames; spatial outputs become GeoPandas GeoDataFrames. After observing success, the client verifies the retained description and downloads one Arrow stream per output. Each frame has the same logical dtypes, geometry, and CRS as a call to `results.table(job_id, output_name)`, including for typed empty tables. The downloads can finish after the queue record expires.
 
@@ -378,9 +377,9 @@ Request provenance records your submitted ID selections. The provider declares t
 
 [Local execution](../local-execution/) returns native GeoDataFrames with declared data types, a fresh `RangeIndex`, and their original CRS. Server serialization leaves the worker’s native graph table unchanged.
 
-## Keep access after job expiry
+## Keep access after queue expiry
 
-Save the deployment address and `job_id` at submission. Once the queue record expires, job status and job-result downloads expire with it.
+Save the deployment address and `job_id` at submission. Terminal job status and downloads remain available from SQLite after queue expiry.
 
 To [reconnect with the job ID](../python-client/#reconnect-with-the-job-id), use `client.results.describe(job_id)` for metadata. Pass the same ID and an output name to `client.results.table()` or `client.results.download_table()`. These methods read the [shared SQLite store](../../operate/caching/).
 
@@ -388,7 +387,7 @@ With access to the SQLite file, you can also [reopen the report and tables local
 
 Changed keys and cache policies don’t delete saved records. Retention applies within a [supported store](../../operate/caching/#preserve-stored-results); incompatible schema changes can require an explicit development-store reset. A reset removes the store’s contents.
 
-A job-status lookup returns HTTP 404 for both unknown and expired jobs. A job-result lookup returns HTTP 500 with `invalid_job_result` if required stored data is corrupt, inconsistent, or missing.
+A job-status lookup returns HTTP 404 for an unknown job ID. A job-result lookup returns HTTP 500 with `invalid_job_result` if required stored data is corrupt, inconsistent, or missing.
 
 Repeated downloads cannot recover missing retained data. A new submission creates another job, which may reuse cached calculations.
 

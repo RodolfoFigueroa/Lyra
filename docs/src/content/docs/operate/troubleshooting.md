@@ -68,7 +68,7 @@ Execution stops at the first failure and publishes no partial outputs. A new sub
 
 ## Distinguish missing results from active work
 
-Poll an active job’s status until it finishes, then save its result before retention ends. An unavailable job ID does not tell you whether the job never existed or its retained data expired.
+Check terminal history by job ID. Restore Redis access to inspect queued and running jobs.
 
 A local wait timeout leaves the remote job running. Reconnect with its ID. See [job handling](../../use/jobs/) and [results](../../use/results/) for the consumer-facing behavior.
 

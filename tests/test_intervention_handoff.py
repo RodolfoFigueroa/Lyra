@@ -322,14 +322,17 @@ def test_worker_checks_accepted_target_bindings(
     if change == "legacy_plain":
         assert worker.run_metric_task(wire)["job_id"]
         return
-    store = Mock(side_effect=AssertionError("opened result store"))
-    monkeypatch.setattr(worker, "SQLiteStore", store)
+    execute = Mock(side_effect=AssertionError("started invalid computation"))
+    monkeypatch.setattr(worker, "GraphExecutor", execute)
     with pytest.raises(
         worker.BoundPlanError, match="extra" if change == "extra" else "trees"
     ):
         worker.run_metric_task(wire)
     assert native.meta["failure"]["error"]["type"] == "bound_plan"
-    store.assert_not_called()
+    execute.assert_not_called()
+    status = runtime.jobs.read_status(native.id)
+    assert status is not None
+    assert status.error == native.meta["failure"]["error"]
 
 
 @pytest.mark.parametrize("model", [ExecutionRequest, JobCreateRequest])

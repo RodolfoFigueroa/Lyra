@@ -12,6 +12,7 @@ with command_imports(__name__):
     from redis.exceptions import RedisError
 
     from lyra.contracts.config import LyraConfig
+    from lyra.runtime.terminal_history import HistoryUnavailableError
     from lyra.server.config import (
         ApiCredentials,
         ensure_runtime_directories,
@@ -19,7 +20,6 @@ with command_imports(__name__):
         load_config,
     )
     from lyra.server.db.redis import create_async_client, create_sync_client
-    from lyra.server.job_store import JobStore
     from lyra.server.logging_config import configure_logging
     from lyra.server.mcp import create_mcp_app
     from lyra.server.mcp.tools import InProcessLyraBackend
@@ -27,6 +27,7 @@ with command_imports(__name__):
     from lyra.server.results import ResultService
     from lyra.server.routes.registration import register_http_routes
     from lyra.server.runtime import ApplicationRuntime, require_runtime
+    from lyra.server.terminal_jobs import ServerJobStore
     from lyra.version import APP_VERSION
 
 
@@ -47,7 +48,8 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
                 stack.callback(connection.close)
                 async_connection = create_async_client(config.redis)
                 stack.push_async_callback(async_connection.aclose)
-                jobs = JobStore(connection, config.jobs)
+                jobs = ServerJobStore(connection, config.jobs, config.result_store_path)
+                jobs.initialize()
                 app.state.runtime = ApplicationRuntime(
                     config,
                     catalog,
@@ -68,6 +70,7 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
 
     app = FastAPI(title="Lyra API", version=APP_VERSION, lifespan=lifespan)
     app.add_exception_handler(RedisError, redis_unavailable_response)
+    app.add_exception_handler(HistoryUnavailableError, sqlite_unavailable_response)
     register_http_routes(app)
     if config.mcp.enabled:
         mcp_app = create_mcp_app(
@@ -78,6 +81,13 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
         app.state.mcp_app = mcp_app
         app.mount(config.mcp.mount_path, mcp_app)
     return app
+
+
+def sqlite_unavailable_response(_request: Request, _exc: Exception) -> JSONResponse:
+    """Return temporary unavailability for a database error."""
+    return JSONResponse(
+        status_code=503, content={"detail": "Result storage is unavailable."}
+    )
 
 
 def redis_unavailable_response(_request: Request, _exc: Exception) -> JSONResponse:

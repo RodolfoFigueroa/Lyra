@@ -161,7 +161,7 @@ print(table)
 
 Run `uv run python read_retained.py`. Both lookups return complete models, even when an inspection would return a preview. You can use the models and frame after the client closes.
 
-With `AsyncLyraClient`, use `async with` and await each method. Direct report and table reads work after queue expiry. The job-result method `client.results.get(job_id)` requires the queue record.
+With `AsyncLyraClient`, use `async with` and await each method. Direct report and table reads work after queue expiry. The job-result method `client.results.get(job_id)` reads completed outcomes from SQLite.
 
 ## Read and save retained tables
 
@@ -176,7 +176,7 @@ With `AsyncLyraClient`, await each call. `table()` requires `lyra[client,tables]
 
 `download_table()` requires only `lyra[client]`. It streams unchanged Arrow IPC bytes regardless of the filename extension, replaces the destination after successful completion, and returns `None`. Create the parent directory first. Failure or cancellation preserves any original file and cleans up the temporary file.
 
-Both operations work after job expiry while the retained store is available. See the [results guide](../results/#read-a-retained-table) for ordinary PyArrow/GeoPandas file readers and lookup errors.
+Both operations work after queue expiry while the retained store is available. See the [results guide](../results/#read-a-retained-table) for ordinary PyArrow/GeoPandas file readers and lookup errors.
 
 Use `client.results.inspect(job_id)` for a bounded sample of metric outputs. For a subset of a complete table, filter the downloaded frame locally, for example `maintenance.loc[maintenance["length_m"] > 50]`.
 
@@ -211,7 +211,7 @@ Check `availability` before reading an input. A value of `not_materialized` mean
 
 ## Retrieve execution reports
 
-Save `job_id` from submission to [retrieve its report](../results/#read-an-execution-report), including after job expiry. Choose the method for the response you need:
+Save `job_id` from submission to [retrieve its report](../results/#read-an-execution-report), including after queue expiry. Choose the method for the response you need:
 
 | Task | Method |
 | --- | --- |
@@ -249,7 +249,7 @@ Result retrieval depends on the job’s state:
 
 Both clients validate that the job ID contains exactly 32 lowercase hexadecimal characters before sending a request.
 
-Missing or expired jobs return HTTP `404`. If required stored data is missing, corrupt, or inconsistent, Lyra returns HTTP `500` with code `invalid_job_result`. The client raises `DownloadError` for either response. Repeating a lookup does not rerun the calculation or recover missing data.
+Unknown jobs return HTTP `404`. If required stored data is missing, corrupt, or inconsistent, Lyra returns HTTP `500` with code `invalid_job_result`. The client raises `DownloadError` for either response. Repeating a lookup does not rerun the calculation or recover missing data.
 
 ## Use the asynchronous client
 

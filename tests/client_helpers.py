@@ -180,6 +180,7 @@ def _liveness_response() -> dict[str, Any]:
 def _readiness_response() -> dict[str, Any]:
     return {
         "status": "ready",
+        "sqlite": {"status": "ok"},
         "api_version": "0.1.0",
         "redis": {"status": "ok"},
     }
@@ -202,7 +203,7 @@ def _admin_status_response() -> dict[str, Any]:
         "metric_count": 1,
         "queue": "lyra",
         "worker_concurrency": 1,
-        "result_retention_seconds": 86400,
+        "rq_retention_seconds": 86400,
         "catalog_fingerprint": "abc",
     }
 
@@ -213,7 +214,7 @@ def _config_summary_response() -> dict[str, Any]:
         "api_port": 5219,
         "queue": "lyra",
         "worker": {"concurrency": 1, "temp_dir": "/lyra_data/cache/jobs"},
-        "result_retention_seconds": 86400,
+        "rq_retention_seconds": 86400,
     }
 
 

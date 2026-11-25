@@ -212,20 +212,6 @@ def parse_job_result(payload: object) -> TerminalJobResult:
     return _TERMINAL_JOB_RESULT_ADAPTER.validate_python(payload)
 
 
-class ResultLifetime(StrictBaseModel):
-    """Redis-backed lifetime metadata for a stored result."""
-
-    expires_in_seconds: int | None = Field(
-        default=None,
-        ge=0,
-        description="Approximate remaining result lifetime, when available.",
-    )
-    expires_at: datetime | None = Field(
-        default=None,
-        description="Exact result expiry timestamp, when computable.",
-    )
-
-
 class ResultColumnSummary(StrictBaseModel):
     """Observed values; numeric bounds apply only to wholly numeric columns."""
 
@@ -325,10 +311,10 @@ class JobStatusInfo(StrictBaseModel):
 
 
 class JobListResponse(StrictBaseModel):
-    """Admin response containing a native queue or registry page."""
+    """Admin response containing a page of matching live or terminal jobs."""
 
     jobs: list[JobStatusInfo] = Field(
-        description="Retained jobs in native queue or registry order."
+        description="Matching active jobs in RQ order, or terminal jobs newest first."
     )
 
 

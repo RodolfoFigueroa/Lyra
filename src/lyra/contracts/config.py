@@ -17,7 +17,7 @@ DEFAULT_CONFIG_PATH = LYRA_DATA_DIR / "config" / "lyra.toml"
 DEFAULT_API_HOST = str(ipaddress.IPv4Address(0))
 DEFAULT_API_PORT = 5219
 DEFAULT_FORWARDED_ALLOW_IPS = ["127.0.0.1"]
-DEFAULT_RESULT_RETENTION_SECONDS = 86400
+DEFAULT_RQ_RETENTION_SECONDS = 86400
 DEFAULT_PROGRESS_MIN_INTERVAL_MS = 1000
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_WORKER_CONCURRENCY = 1
@@ -301,10 +301,10 @@ class JobsConfig(StrictConfigModel):
     execution_timeout_seconds: int = Field(
         default=18000, gt=0, description="Native execution timeout in seconds."
     )
-    result_retention_seconds: int = Field(
-        default=86400,
+    rq_retention_seconds: int = Field(
+        default=DEFAULT_RQ_RETENTION_SECONDS,
         gt=0,
-        description="Retention for successful and failed jobs in seconds.",
+        description="Retention for RQ records and administrator tracebacks in seconds.",
     )
     progress_min_interval_ms: int = Field(
         default=1000,

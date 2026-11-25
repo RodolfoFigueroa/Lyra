@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from fastapi import Response
 from redis.exceptions import RedisError
 
@@ -52,7 +53,8 @@ def test_readiness_reports_healthy_dependencies() -> None:
     http_response = Response()
 
     runtime.config = SimpleNamespace(
-        redis=SimpleNamespace(readiness_timeout_seconds=1.0)
+        result_store_path=Path("results.sqlite"),
+        redis=SimpleNamespace(readiness_timeout_seconds=1.0),
     )
     response = asyncio.run(health.readiness(http_response, runtime))
 
@@ -60,7 +62,7 @@ def test_readiness_reports_healthy_dependencies() -> None:
     assert http_response.headers["Cache-Control"] == "no-store"
     assert response.status == "ready"
     assert response.redis.status == "ok"
-    assert set(response.model_dump()) == {"status", "api_version", "redis"}
+    assert set(response.model_dump()) == {"status", "api_version", "redis", "sqlite"}
 
 
 def test_readiness_reports_unavailable_redis() -> None:
@@ -69,12 +71,13 @@ def test_readiness_reports_unavailable_redis() -> None:
     http_response = Response()
 
     runtime.config = SimpleNamespace(
-        redis=SimpleNamespace(readiness_timeout_seconds=1.0)
+        result_store_path=Path("results.sqlite"),
+        redis=SimpleNamespace(readiness_timeout_seconds=1.0),
     )
     response = asyncio.run(health.readiness(http_response, runtime))
 
-    assert http_response.status_code == 503
-    assert response.status == "not_ready"
+    assert http_response.status_code == 200
+    assert response.status == "degraded"
     assert response.redis.status == "unavailable"
 
 
@@ -161,3 +164,19 @@ def test_catalog_metadata_reports_smoke_directory_plugin(tmp_path: Path) -> None
     assert response.installed_plugins[0].version == "0.1.0"
     assert response.catalog_fingerprint
     assert SMOKE_PLUGIN_DIR.exists()
+
+
+def test_readiness_requires_readable_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _configure_admin(tmp_path)
+
+    def unavailable(_path: Path) -> None:
+        raise OSError
+
+    monkeypatch.setattr(health, "probe_storage", unavailable)
+    response = Response()
+    readiness = asyncio.run(health.readiness(response, runtime))
+    assert response.status_code == 503
+    assert readiness.status == "not_ready"
+    assert readiness.sqlite.status == "unavailable"

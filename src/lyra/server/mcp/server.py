@@ -172,13 +172,13 @@ SERVER_INSTRUCTIONS = (
     "limited to 64 KiB including "
     "both MCP representations. Truncation is explicit; "
     "use the authenticated descriptor URL for complete provenance. Unknown "
-    "or expired job IDs return result_not_found. Missing, corrupt, or inconsistent "
+    "job IDs return result_not_found. Missing, corrupt, or inconsistent "
     "required stored data produces result_observation_error. Downloads of active "
     "jobs return result_not_ready; downloads of failed jobs return "
     "result_not_downloadable. Invalid arguments produce validation errors "
     "in text content with isError true. "
     "Use lyra_describe_result with the durable job_id for retained metadata "
-    "independently of job expiry. Read structuredContent.result.kind: complete "
+    "independently of the queue. Read structuredContent.result.kind: complete "
     "contains the whole description; preview omits it and supplies an authenticated "
     "download_url for complete JSON. Descriptions never load tables or report bodies. "
     "Use lyra_inspect_report with the durable job_id for a complete report "
@@ -363,7 +363,7 @@ def create_mcp_app(
 
         The tool call succeeds even when the job failed, because it successfully reports
         the outcome.  Responses group summaries and previews by output name within a 64
-        KiB limit. Fetch the descriptor for complete provenance; unknown or expired job
+        KiB limit. Fetch the descriptor for complete provenance; unknown job
         IDs return `result_not_found`.
 
         Returns:
@@ -422,7 +422,7 @@ def _register_retained_tools(
     ) -> TableDownload:
         """Get a download URL for one retained output.
 
-        Fetch the URL with your agent bearer credential, even after the job
+        Fetch the URL with your agent bearer credential, even after its queue record
         expires. Lyra checks the stored values before sending the Arrow IPC
         stream. Read the stream with PyArrow or GeoPandas.
 
@@ -499,7 +499,7 @@ def _register_retained_tools(
     async def lyra_inspect_report(
         job_id: JobId,
     ) -> ExecutionReportInspection:
-        """Inspect a retained execution report independently of job expiry.
+        """Inspect a retained execution report independently of the queue.
 
         Read structuredContent.result.kind. A complete inspection includes the
         whole report; a preview omits it as a unit and supplies an authenticated

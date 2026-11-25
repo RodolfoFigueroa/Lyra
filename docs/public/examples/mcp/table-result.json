@@ -4,9 +4,6 @@
     "status": "succeeded",
     "result_kind": "table",
     "completed_at": "2026-09-24T12:00:10Z",
-    "lifetime": {
-      "expires_in_seconds": 3600
-    },
     "truncation": {
       "omitted_rows": 0,
       "omitted_columns": 0,

@@ -3,7 +3,6 @@
     "job_id": "12345678901234567890123456789013",
     "status": "succeeded",
     "result_kind": "table",
-    "lifetime": {},
     "outputs": {
       "summary": {
         "metadata": {

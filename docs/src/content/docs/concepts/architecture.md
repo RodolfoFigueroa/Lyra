@@ -60,7 +60,7 @@ Lyra gives handlers independent parameter models and returns independent values 
 
 The worker saves validated output values in SQLite. It commits the result description and execution report together under the job ID you received at submission. Each submission gets a fresh ID, even when every node reuses cached values.
 
-Once SQLite commits, you can read the description, report, and named tables by job ID. These reads work even if the worker stops before RQ records success. When the queue record expires, you lose access to job status and job-result downloads. The retained data stays available.
+Once SQLite commits, you can read the description, report, and named tables by job ID. These reads work even if the worker stops before RQ records success. SQLite also serves terminal job status and result downloads.
 
 ## Know each component’s responsibility
 
@@ -77,8 +77,8 @@ Use this table to identify which component handles discovery, execution, or resu
 | `lyra.api` | Synchronous and asynchronous HTTP clients and the administrative command-line interface |
 | `lyra.utils` | Date and geometry helpers, plus Earth Engine helpers with the `earth-engine` extra |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
-| Redis | The job queue, registries, job metadata, and completion records |
-| SQLite | Shared immutable values, completion, schemas, and final-result descriptions |
+| Redis | Dispatch, live job and worker state, and temporary failure diagnostics |
+| SQLite | Shared immutable values, terminal job history, schemas, reports, and final-result descriptions |
 | PostGIS | Optional plugin-owned spatial data and queries |
 | Model Context Protocol (MCP) adapter | Agent tools using the same submission and result services |
 

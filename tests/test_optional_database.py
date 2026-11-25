@@ -39,7 +39,12 @@ def test_api_lifecycle_serves_readiness(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
     app = main.create_app(config, credentials=api_credentials())
     with TestClient(app) as client:
-        assert set(client.get("/ready").json()) == {"status", "api_version", "redis"}
+        assert set(client.get("/ready").json()) == {
+            "status",
+            "api_version",
+            "redis",
+            "sqlite",
+        }
 
 
 @pytest.mark.parametrize("healthy", [True, False])
@@ -50,7 +55,8 @@ def test_readiness(tmp_path: Path, *, healthy: bool) -> None:
     response = Response()
     result = asyncio.run(readiness(response, runtime))
     assert result.redis.status == ("ok" if healthy else "unavailable")
-    assert response.status_code == (200 if healthy else 503)
+    assert response.status_code == 200
+    assert result.status == ("ready" if healthy else "degraded")
 
 
 def test_worker_context_creates_scratch_directory(

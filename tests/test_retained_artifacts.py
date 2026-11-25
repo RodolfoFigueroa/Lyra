@@ -3,10 +3,13 @@
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
-from rq.job import JobStatus
+from redis.exceptions import RedisError
+from rq import Worker
+from rq.job import Job, JobStatus
 from sqlalchemy.sql.dml import Insert
 
 from lyra.runtime.execution import GraphExecutionError
@@ -15,6 +18,7 @@ from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server import job_store, worker
 from lyra.server.results import ResultService
+from lyra.server.worker_launcher import JsonWorker
 from tests.local_persistence_helpers import definition
 from tests.queue_helpers import accepted_envelope
 from tests.sqlite_helpers import Database, database
@@ -57,14 +61,14 @@ def test_jobs_share_values_with_local_and_survive_expiry(
     path.touch()
     running = runtime.jobs.read_status(native.id)
     assert running is not None
-    assert running.status == "running"
+    assert running.status == "succeeded"
     assert_committed(runtime.results, native.id)
     native.get_status.return_value = JobStatus.FINISHED
     observed = runtime.jobs.read_job(native.id)
     assert observed is not None
     assert observed.snapshot.job_id == second["job_id"]
     monkeypatch.setattr(runtime.jobs.connection, "ttl", Mock(return_value=-2))
-    assert runtime.jobs.read_status(native.id) is None
+    assert runtime.jobs.read_status(native.id) == running
     assert_committed(runtime.results, native.id)
     # A restart and changed cache policy cannot remove previously published results.
     install_definitions(
@@ -80,7 +84,7 @@ def test_jobs_share_values_with_local_and_survive_expiry(
     assert database.engine.dispose.call_count >= 5
 
 
-@pytest.mark.parametrize("failure", ["value", "description"])
+@pytest.mark.parametrize("failure", ["value", "description", "terminal"])
 def test_required_publication_failure_fails_job_and_closes_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database, failure: str
 ) -> None:
@@ -88,10 +92,20 @@ def test_required_publication_failure_fails_job_and_closes_store(
     native = native_job(monkeypatch)
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     execute = database.execute
-    table = "stored_results" if failure == "value" else "final_results"
+    table = {
+        "value": "stored_results",
+        "description": "final_results",
+        "terminal": "terminal_jobs",
+    }[failure]
 
     def inject(statement: object, parameters: object = None) -> object:
-        if isinstance(statement, Insert) and statement.table.name == table:
+        if (
+            isinstance(statement, Insert)
+            and statement.table.name == table
+            and not (
+                isinstance(parameters, dict) and parameters.get("status") == "failed"
+            )
+        ):
             msg = "full"
             raise OSError(msg)
         return execute(statement, parameters)
@@ -102,7 +116,9 @@ def test_required_publication_failure_fails_job_and_closes_store(
     assert native.meta["failure"]["error"]["type"] == "worker"
     assert not native.meta["execution"]["succeeded"]
     assert not database.rows.get("final_results")
-    database.engine.dispose.assert_called_once()
+    assert [row["status"] for row in database.rows["terminal_jobs"]] == ["failed"]
+    # Both the executor store and the independent failure transaction closed.
+    assert database.engine.dispose.call_count == 2
 
 
 def assert_retained(path: Path, refs: list) -> None:
@@ -124,3 +140,69 @@ def assert_committed(service: ResultService, job_id: str) -> None:
     assert service.read_report(job_id).job_id == job_id
     assert service.read_description(job_id).job_id == job_id
     assert b"".join(service.stream_table(job_id, "answer"))
+
+
+def test_admin_history_during_redis_outage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
+    _, runtime = install_definitions(tmp_path, monkeypatch, {"plugin": definition([])})
+    outage = Mock(side_effect=RedisError("offline"))
+    monkeypatch.setattr(job_store.Job, "fetch", outage)
+    now = datetime.now(UTC)
+    ids = ["1" * 32, "2" * 32, "3" * 32]
+    for job_id in ids:
+        native = native_job(monkeypatch, job_id=job_id)
+        native.ended_at = now
+        envelope = accepted_envelope(job_id=job_id, metric="root", inputs={})
+        native.args = (envelope.model_dump(mode="json"),)
+        if job_id == ids[2]:
+            native.origin = "another-queue"
+        worker.run_metric_task(native.args[0])
+        # A supervisor may report a dead worker after SQLite committed success.
+        worker.retain_rq_failure(cast("Job", native))
+    page = runtime.jobs.list_job_statuses(status="succeeded", limit=1, offset=1)
+    assert [job.job_id for job in page] == ids[:1]
+    assert len(database.rows["terminal_jobs"]) == len(ids)
+    detail = runtime.jobs.get_job_detail(ids[1])
+    assert detail is not None
+    assert detail.snapshot.status == "succeeded"
+    outage.assert_not_called()
+    with pytest.raises(RedisError):
+        runtime.jobs.read_job("9" * 32)
+
+
+def test_recover_failed_worker_during_maintenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
+    _, runtime = install_definitions(tmp_path, monkeypatch, {"plugin": definition([])})
+    native = native_job(monkeypatch)
+    envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
+    native.args = (envelope.model_dump(mode="json"),)
+    native.connection = Mock()
+    supervisor = Mock(
+        spec=JsonWorker,
+        connection=native.connection,
+        queues=[SimpleNamespace(name=native.origin)],
+    )
+    native.connection.sscan_iter.return_value = [native.id.encode()]
+    monkeypatch.setattr(Worker, "handle_job_failure", Mock())
+    monkeypatch.setattr(Worker, "clean_registries", Mock())
+    monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=native))
+    database.fail_commit = True
+    JsonWorker.handle_job_failure(supervisor, cast("Job", native), supervisor.queues[0])
+    assert not database.rows.get("terminal_jobs")
+    native.connection.sadd.assert_called_once_with(
+        f"lyra:pending-failures:{native.origin}", native.id
+    )
+    database.fail_commit = False
+    JsonWorker.clean_registries(supervisor)
+    native.connection.srem.assert_called_once()
+    monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=RedisError))
+    detail = runtime.jobs.get_job_detail(native.id)
+    assert detail is not None
+    assert detail.snapshot.status == "failed"
+    assert detail.snapshot.error == {
+        "type": "worker",
+        "message": "Job execution failed.",
+    }
+    assert detail.failure_diagnostics is None

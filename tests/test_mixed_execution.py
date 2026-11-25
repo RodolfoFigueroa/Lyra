@@ -587,6 +587,8 @@ def test_worker_retains_invocation_context_without_acquisition_secrets(
 ) -> None:
     native = SimpleNamespace(
         id=TEST_JOB_ID,
+        started_at=None,
+        ended_at=None,
         worker_name="worker",
         meta={},
         save_meta=Mock(),

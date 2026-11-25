@@ -76,7 +76,7 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
    docker compose logs --tail=100 api worker
    ```
 
-   Expect HTTP 200 from both endpoints. A successful `/live` check means the API is running. A successful `/ready` check means it can reach Redis.
+   Expect HTTP 200 from both endpoints. A successful `/live` check means the API is running. A successful `/ready` check means SQLite is readable. Inspect the Redis field to confirm queue availability.
 
    Check for active workers from the API container, where Compose sets the administrator key.
 

@@ -168,13 +168,15 @@ def test_bulk_matches_single_after_queue_expiry(
     monkeypatch.setattr(
         retained.service.jobs,
         "get_job_status_async",
-        AsyncMock(side_effect=[status, None]),
+        AsyncMock(return_value=status),
     )
     with native_api.serve(retained.public, monkeypatch), native_api.connect() as client:
         frames = native_api.resolve(client.results.tables(job_id))
         single = native_api.resolve(client.results.table(job_id, "rows"))
-        with pytest.raises(DownloadError, match="HTTP 404"):
-            native_api.resolve(client.results.tables(job_id))
+        repeated = native_api.resolve(client.results.tables(job_id))
+        pd.testing.assert_frame_equal(
+            frames["rows"], repeated["rows"], check_exact=True
+        )
     assert list(frames) == ["rows"]
     bulk = frames["rows"]
     pd.testing.assert_frame_equal(bulk, single, check_exact=True)

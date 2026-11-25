@@ -164,7 +164,7 @@ Read these fields directly from `structuredContent`:
 - `output_name`: identifies the selected table
 - `download_url`: gives the complete download address, including your deployment’s public path prefix
 
-Fetch `download_url` with your agent Bearer credential and save the response bytes unchanged. Read the saved Arrow stream with [PyArrow or GeoPandas](../rest-api/#download-a-retained-table), regardless of filename. You can download the table after job expiry while Lyra retains the result.
+Fetch `download_url` with your agent Bearer credential and save the response bytes unchanged. Read the saved Arrow stream with [PyArrow or GeoPandas](../rest-api/#download-a-retained-table), regardless of filename. You can download the table after queue expiry while Lyra retains the result.
 
 The tool checks that the output exists. MCP limits the link response to 65,536 bytes, including both response representations and the envelope.
 
@@ -181,16 +181,16 @@ Each lookup error includes `job_id` and the requested `output_name`. Missing or 
 
 ## Handle unavailable job results
 
-An unavailable result can mean that work is still active, retained data has expired, or execution failed. Use the error code to distinguish these cases:
+An unavailable result can mean that work is still active, the job ID is unknown, or execution failed. Use the error code to distinguish these cases:
 
 | Error | Meaning |
 | --- | --- |
-| `result_not_found` | The job ID is unknown or expired |
+| `result_not_found` | The job ID is unknown |
 | `result_observation_error` | Required retained job data is missing, corrupt, or inconsistent |
 | `result_not_ready` | You requested a download while the job was active |
 | `result_not_downloadable` | The job failed |
 
-Save `job_id` when submitting the job. Use these tools after job expiry:
+Save `job_id` when submitting the job. Use these tools after queue expiry:
 
 | Task | Tool |
 | --- | --- |

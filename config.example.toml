@@ -37,7 +37,9 @@ level = "INFO"
 # queue = "lyra"
 execution_timeout_seconds = 18000
 progress_min_interval_ms = 1000
-result_retention_seconds = 86400
+
+# Native RQ records and admin tracebacks are retained for this period.
+rq_retention_seconds = 86400
 
 
 [mcp]

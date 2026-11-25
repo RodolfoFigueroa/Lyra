@@ -3,10 +3,10 @@
 from unittest.mock import AsyncMock, Mock
 
 from lyra.contracts.config import LyraConfig
-from lyra.server.job_store import JobStore
 from lyra.server.registry import Catalog
 from lyra.server.results import ResultService
 from lyra.server.runtime import ApplicationRuntime
+from lyra.server.terminal_jobs import ServerJobStore
 from tests.config_helpers import api_credentials
 
 
@@ -15,7 +15,7 @@ def make_runtime(
 ) -> ApplicationRuntime:
     connection = Mock()
     asynchronous = Mock(aclose=AsyncMock(), ping=AsyncMock(return_value=True))
-    jobs = JobStore(connection, config.jobs)
+    jobs = ServerJobStore(connection, config.jobs, config.result_store_path)
     return ApplicationRuntime(
         config=config,
         catalog=catalog

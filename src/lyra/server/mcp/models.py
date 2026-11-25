@@ -8,7 +8,6 @@ from lyra.contracts.discovery import MetricSummary
 from lyra.contracts.inspection import ResultInspection
 from lyra.contracts.jobs import (
     JobId,
-    ResultLifetime,
 )
 from lyra.contracts.references import RetrievalName
 from lyra.contracts.strict import StrictBaseModel
@@ -175,7 +174,7 @@ class LyraAPIHandoffOutput(MCPContractModel):
 
 
 class DownloadResultOutput(MCPContractModel):
-    """Return authenticated download instructions and result lifetime."""
+    """Return authenticated download instructions for a completed job."""
 
     model_config = ConfigDict(str_strip_whitespace=False)
 
@@ -183,7 +182,6 @@ class DownloadResultOutput(MCPContractModel):
     status: Literal["succeeded"] = "succeeded"
     format: Literal["json"]
     media_type: str
-    lifetime: ResultLifetime
     lyra_api: LyraAPIHandoffOutput
 
 

@@ -315,7 +315,7 @@ async def _observation_for_job(job_id: str, backend: LyraMCPBackend) -> JobObser
     if observation is None:
         _raise_tool_error(
             "result_not_found",
-            "This job is unknown or expired.",
+            "This job is unknown.",
             {"job_id": job_id},
         )
     return observation
@@ -359,7 +359,6 @@ async def download_result(
             job_id=job_id,
             format="json",
             media_type="application/json",
-            lifetime=observation.lifetime.model_copy(deep=True),
             lyra_api=handoff(public_api_base_url, job_id, "download"),
         )
 

@@ -39,7 +39,7 @@ from lyra.server.mcp.tools import (
 )
 from tests.config_helpers import api_credentials, load_test_config
 from tests.job_id_helpers import TEST_JOB_ID
-from tests.retained_job_helpers import retain
+from tests.retained_job_helpers import publish_terminal, retain
 from tests.retained_table_helpers import retained_service
 from tests.runtime_helpers import make_runtime
 from tests.sqlite_helpers import Database, database, schema_database
@@ -121,6 +121,8 @@ def stored(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
     status: JobStatus = JobStatus.FINISHED,
+    *,
+    durable: bool = True,
 ) -> SimpleNamespace:
     runtime = app.state.runtime
     job = retain(
@@ -137,6 +139,8 @@ def stored(
     )
     job.origin, job.worker_name = "interactive", "worker"
     job.latest_result.return_value.exc_string = "diagnostics"
+    if durable and status in {JobStatus.FINISHED, JobStatus.FAILED}:
+        publish_terminal(runtime.config.result_store_path, job)
     return job
 
 
@@ -176,7 +180,7 @@ async def test_lifecycle(
 
 
 def damage_storage(app: FastAPI, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
-    job = stored(app, monkeypatch)
+    job = stored(app, monkeypatch, durable=damage == "table")
     if damage == "missing":
         monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=NoSuchJobError))
     elif damage == "expired":
@@ -489,14 +493,13 @@ async def test_native_lookup_preserves_absence_across_transports(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    "record", [{"job_id": TEST_JOB_ID}, {}, {"job_id": "bad"}, {"job_id": "f" * 32}]
-)
-async def test_job_download_handoff_uses_only_queue_record(
-    app: FastAPI, monkeypatch: pytest.MonkeyPatch, record: dict[str, str]
+async def test_download_handoff_survives_queue_loss(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    job = stored(app, monkeypatch)
-    job.latest_result.return_value.return_value = record
+    stored(app, monkeypatch)
+    monkeypatch.setattr(
+        job_store.Job, "fetch", Mock(side_effect=AssertionError("Redis read"))
+    )
     monkeypatch.setattr(
         ResultStore,
         "open",
@@ -508,17 +511,11 @@ async def test_job_download_handoff_uses_only_queue_record(
         backend,
         public_api_base_url="https://example.test/api",
     )
-    if record.get("job_id") == TEST_JOB_ID:
-        descriptor = await handoff
-        assert descriptor.lifetime.expires_in_seconds == 60
-        assert (
-            descriptor.lyra_api.url
-            == f"https://example.test/api/jobs/{TEST_JOB_ID}/result/download"
-        )
-    else:
-        with pytest.raises(ToolCallError) as failure:
-            await handoff
-        assert failure.value.code == "result_observation_error"
+    descriptor = await handoff
+    assert (
+        descriptor.lyra_api.url
+        == f"https://example.test/api/jobs/{TEST_JOB_ID}/result/download"
+    )
 
 
 @pytest.mark.anyio

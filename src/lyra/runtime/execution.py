@@ -79,6 +79,8 @@ from lyra.sdk.storage_schema import empty_frame
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping, Sequence
 
+    import sqlalchemy as sa
+
     from lyra.contracts.interventions import AcceptedIntervention
     from lyra.contracts.locations import LocationContractReference
     from lyra.contracts.metric_scope import OutputScope
@@ -300,6 +302,9 @@ class GraphExecutor:
     retained_providers: frozenset[str] = field(default=frozenset(), kw_only=True)
 
     retain_result: bool = field(default=False, kw_only=True)
+    on_publish: Callable[[sa.Connection, ExecutionObservations], None] | None = field(
+        default=None, kw_only=True
+    )
 
     @property
     def graph(self) -> PluginGraph:
@@ -1275,8 +1280,20 @@ class GraphExecutor:
                 else InputBindings(),
             )
             report = completed.report.complete()
+
+            def publish_job(connection: sa.Connection) -> None:
+                if self.on_publish is not None:
+                    self.on_publish(
+                        connection,
+                        ExecutionObservations(
+                            tuple(completed.native_inputs),
+                            tuple(completed.observations),
+                            succeeded=True,
+                        ),
+                    )
+
             projection = _ResultPublication(store).publish_metadata(
-                description, report, registrations
+                description, report, registrations, publish_job
             )
             metadata.location_inputs = projection.location_inputs
             completed.committed_report = report

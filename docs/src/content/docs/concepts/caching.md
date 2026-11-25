@@ -144,4 +144,4 @@ Each run gets a fresh job ID, even for an empty result or a full cache hit. Diff
 
 Lyra saves intermediate values when it needs them for caching or retrieval. It can find a cached value without reading an earlier job’s report.
 
-Queue expiry ends access to job status and job-based JSON downloads. The [SQLite store](../../operate/caching/#preserve-stored-results) retains published data across queue expiry and cache policy or key changes. Keep the job ID for remote reads. For [local reads](../../use/results/#reopen-a-local-result), also save the store path.
+SQLite serves terminal job status and job-based JSON downloads. The [SQLite store](../../operate/caching/#preserve-stored-results) retains published data across queue expiry and cache policy or key changes. Keep the job ID for remote reads. For [local reads](../../use/results/#reopen-a-local-result), also save the store path.

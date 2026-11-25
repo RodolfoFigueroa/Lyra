@@ -31,6 +31,9 @@ class BoundWorkerSuite:
         """Bind the selected workload to temporary storage and fake job services."""
         self.native = SimpleNamespace(
             id=new_job_id(),
+            origin="lyra",
+            started_at=None,
+            ended_at=None,
             worker_name="benchmark",
             meta={},
             save_meta=Mock(),

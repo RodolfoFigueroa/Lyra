@@ -82,7 +82,21 @@ class Database:
                     if any(old["job_id"] == row["job_id"] for old in existing):
                         msg = "Duplicate job ID"
                         raise ValueError(msg)
-            existing.extend(deepcopy(batch))
+            if statement.table.name == "terminal_jobs":
+                conflict = str(statement.compile())
+                for row in batch:
+                    found = next(
+                        (item for item in existing if item["job_id"] == row["job_id"]),
+                        None,
+                    )
+                    if found is None:
+                        existing.append(deepcopy(row))
+                    elif "DO UPDATE SET" in conflict:
+                        found.update(deepcopy(row))
+                    else:
+                        assert "DO NOTHING" in conflict
+            else:
+                existing.extend(deepcopy(batch))
         elif isinstance(statement, sa.sql.Select):
             rows = select_rows(statement, self.rows)
             result.mappings.return_value.__iter__.return_value = iter(deepcopy(rows))
@@ -109,9 +123,13 @@ def select_rows(statement: sa.Select, tables: dict[str, list[dict]]) -> list[dic
     compiled = statement.compile()
     # Evaluate column expressions against the logical keys in the fake rows.
     order = statement._order_by_clauses  # ruff: ignore[private-member-access]
-    if order:
+    for item in reversed(order):
+        descending = (
+            isinstance(item, UnaryExpression) and item.modifier is operators.desc_op
+        )
+        key = item.element if descending else item
         rows = sorted(
-            rows, key=lambda row: tuple(evaluate(column, row) for column in order)
+            rows, key=lambda row, key=key: (evaluate(key, row),), reverse=descending
         )
     aggregate = any(
         isinstance(column, Label) and isinstance(column.element, Function)
@@ -130,7 +148,9 @@ def select_rows(statement: sa.Select, tables: dict[str, list[dict]]) -> list[dic
     limit = compiled.limit_clause(statement).strip()
     if limit:
         assert limit.startswith("LIMIT :")
-        rows = rows[: compiled.params[limit.removeprefix("LIMIT :")]]
+        count, _, start = limit.removeprefix("LIMIT :").partition(" OFFSET :")
+        offset = compiled.params[start] if start else 0
+        rows = rows[offset : offset + compiled.params[count]]
     return rows
 
 

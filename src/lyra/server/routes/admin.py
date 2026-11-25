@@ -166,7 +166,7 @@ def get_status(runtime: RuntimeDependency) -> AdminStatusResponse:
         metric_count=len(runtime.catalog.get_loaded_metric_names()),
         queue=config.jobs.queue,
         worker_concurrency=config.worker.concurrency,
-        result_retention_seconds=config.jobs.result_retention_seconds,
+        rq_retention_seconds=config.jobs.rq_retention_seconds,
         catalog_fingerprint=runtime.catalog.operational_fingerprint,
     )
 
@@ -184,7 +184,7 @@ def get_config_summary(runtime: RuntimeDependency) -> ConfigSummaryResponse:
         api_port=config.api.port,
         queue=config.jobs.queue,
         worker=_worker_config_summary(config),
-        result_retention_seconds=config.jobs.result_retention_seconds,
+        rq_retention_seconds=config.jobs.rq_retention_seconds,
     )
 
 
@@ -246,10 +246,10 @@ def list_jobs(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> JobListResponse:
-    """Read one native queue/status page without registry cleanup.
+    """List live jobs in queue order or completed jobs by completion time.
 
     Returns:
-        Retained jobs from the requested native page.
+        One page of jobs matching the requested status.
     """
     return JobListResponse(
         jobs=runtime.jobs.list_job_statuses(
@@ -265,7 +265,7 @@ def get_job(job_id: JobId, runtime: RuntimeDependency) -> AdminJobDetail:
     """Return native job diagnostics to authenticated administrators.
 
     Raises:
-        HTTPException: If the job expired or does not exist.
+        HTTPException: If the job does not exist.
         InvalidJobResultHTTPError: If required stored job data is invalid.
     """
     try:
@@ -273,5 +273,5 @@ def get_job(job_id: JobId, runtime: RuntimeDependency) -> AdminJobDetail:
     except InvalidJobResultError as exc:
         raise InvalidJobResultHTTPError from exc
     if detail is None:
-        raise HTTPException(status_code=404, detail="Job expired or not found")
+        raise HTTPException(status_code=404, detail="Job not found")
     return detail

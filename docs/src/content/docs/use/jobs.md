@@ -33,7 +33,7 @@ For result requests, use the HTTP response to choose your next action:
 | Succeeded with a valid result | `200` with the result or inspection | Use the result |
 | Failed | `200` with failure details or an inspection | Read the error before deciding whether to run again |
 | Succeeded, but required result data is missing or corrupt | `500` with a generic error message and `retryable: false` | Report a stored-result integrity failure; you can still check job status |
-| Job absent or expired | `404` | Stop checking; status is also unavailable |
+| Job absent | `404` | Stop checking; status is also unavailable |
 
 Downloads include `Content-Disposition: attachment` only after the job succeeds or fails. Pending responses contain status information without an attachment header.
 

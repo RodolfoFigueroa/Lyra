@@ -151,7 +151,6 @@ def project_observation(
             if provenance
             else snapshot.metric,
             "completed_at": snapshot.completed_at,
-            "lifetime": observation.lifetime,
             "download": f"/{job_path(job_id)}/result/download",
             "error": _error_details(error, truncation),
             "truncation": truncation,

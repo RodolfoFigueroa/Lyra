@@ -152,7 +152,6 @@ The tool call succeeds (`isError: false`) even when it reports a failed job.
     "job_id": "12345678901234567890123456789014",
     "status": "failed",
     "result_kind": "failed",
-    "lifetime": {},
     "download": "/jobs/12345678901234567890123456789014/result/download",
     "error": {
       "message": "Execution failed"
@@ -175,7 +174,7 @@ A tool error reports `result_not_found` with `isError: true`.
 {
   "error": {
     "code": "result_not_found",
-    "message": "This job is unknown or expired.",
+    "message": "This job is unknown.",
     "details": {
       "job_id": "12345678901234567890123456789015"
     }
@@ -195,9 +194,6 @@ For a successful job, the download handoff returns a URL and authentication inst
   "status": "succeeded",
   "format": "json",
   "media_type": "application/json",
-  "lifetime": {
-    "expires_in_seconds": 3600
-  },
   "lyra_api": {
     "method": "GET",
     "url": "https://lyra.example/api/jobs/12345678901234567890123456789012/result/download",

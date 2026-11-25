@@ -30,7 +30,7 @@ If storage or publication fails, the attempt fails even when calculation finishe
 
 Lyra retains stored values, result descriptions, and reports indefinitely within a supported store. Job expiry, worker restarts, and changes to cache keys or policies don’t delete them. Plan for storage growth: Lyra doesn’t automatically remove old data.
 
-After queue expiry, use the job ID to [read retained results through the API](../../use/results/#keep-access-after-job-expiry). With filesystem access, you can also [open the store locally](../../use/results/#reopen-a-local-result). Local reads need no plugins or provider connections.
+After queue expiry, use the job ID to [read retained results through the API](../../use/results/#keep-access-after-queue-expiry). With filesystem access, you can also [open the store locally](../../use/results/#reopen-a-local-result). Local reads need no plugins or provider connections.
 
 Retention applies while the store’s schema remains compatible with your Lyra version. Closed alpha doesn’t promise migrations or readers for incompatible stores; you can explicitly reset a development store if needed.
 

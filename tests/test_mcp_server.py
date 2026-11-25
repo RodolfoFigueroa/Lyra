@@ -38,7 +38,6 @@ from lyra.contracts.jobs import (
     JobLinks,
     JobProgress,
     JobStatusInfo,
-    ResultLifetime,
     TableJobResult,
 )
 from lyra.contracts.locations import LocationSelection
@@ -89,7 +88,7 @@ from tests.mcp_helpers import (
 from tests.provenance_helpers import result_provenance
 from tests.queue_helpers import submitted_input
 from tests.result_helpers import result_observation
-from tests.retained_job_helpers import retain
+from tests.retained_job_helpers import publish_terminal, retain
 
 FIRST_JOB_ID = f"{1:032x}"
 SECOND_JOB_ID = f"{2:032x}"
@@ -1458,14 +1457,12 @@ def test_json_download_handoff() -> None:
                 "output_metadata": {"one": {"columns": []}, "two": {"columns": []}},
             }
         ),
-        lifetime=ResultLifetime(expires_in_seconds=60),
     )
     wire = _inspect(backend, job_id, tool="lyra_download_result")
     assert wire["isError"] is False
     payload = wire["structuredContent"]
     assert payload["format"] == "json"
     assert payload["media_type"] == "application/json"
-    assert payload["lifetime"]["expires_in_seconds"] == 60
     assert payload["lyra_api"]["url"].endswith(f"{job_id}/result/download")
     assert payload["lyra_api"]["authentication"] == {
         "scheme": "Bearer",
@@ -2506,7 +2503,6 @@ def test_direct_job_operations_and_mutation_isolation() -> None:
         result = await tools.get_job_result(GetJobResultInput(job_id=job_id), backend)
         assert isinstance(result, TerminalResultOutput)
         original = result.model_dump(mode="json")
-        result.lifetime.expires_in_seconds = 0
         result.outputs.clear()
         download = await tools.download_result(
             JobIdInput(job_id=job_id),
@@ -2514,7 +2510,6 @@ def test_direct_job_operations_and_mutation_isolation() -> None:
             public_api_base_url="https://example.test",
         )
         assert download.lyra_api.url.endswith(f"/jobs/{job_id}/result/download")
-        download.lifetime.expires_in_seconds = 0
         repeated = await tools.get_job_result(GetJobResultInput(job_id=job_id), backend)
         assert repeated.model_dump(mode="json") == original
         assert backend.observations[job_id] is before
@@ -2810,6 +2805,9 @@ def test_official_client_mounted_job_workflow(
                 (terminal, "succeeded" if terminal == JobStatus.FINISHED else "failed"),
             ):
                 job.get_status.return_value = state
+                if state in {JobStatus.FINISHED, JobStatus.FAILED}:
+                    job.origin, job.worker_name = runtime.config.jobs.queue, "worker"
+                    publish_terminal(config.result_store_path, job)
                 inspection = await call("lyra_get_job_result", {"job_id": job_id})
                 assert inspection["result"]["status"] == expected
                 response = await http.get(f"/jobs/{job_id}")

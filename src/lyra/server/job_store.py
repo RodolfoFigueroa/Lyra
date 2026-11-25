@@ -21,7 +21,6 @@ from lyra.contracts.jobs import (
     JobProgress,
     JobRunProvenance,
     JobStatusInfo,
-    ResultLifetime,
 )
 from lyra.contracts.references import validate_job_id
 from lyra.contracts.strict import StrictBaseModel
@@ -47,7 +46,6 @@ class JobObservation:
     inspection: dict[str, Any] | None = None
     declarations: dict[str, "OutputMetadata"] = field(default_factory=dict)
     provenance: JobRunProvenance | None = None
-    lifetime: ResultLifetime = field(default_factory=ResultLifetime)
 
 
 def is_terminal_status(status: JobLifecycleStatus) -> bool:
@@ -82,8 +80,8 @@ class JobStore:
             args=(envelope.model_dump(mode="json"),),
             job_id=envelope.job_id,
             timeout=settings.execution_timeout_seconds,
-            result_ttl=settings.result_retention_seconds,
-            failure_ttl=settings.result_retention_seconds,
+            result_ttl=settings.rq_retention_seconds,
+            failure_ttl=settings.rq_retention_seconds,
             meta={},
         )
 
@@ -142,7 +140,6 @@ class JobStore:
                 progress=progress,
             ),
             provenance=provenance,
-            lifetime=ResultLifetime(expires_in_seconds=ttl if ttl >= 0 else None),
         )
 
     @staticmethod
@@ -199,8 +196,7 @@ class JobStore:
 
     def read_status(self, job_id: str) -> JobStatusInfo | None:
         """Return queue status without reading retained tables or reports."""
-        job = self._fetch(job_id)
-        observation = self._observation(job) if job else None
+        observation = self.read_job(job_id)
         return observation.snapshot if observation else None
 
     async def get_job_status_async(self, job_id: str) -> JobStatusInfo | None:

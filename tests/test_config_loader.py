@@ -47,7 +47,7 @@ level = "INFO"
 file = {_q(base / "logs" / "lyra.log")}
 
 [jobs]
-result_retention_seconds = 86400
+rq_retention_seconds = 86400
 
 [plugins]
 

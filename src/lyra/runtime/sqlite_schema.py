@@ -235,6 +235,20 @@ class Layout:
             sa.Column("registration_key", sa.Text, primary_key=True),
             sa.Column("description", sa.Text, nullable=False),
         )
+        self.terminal_jobs = sa.Table(
+            "terminal_jobs",
+            self.metadata,
+            sa.Column("job_id", sa.Text, primary_key=True),
+            sa.Column("queue", sa.Text, nullable=False),
+            sa.Column("status", sa.Text, nullable=False),
+            sa.Column("completed_at", sa.Text, nullable=False),
+            sa.Column("worker_id", sa.Text),
+            sa.Column("snapshot", sa.Text, nullable=False),
+            sa.Column("provenance", sa.Text, nullable=False),
+            sa.Index(
+                "terminal_jobs_history", "queue", "status", "completed_at", "job_id"
+            ),
+        )
         self.final_results = sa.Table(
             "final_results",
             self.metadata,

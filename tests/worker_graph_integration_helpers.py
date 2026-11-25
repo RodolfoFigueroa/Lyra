@@ -73,6 +73,8 @@ def native_job(
     native = SimpleNamespace(
         id=job_id or new_job_id(),
         origin=worker.require_worker_config().jobs.queue,
+        started_at=None,
+        ended_at=None,
         worker_name="fake-worker",
         meta={},
         save_meta=Mock(),

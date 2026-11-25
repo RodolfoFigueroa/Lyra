@@ -11,7 +11,6 @@ from redis.exceptions import RedisError
 from rq import get_current_job
 from rq.job import Job
 
-from lyra.contracts.accepted import WorkerRequest
 from lyra.contracts.config import JobsConfig, LyraConfig
 from lyra.contracts.errors import (
     LocationAcquisitionError,
@@ -26,6 +25,7 @@ from lyra.contracts.jobs import (
     FailedJobResult,
     JobEnvelope,
     JobProgress,
+    JobRunProvenance,
 )
 from lyra.contracts.references import validate_job_id
 from lyra.contracts.types import JsonObject
@@ -40,6 +40,7 @@ from lyra.runtime.provider_records import ProviderRecords
 from lyra.runtime.report_collection import ReportCollection
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server.registry import Catalog
+from lyra.server.terminal_jobs import job_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +307,8 @@ def run_metric_task(envelope_payload: JsonObject) -> JsonObject:
     except Exception as exc:
         logger.exception("Graph job %s failed", native.id)
         _save_failure(native.id, exc)
+        if persist_failed_job(native, envelope_payload):
+            native.meta["outcome_recorded"] = True
         raise
 
 
@@ -327,7 +330,7 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
     if job.accepted.plan.build_revision != runtime.catalog.compiled.build_revision:
         message = "deployment_changed: resubmit against the current deployment"
         raise DeploymentChangedError(message)
-    return _execute_bound_job(job.accepted.plan, native, runtime)
+    return _execute_bound_job(job, native, runtime)
 
 
 def require_worker_config() -> LyraConfig:
@@ -344,7 +347,7 @@ class BoundPlanError(ValueError):
 
 
 def _execute_bound_job(
-    plan: WorkerRequest, native: Job, runtime: WorkerRuntime
+    job: JobEnvelope, native: Job, runtime: WorkerRuntime
 ) -> JsonObject:
     """Prepare normalized values against the compatible live worker catalog.
 
@@ -355,6 +358,7 @@ def _execute_bound_job(
         BoundPlanError: If this installation cannot honor the accepted computation.
         RuntimeError: If execution did not publish a terminal result description.
     """
+    plan = job.accepted.plan
     try:
         live = prepare_execution(
             runtime.catalog.compiled,
@@ -394,6 +398,9 @@ def _execute_bound_job(
             runtime.config.resources,
             provider_records=ProviderRecords(store),
             retain_result=True,
+            on_publish=lambda conn, observations: job_outcome(
+                native, JobRunProvenance(accepted=job.accepted, execution=observations)
+            ).publish(conn, store.layout.terminal_jobs),
         )
         try:
             outcome = executor.execute(live, report=report)
@@ -417,3 +424,51 @@ def _capture_observations(native: Job, executor: GraphExecutor) -> None:
         native.meta["execution"] = TypeAdapter(
             type(executor.provenance.execution)
         ).dump_python(executor.provenance.execution, mode="json")
+
+
+def persist_failed_job(native: Job, payload: JsonObject | None = None) -> bool:
+    """Return whether the terminal failure was saved successfully."""
+    try:
+        _write_failed_job(native, payload)
+    except Exception:
+        logger.exception("Could not store failed job %s", native.id)
+        return False
+    return True
+
+
+def _write_failed_job(native: Job, payload: JsonObject | None) -> None:
+    envelope = JobEnvelope.model_validate(
+        native.args[0] if payload is None else payload
+    )
+    if envelope.job_id != native.id:
+        msg = "Failed job identity differs from acceptance"
+        raise ValueError(msg)
+    error = native.meta.get("failure")
+    failure = (
+        FailedJobResult.model_validate(error)
+        if error
+        else FailedJobResult(
+            job_id=native.id,
+            error={"type": "worker", "message": "Job execution failed."},
+        )
+    )
+    provenance = JobRunProvenance(
+        accepted=envelope.accepted, execution=native.meta.get("execution")
+    )
+    with (
+        SQLiteStore(require_worker_config().result_store_path) as store,
+        store.schema_transaction() as connection,
+    ):
+        job_outcome(native, provenance, failure=failure).publish(
+            connection, store.layout.terminal_jobs
+        )
+
+
+def retain_rq_failure(native: Job, *_exc_info: object) -> None:
+    """Capture RQ failures including abandoned jobs discovered by maintenance."""
+    if native.meta.get("outcome_recorded") or persist_failed_job(native):
+        return
+    try:
+        native.connection.sadd(f"lyra:pending-failures:{native.origin}", native.id)
+    except RedisError:
+        logger.exception("Could not schedule failure persistence for %s", native.id)

@@ -112,7 +112,7 @@ def executor_sqlite_boundary(
     databases: dict[Path, Database] = {}
     default_path = Path.cwd() / ".lyra/results.sqlite3"
 
-    def store(path: Path) -> SQLiteStore:
+    def store(path: Path, *, read_only: bool = False) -> SQLiteStore:
         database = (
             request.getfixturevalue("database")
             if "database" in request.fixturenames
@@ -128,7 +128,7 @@ def executor_sqlite_boundary(
                 if path in {default_path, Path.cwd() / ".lyra/results.sqlite3"}
                 else path
             )
-            return SQLiteStore(safe_path)
+            return SQLiteStore(safe_path, read_only=read_only)
 
     if request.module.__name__ in {
         "tests.test_computation_identity",
@@ -152,3 +152,6 @@ def executor_sqlite_boundary(
     monkeypatch.setattr("lyra.runtime.execution.SQLiteStore", store)
     monkeypatch.setattr("lyra.runtime.local.SQLiteStore", store)
     monkeypatch.setattr("lyra.server.worker.SQLiteStore", store)
+    monkeypatch.setattr("tests.retained_job_helpers.SQLiteStore", store)
+    monkeypatch.setattr("lyra.runtime.terminal_history.SQLiteStore", store)
+    monkeypatch.setattr("lyra.server.terminal_jobs.SQLiteStore", store)

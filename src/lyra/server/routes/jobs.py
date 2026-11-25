@@ -116,11 +116,11 @@ async def get_job(job_id: JobId, jobs: JobStoreDependency) -> JobStatusInfo:
         The current lifecycle, progress, and error metadata.
 
     Raises:
-        HTTPException: If Redis is unavailable or the job is no longer retained.
+        HTTPException: If a required store is unavailable or the job was not found.
     """
     snapshot = await _get_observed_job_status(job_id, jobs)
     if snapshot is None:
-        raise HTTPException(status_code=404, detail="Job expired or not found")
+        raise HTTPException(status_code=404, detail="Job not found")
     return snapshot
 
 
@@ -130,7 +130,7 @@ async def _result_observation(job_id: JobId, jobs: ResultService) -> JobObservat
     except InvalidJobResultError as exc:
         raise InvalidJobResultHTTPError from exc
     if observation is None:
-        raise HTTPException(status_code=404, detail="Job expired or not found")
+        raise HTTPException(status_code=404, detail="Job not found")
     return observation
 
 

@@ -856,7 +856,14 @@ def test_isolated_submission_worker_and_result_round_trip(
         "_WORKER_RUNTIME",
         worker.WorkerRuntime(catalog, config),
     )
-    native = Mock(id="55555555555555555555555555555555", origin="default", meta={})
+    native = Mock(
+        id="55555555555555555555555555555555",
+        origin="default",
+        meta={},
+        started_at=None,
+        ended_at=None,
+        worker_name="worker",
+    )
     result = worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
     outputs = read_retained(str(result["job_id"])).tables
     assert outputs["result"].total.tolist() == [1]

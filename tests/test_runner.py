@@ -318,6 +318,8 @@ def test_worker_encodes_named_outputs_without_request_identity(
         id="a" * 32,
         origin=entries.config.jobs.queue,
         meta={},
+        started_at=None,
+        ended_at=None,
         worker_name="test-worker",
         save_meta=lambda: None,
     )

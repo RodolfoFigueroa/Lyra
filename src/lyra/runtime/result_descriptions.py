@@ -29,7 +29,7 @@ from lyra.runtime.sqlite_store import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from lyra.contracts.reports import ReportNode
     from lyra.data.results import NativeOutputs
@@ -528,6 +528,7 @@ class _ResultPublication(ResultDescriptions):
         description: ResultDescription,
         report: ExecutionReport,
         registrations: tuple["Registration", ...] = (),
+        on_publish: "Callable[[sa.Connection], None] | None" = None,
     ) -> PublicResultDescription:
         """Publish the final selections and report under their job ID.
 
@@ -581,4 +582,6 @@ class _ResultPublication(ResultDescriptions):
                     "description": description.model_dump_json(),
                 },
             )
+            if on_publish is not None:
+                on_publish(connection)
         return projection

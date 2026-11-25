@@ -8,8 +8,14 @@ from pydantic import Field
 from lyra.contracts.strict import StrictBaseModel
 
 ReadinessStatus = Literal["ok", "unavailable", "unknown"]
-ServiceReadinessStatus = Literal["ready", "not_ready"]
+ServiceReadinessStatus = Literal["ready", "degraded", "not_ready"]
 WorkerObservedStatus = Literal["online", "offline", "unknown"]
+
+
+class StorageHealth(StrictBaseModel):
+    """SQLite terminal history availability."""
+
+    status: ReadinessStatus
 
 
 class RedisHealth(StrictBaseModel):
@@ -31,6 +37,7 @@ class ReadinessResponse(StrictBaseModel):
     status: ServiceReadinessStatus = Field(description="Overall API readiness state.")
     api_version: str = Field(min_length=1, description="Running Lyra API version.")
     redis: RedisHealth = Field(description="Redis readiness details.")
+    sqlite: StorageHealth
 
 
 class WorkerConfigSummary(StrictBaseModel):
@@ -47,7 +54,7 @@ class ConfigSummaryResponse(StrictBaseModel):
     api_port: int = Field(ge=1, le=65535)
     queue: str = Field(min_length=1)
     worker: WorkerConfigSummary
-    result_retention_seconds: int = Field(gt=0)
+    rq_retention_seconds: int = Field(gt=0)
 
 
 class InstalledPluginSummary(StrictBaseModel):
@@ -107,5 +114,5 @@ class AdminStatusResponse(StrictBaseModel):
     metric_count: int = Field(ge=0)
     queue: str = Field(min_length=1)
     worker_concurrency: int = Field(gt=0)
-    result_retention_seconds: int = Field(gt=0)
+    rq_retention_seconds: int = Field(gt=0)
     catalog_fingerprint: str
