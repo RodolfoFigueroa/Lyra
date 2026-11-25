@@ -73,6 +73,8 @@ jobs:
         shell: bash
         run: >-
           uv run pytest
+          -n auto
+          --durations=25
           --cov=lyra
           --cov-report=term-missing
           --cov-report=xml
