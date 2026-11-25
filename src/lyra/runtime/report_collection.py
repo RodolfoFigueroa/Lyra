@@ -91,7 +91,6 @@ class ReportCollection:
     root_use_id: str | None = field(default=None, init=False)
     uses: dict[str, ResolvedUse] = field(default_factory=dict, init=False)
     request: SubmittedRequest | None = field(default=None, init=False)
-    build_revision: str | None = field(default=None, init=False)
     descriptions: dict[str, NodeDescription] = field(default_factory=dict, init=False)
     parameter_bindings: list[ParameterBinding] = field(default_factory=list, init=False)
     _keys: dict[str, str] = field(default_factory=dict, init=False)
@@ -183,7 +182,6 @@ class ReportCollection:
             root_use_id=self.root_use_id,
             nodes=list(self.nodes),
             parameter_bindings=self.parameter_bindings,
-            build_revision=self.build_revision,
             intervention_validations=self.intervention_validations,
         )
 
@@ -256,7 +254,6 @@ class ReportCollection:
         if prepared is None:
             return
         self.request = prepared.request.model_copy(deep=True)
-        self.build_revision = prepared.build_revision
         self._capture_parameter_bindings(root, catalog)
         self._describe(root, catalog)
         for use_id, use in self.uses.items():

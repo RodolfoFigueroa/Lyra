@@ -1,0 +1,78 @@
+---
+title: Update a deployment safely
+description: Pause submissions, empty the deployment queue, and restart the API and workers after a package or configuration change.
+contentType: How-to
+contentPlan: operate/updates
+sidebar: { label: "Update a Deployment Safely" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Schedule downtime when you change production packages or configuration. Let active jobs finish, then discard waiting jobs on the deployment’s queue before starting the updated services. Keep the SQLite data volume so callers can retrieve completed results.
+
+## Choose the required update
+
+Prepare the changes for both the API and workers.
+
+| Change | What to prepare |
+| --- | --- |
+| Plugin implementation, metric declarations, or application source | Rebuild the application image. Update affected code revisions when the change affects results. |
+| Package dependency or version | Update the deployment lockfile and rebuild the image. |
+| Plugin selection or queue name | Validate the updated `lyra.toml`. |
+
+For a local plugin checkout, follow [Run a local plugin server](../../plugins/development/).
+
+## Decide whether cached computations remain valid
+
+Lyra uses [computation identities](../../concepts/caching/#keep-cached-results-current) to decide which stored values it can reuse. Update the affected node’s `code_revision` when the same inputs produce different results. When external data changes, work with the plugin author to update the [origin or provider revision](../../plugins/location-providers/#define-revision-coverage).
+
+## Stop services and empty the queue <span id="drain-and-restart"></span>
+
+Use the current deployment settings to select the queue, including when the update changes its name. The Compose commands below use the example in `examples/lyra-deployment`. Run them from that directory.
+
+<Steps>
+
+1. Pause new submissions at the proxy. Stop the API and all workers that consume the queue. Let active jobs finish during shutdown. In the example, stop both services and keep Redis running on its own.
+
+   ```sh
+   docker compose stop api worker
+   docker compose up -d redis
+   ```
+
+2. Read `redis.url` and `jobs.queue` from the current `lyra.toml`. The queue defaults to `lyra` if you omit `jobs.queue`. Check both values before continuing. **Emptying the queue discards all jobs still waiting on it.**
+
+3. Empty the queue with Redis Queue (RQ). For the example’s default settings, run the command in a one-off worker container.
+
+   ```sh
+   docker compose run --rm --no-deps worker \
+     rq empty --url redis://redis:6379/0 --serializer json lyra
+   ```
+
+   For another deployment, set the shell variables `redis_url` and `queue_name` to the values you checked. Run this command in the Lyra server environment.
+
+   ```sh
+   rq empty --url "$redis_url" --serializer json "$queue_name"
+   ```
+
+</Steps>
+
+## Restart the API and workers <span id="recreate-the-example"></span>
+
+Apply the updated configuration and deploy the same image to both services. Mount the existing data volume at its usual path and preserve the SQLite file at `result_store_path`. Ordinary service restarts preserve queued work.
+
+For the Compose example, rebuild the image and start both services.
+
+```sh
+docker compose up -d --build --wait api worker
+```
+
+## Verify before reopening traffic
+
+Reopen submissions once all checks pass.
+
+- `GET /ready` returns HTTP 200 with `status` set to `ready`.
+- The API and workers use the intended plugin versions.
+- The worker startup logs show no errors.
+- `lyra-admin queue show` lists an active worker on the configured queue.
+
+If startup fails, use the [deployment troubleshooting guide](../troubleshooting/). After correcting a catalog error, restart the API and workers to load the corrected definitions.

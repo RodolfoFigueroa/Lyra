@@ -117,7 +117,6 @@
       "audience": "Deployment operators",
       "contentPlan": [
         "Place configuration and secrets",
-        "Assign a deployment build revision",
         "Configure plugin resources",
         "Pass credentials to Python entry points",
         "Validate a configuration file",
@@ -152,8 +151,7 @@
         "Add the dependency to the deployment",
         "Select the installed distribution",
         "Configure the worker service",
-        "Develop with editable sources",
-        "Add another checkout",
+        "Run a local plugin server",
         "Enable a location provider"
       ],
       "openQuestions": []
@@ -203,14 +201,14 @@
     },
     "operate/updates": {
       "contentType": "How-to",
-      "overview": "Drain work and recreate matching API and worker processes after configuration or package changes.",
-      "goal": "Drain work and recreate matching API and worker processes after configuration or package changes",
+      "overview": "Pause submissions, empty the deployment queue, and restart the API and workers after a package or configuration change.",
+      "goal": "Deploy updated services, preserve stored results, and verify the queue before reopening submissions",
       "audience": "Deployment operators",
       "contentPlan": [
         "Choose the required update",
         "Decide whether cached computations remain valid",
-        "Drain and restart",
-        "Recreate the example",
+        "Stop services and empty the queue",
+        "Restart the API and workers",
         "Verify before reopening traffic"
       ],
       "openQuestions": []
@@ -985,12 +983,14 @@
     },
     "plugins/development": {
       "contentType": "How-to",
-      "overview": "Mount plugin checkouts and restart the API and workers after source changes.",
-      "goal": "Develop with editable sources",
+      "overview": "Run your plugin through the API and worker from an editable checkout.",
+      "goal": "Run a local plugin server",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Develop with editable sources",
-        "Add another checkout"
+        "Start the city example",
+        "Load your edits",
+        "Add another checkout",
+        "Supply plugin settings and credentials"
       ],
       "openQuestions": []
     },

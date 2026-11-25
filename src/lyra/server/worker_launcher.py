@@ -16,6 +16,7 @@ with command_imports(__name__):
     from rq.serializers import JSONSerializer
     from rq.worker_pool import WorkerPool
 
+    from lyra.contracts.config import DEFAULT_CONFIG_PATH
     from lyra.server.config import ensure_runtime_directories, load_config
     from lyra.server.db.redis import create_sync_client
     from lyra.server.logging_config import configure_logging
@@ -135,16 +136,18 @@ def build_parser() -> argparse.ArgumentParser:
     Returns:
         The worker command parser.
     """
-    return argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="python -m lyra.server.worker_launcher",
-        description="Launch a Lyra RQ worker from /lyra_data/config/lyra.toml.",
+        description="Launch a Lyra RQ worker.",
     )
+    parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
+    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Launch a configured worker from command-line arguments."""
-    build_parser().parse_args(argv)
-    launch_worker(config=load_config())
+    args = build_parser().parse_args(argv)
+    launch_worker(config=load_config(args.config))
 
 
 if __name__ == "__main__":

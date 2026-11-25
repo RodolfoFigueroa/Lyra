@@ -64,5 +64,4 @@ def publication_report(
             *sources,
         ],
         parameter_bindings=[],
-        build_revision=None,
     )

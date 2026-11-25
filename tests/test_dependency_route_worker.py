@@ -31,7 +31,7 @@ pytestmark = pytest.mark.usefixtures("worker_state")
     "change",
     ["middle_provider", "target_provider", "origin", "preference"],
 )
-def test_old_route_rejected_by_worker_with_unchanged_build(
+def test_old_route_rejected_before_lookup_and_acquisition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions())
@@ -41,12 +41,11 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
         inputs=request()["inputs"],
         catalog=runtime.catalog.compiled,
     )
-    _, current = install_definitions(
+    install_definitions(
         tmp_path,
         monkeypatch,
         definitions({change: "alternate" if change == "preference" else "2"}),
     )
-    assert current.config.build_revision == envelope.accepted.plan.build_revision
     native = native_job(monkeypatch, job_id=envelope.job_id)
     acquire = Mock(side_effect=AssertionError("acquisition"))
     lookup = Mock(side_effect=AssertionError("cache lookup"))

@@ -5,7 +5,6 @@ from yaml import safe_load
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_FILES = [
     ROOT / "docker" / "docker-compose.yml",
-    ROOT / "docker" / "docker-compose-dev.yml",
 ]
 APP_FILE_MOUNTS = [
     "${LYRA_CONFIG_FILE}:/lyra_data/config/lyra.toml:ro",

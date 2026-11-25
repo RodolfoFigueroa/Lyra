@@ -204,9 +204,6 @@ def test_split_route_loading_and_execution(
             ("alternate",),
             ("alternate", "finish"),
         )
-        runtime.config = runtime.config.model_copy(
-            update={"build_revision": "new-routing-build"}
-        )
     calls.clear()
     acquisition.reset_mock()
     worker.initialize_worker(config=runtime.config)
@@ -214,8 +211,8 @@ def test_split_route_loading_and_execution(
     acquisition.assert_not_called()
     job = native_job(monkeypatch, job_id=envelope.job_id)
     job.args = (envelope.model_dump(mode="json"),)
-    if change_preference:
-        with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
+    if change_preference and not native:
+        with pytest.raises(worker.BoundPlanError, match="Selected computation"):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert calls == []
         acquisition.assert_not_called()
@@ -249,7 +246,16 @@ def test_dependency_closure() -> None:
 
 
 @pytest.mark.parametrize(
-    "change", ["editorial", "unrelated", "alternate", "first", "helper", "provider"]
+    "change",
+    [
+        "editorial",
+        "removed_plugin",
+        "unrelated",
+        "alternate",
+        "first",
+        "helper",
+        "provider",
+    ],
 )
 def test_accepted_route_identity_across_worker_reload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
@@ -265,6 +271,8 @@ def test_accepted_route_identity_across_worker_reload(
     )
     if change == "editorial":
         plugins = definitions(calls, description="Updated explanation")
+    elif change == "removed_plugin":
+        del plugins["unrelated"]
     else:
         plugins = definitions(calls, revisions={change: "2"})
     install_definitions(tmp_path, monkeypatch, plugins)
@@ -273,21 +281,11 @@ def test_accepted_route_identity_across_worker_reload(
     acquire = Mock(wraps=Provider.setup)
     monkeypatch.setattr(Provider, "setup", acquire)
     if change in {"first", "helper", "provider"}:
-        if change == "provider":
-            expected = worker.BoundPlanError
-            failure = "bound_plan"
-        else:
-            current = worker.require_worker_config()
-            worker.initialize_worker(
-                config=current.model_copy(update={"build_revision": "replacement"}),
-            )
-            expected = worker.DeploymentChangedError
-            failure = "deployment_changed"
-        with pytest.raises(expected):
+        with pytest.raises(worker.BoundPlanError):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert calls == []
         acquire.assert_not_called()
-        assert native.meta["failure"]["error"]["type"] == failure
+        assert native.meta["failure"]["error"]["type"] == "bound_plan"
     else:
         # The fixture provider has no service connections.
         monkeypatch.setattr(Provider, "setup", lambda _self: None)

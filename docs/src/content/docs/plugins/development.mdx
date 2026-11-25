@@ -1,0 +1,52 @@
+---
+title: Run a local plugin server
+description: Run your plugin through the API and worker from an editable checkout.
+contentType: How-to
+contentPlan: plugins/development
+sidebar: { label: "Run a Local Plugin Server" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Use `lyra-plugin dev` to test your plugin through the local API and worker. The launcher installs your plugins in a separate uv environment. It uses the same Lyra checkout, Git commit, or release as your SDK.
+
+## Start the city example <span id="develop-with-editable-sources"></span>
+
+Use Linux, macOS, or Windows Subsystem for Linux (WSL). You’ll need [uv and the Lyra SDK](../../start/installation/) and a running Redis server. The launcher connects to `redis://127.0.0.1:6379/0` by default. Pass `--redis-url` to use another endpoint.
+
+<Steps>
+
+1. From the Lyra repository root, start the API and worker with the city plugin. Startup clears jobs still waiting on this checkout’s queue.
+
+   ```sh
+   cd examples/city-plugin
+   uv run lyra-plugin dev
+   ```
+
+2. Leave that terminal open for API and worker logs. In another terminal, open the credentials file at the path the launcher prints. Use `LYRA_AGENT_API_KEY` from that file to [submit a city job](../../quickstart/#set-your-connection-details) at `http://127.0.0.1:5219`.
+
+</Steps>
+
+For your own plugin, install `lyra[sdk]` in its checkout and run `uv run lyra-plugin dev` there.
+
+## Load your edits
+
+Saving a Python file leaves the running services on the code they loaded at startup. When an edit changes results for the same inputs, update the affected node’s [`code_revision`](../../concepts/caching/#keep-cached-results-current) before restarting.
+
+Press Ctrl-C once to stop submissions and let the worker finish its active job. Press Ctrl-C again if you want to interrupt that job.
+
+Rerun `uv run lyra-plugin dev` to load your edits and synchronize dependency changes. The launcher keeps the uv environment and worker scratch files in a cache directory for each checkout. Your API keys and completed SQLite results persist there across sessions.
+
+## Add another checkout
+
+Stop the session, then relaunch with `--plugin` for each additional checkout. If your provider plugin lives in `../city-providers`, start both plugins together.
+
+```sh
+uv run lyra-plugin dev --plugin ../city-providers
+```
+
+Run the command in the primary plugin’s directory, or pass its path with `--project`. For an independent session, start a different primary checkout with `--port 5220`. Each checkout has its own waiting queue on the shared Redis server.
+
+## Supply plugin settings and credentials
+
+Pass `--resources resources.toml` to load the plugin’s [resource settings and credential references](../../operate/resources/). Specify relative credential file paths from the directory containing `resources.toml`. Export any referenced environment variables before starting the session.

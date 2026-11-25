@@ -99,7 +99,6 @@ def report_payload() -> dict:
                     "target_parameter": "config",
                 }
             ],
-            "build_revision": None,
         }
     )
 
@@ -151,9 +150,7 @@ def test_report_requires_valid_job_id(value: object) -> None:
         validate_job_id(value)
 
 
-@pytest.mark.parametrize(
-    "field", ["job_id", "status", "build_revision", "request", "root_use_id"]
-)
+@pytest.mark.parametrize("field", ["job_id", "status", "request", "root_use_id"])
 def test_success_requires_complete_fields(field: str) -> None:
     raw = report_payload()
     del raw[field]

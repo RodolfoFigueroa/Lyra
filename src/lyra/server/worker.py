@@ -158,7 +158,7 @@ def initialize_worker(*, config: LyraConfig) -> WorkerRuntime:
     global _WORKER_RUNTIME  # ruff:ignore[global-statement]
 
     config = config.model_copy(deep=True)
-    catalog = Catalog.load(config.plugins, build_revision=config.build_revision)
+    catalog = Catalog.load(config.plugins)
     runtime = WorkerRuntime(catalog, config)
     set_runner_temp_base(config.worker_temp_dir())
     _WORKER_RUNTIME = runtime
@@ -243,8 +243,6 @@ def _save_failure(job_id: str, exc: Exception) -> None:
             "ids": list(exc.ids),
             "reason": type(exc).__name__,
         }
-    elif isinstance(exc, DeploymentChangedError):
-        error = {"type": "deployment_changed", "message": str(exc)}
     elif isinstance(exc, BoundPlanError | PlanValidationError):
         error = {"type": "bound_plan", "message": str(exc)}
     elif isinstance(exc, ResourceConfigurationError):
@@ -320,26 +318,18 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
 
     Raises:
         BoundPlanError: If the accepted job identity differs.
-        DeploymentChangedError: If the deployment changed since submission.
     """
     job = JobEnvelope.model_validate(envelope_payload)
     if job.job_id != native.id:
         message = "Accepted job identity differs from worker job"
         raise BoundPlanError(message)
     runtime = require_worker_runtime()
-    if job.accepted.plan.build_revision != runtime.catalog.compiled.build_revision:
-        message = "deployment_changed: resubmit against the current deployment"
-        raise DeploymentChangedError(message)
     return _execute_bound_job(job, native, runtime)
 
 
 def require_worker_config() -> LyraConfig:
     """Return configuration bound during worker startup."""
     return require_worker_runtime().config
-
-
-class DeploymentChangedError(ValueError):
-    """The queued job belongs to another immutable deployment."""
 
 
 class BoundPlanError(ValueError):

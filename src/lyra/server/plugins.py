@@ -21,9 +21,7 @@ class InstalledPlugin:
     definition: PluginDefinition
 
 
-def load_installed_plugins(
-    config: PluginsConfig, *, build_revision: str | None = None
-) -> CompiledCatalog:
+def load_installed_plugins(config: PluginsConfig) -> CompiledCatalog:
     """Compile the installed definitions together.
 
     Returns:
@@ -32,7 +30,6 @@ def load_installed_plugins(
     installed = discover_installed_plugins(config)
     return compile_live_catalog(
         {plugin.distribution: plugin.definition for plugin in installed},
-        build_revision=build_revision,
     )
 
 

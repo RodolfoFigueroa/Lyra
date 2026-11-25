@@ -3,9 +3,7 @@
 # are supplied through environment variables, not this TOML file.
 # LYRA_AGENT_API_KEY authenticates MCP and every /jobs lifecycle route.
 
-schema_version = 6
-# Assign a new revision when you change code, declarations, or provider routing.
-build_revision = "example-build-1"
+schema_version = 7
 # Use one SQLite file for the API and all workers.
 # Defaults to LYRA_DATA_DIR/results.sqlite3.
 # result_store_path = "/lyra_data/results.sqlite3"
@@ -23,10 +21,7 @@ forwarded_allow_ips = ["127.0.0.1"]
 
 [redis]
 readiness_timeout_seconds = 1.0
-# The checked-in value targets docker/docker-compose-dev.yml.
-# For a production Compose service named lyra-redis, use redis://lyra-redis:6379/0.
-# For direct local processes, use redis://localhost:6379/0.
-url = "redis://lyra-redis-dev:6379/0"
+url = "redis://lyra-redis:6379/0"
 
 [logging]
 level = "INFO"

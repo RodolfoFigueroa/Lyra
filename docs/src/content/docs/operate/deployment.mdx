@@ -62,8 +62,6 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
 
    The production build installs the locked dependencies into one image for API and workers. At startup, both processes import enabled distributions through their entry-point factories and compile the live definitions.
 
-   Ensure both processes can import every plugin dependency. Assign them the same immutable `build_revision`; see [build configuration](../configuration/#assign-a-deployment-build-revision).
-
    The example starts six worker processes that read from the same queue, `lyra`. Each process can run one graph at a time. To change the queue or process count, set `jobs.queue` or `worker.concurrency` in the [shared configuration](../configuration/#place-configuration-and-secrets).
 
 1. ## Check API readiness and worker heartbeats <span id="5-check-api-readiness-and-worker-heartbeats"></span>

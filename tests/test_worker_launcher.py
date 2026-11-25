@@ -57,7 +57,7 @@ def test_launcher_command_uses_deployment_configuration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
-    monkeypatch.setattr(worker_launcher, "load_config", lambda: config)
+    monkeypatch.setattr(worker_launcher, "load_config", lambda _path: config)
     launch = Mock()
     monkeypatch.setattr(worker_launcher, "launch_worker", launch)
     worker_launcher.main([])

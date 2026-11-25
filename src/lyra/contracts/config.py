@@ -10,7 +10,6 @@ from urllib.parse import urlparse, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lyra.contracts.resources import ResourceConfig
-from lyra.contracts.revisions import BuildRevision
 
 LYRA_DATA_DIR = Path("/lyra_data")
 DEFAULT_CONFIG_PATH = LYRA_DATA_DIR / "config" / "lyra.toml"
@@ -395,13 +394,6 @@ class WorkerConfig(StrictConfigModel):
 class LyraConfig(StrictConfigModel):
     """Represent the complete validated runtime configuration for Lyra."""
 
-    build_revision: BuildRevision = Field(
-        frozen=True,
-        description=(
-            "Deployment revision for code, declarations, and provider routing."
-        ),
-    )
-
     result_store_path: Path = Field(
         default=LYRA_DATA_DIR / "results.sqlite3",
         description="Shared SQLite result file.",
@@ -418,7 +410,7 @@ class LyraConfig(StrictConfigModel):
         default_factory=dict, description="Deployment-wide named I/O resource settings."
     )
 
-    schema_version: Literal[6] = Field(
+    schema_version: Literal[7] = Field(
         description="Server configuration schema version."
     )
     api: ApiConfig = Field(description="API bind and public URL settings.")

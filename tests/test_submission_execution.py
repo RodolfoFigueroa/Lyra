@@ -235,15 +235,13 @@ def test_worker_failure_lifecycle(
     native = native_job(monkeypatch)
     native.id = envelope.job_id
     if mismatch:
-        payload["accepted"]["plan"]["build_revision"] = "changed"
-    with pytest.raises(
-        worker.DeploymentChangedError if mismatch else GraphExecutionError
-    ):
+        payload["accepted"]["plan"]["computation_identity"] = "changed"
+    with pytest.raises(worker.BoundPlanError if mismatch else GraphExecutionError):
         worker.run_metric_task(payload)
     error = native.meta["failure"]["error"]
     if mismatch:
         assert events == []
-        assert error["type"] == "deployment_changed"
+        assert error["type"] == "bound_plan"
     else:
         assert error["node"] == "measure"
         assert error["dependency_path"] == ["hybrid", "measure"]

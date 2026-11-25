@@ -81,7 +81,6 @@ def test_worker_local_and_development_report_parity(
         report = restored.report
         assert handoff["job_id"] == report.job_id == restored.metadata.job_id
         assert report.job_id == native.id
-        assert report.build_revision == runtime.config.build_revision
         assert report.request == envelope.accepted.plan.request == local.report.request
         assert report.request.parameters == {"value": 7, "label": label}
         if large:

@@ -1,15 +1,13 @@
-"""Author and deployment revision contracts."""
+"""Author revision contracts."""
 
 from dataclasses import dataclass
 
 from lyra.contracts.locations import LocationContractReference
 from lyra.contracts.revision_tokens import (
-    BuildRevision,
     ImplementationRevision,
 )
 
 __all__ = [
-    "BuildRevision",
     "ImplementationRevision",
     "RevisionBinding",
     "RevisionPlan",

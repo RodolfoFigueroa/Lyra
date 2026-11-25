@@ -7,6 +7,5 @@ By default, `CITY_PLUGIN_SOURCE=../city-plugin` selects the city project in this
 Choose the guide for your next task:
 
 - [Configure plugin resources](../../docs/src/content/docs/operate/resources.md)
-- [Develop with editable sources](../../docs/src/content/docs/plugins/development.md)
-- [Add another plugin checkout](../../docs/src/content/docs/plugins/development.md#add-another-checkout)
-- [Update a running deployment](../../docs/src/content/docs/operate/updates.md)
+- [Run a local plugin server](../../docs/src/content/docs/plugins/development.mdx)
+- [Update a running deployment](../../docs/src/content/docs/operate/updates.mdx)

@@ -133,7 +133,6 @@ def _prepare(
         computation_identity=catalog.computation.plan(
             node_name, tuple(inputs), dependency_routes, uses
         ),
-        build_revision=catalog.build_revision,
         outputs=root.outputs,
         locations=tuple(
             contract

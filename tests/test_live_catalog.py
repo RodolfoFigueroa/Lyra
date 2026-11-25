@@ -155,9 +155,8 @@ def test_enabled_import_failure_aborts_startup(
         start()
 
 
-@pytest.mark.parametrize("change", ["code", "declarations", "routing"])
-def test_deployment_revision_is_shared_and_separate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+def test_api_and_workers_share_catalog_across_queue_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     install(monkeypatch)
     config = load_test_config(tmp_path)
@@ -165,25 +164,12 @@ def test_deployment_revision_is_shared_and_separate(
         InstalledPluginConfig(distribution="source-plugin"),
         InstalledPluginConfig(distribution="root-plugin"),
     ]
-    api = Catalog.load(config.plugins, build_revision=config.build_revision)
+    api = Catalog.load(config.plugins)
     entries = initialize_worker(config=config)
-    assert entries.catalog.compiled.build_revision == api.compiled.build_revision
-    assert entries.catalog.compiled.computation.nodes == api.compiled.computation.nodes
-    # Deployment tooling assigns a new immutable token for each kind of change.
-    changed = type(config).model_validate(
-        {**config.model_dump(), "build_revision": f"build-2-{change}"}
-    )
-    updated = Catalog.load(changed.plugins, build_revision=changed.build_revision)
-    assert updated.compiled.build_revision != api.compiled.build_revision
-    assert updated.discovery.fingerprint == api.discovery.fingerprint
-    assert updated.compiled.computation.nodes == api.compiled.computation.nodes
     config.jobs.queue = "alternate"
-    worker = initialize_worker(config=config)
-    assert worker.catalog.compiled.build_revision == api.compiled.build_revision
-    assert (
-        Catalog.load(config.plugins).discovery.fingerprint == api.discovery.fingerprint
-    )
-    assert LocalRunner(["source-plugin", "root-plugin"]).catalog.build_revision is None
+    restarted = initialize_worker(config=config).catalog
+    assert entries.catalog.compiled.computation.nodes == api.compiled.computation.nodes
+    assert restarted.discovery.fingerprint == api.discovery.fingerprint
 
 
 def test_installed_provider_with_cross_plugin_resource(

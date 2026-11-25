@@ -1,6 +1,6 @@
 """Worker catalogs, accepted jobs and retained native results."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
@@ -30,15 +30,8 @@ from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk.storage_schema import describe
 from lyra.server.job_store import JobObservation
 from lyra.server.registry import Catalog
-from test_support.canonical_execution import CanonicalWorkload
 from test_support.publication import publish_result
 from test_support.workloads import Workload, frame, installed, workload
-
-
-def canonical_worker_catalog(work: CanonicalWorkload) -> Catalog:
-    """Capture the benchmark catalog at its deployment revision."""
-    compiled = replace(work.executor.catalog, build_revision="benchmark-build")
-    return Catalog(compiled)
 
 
 @dataclass
@@ -55,11 +48,7 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     """Build an accepted job and publish its fixture output to the supplied store."""
     work = workload(rows)
     plugin = installed(work.plugin)[0]
-    catalog = Catalog(
-        compile_live_catalog(
-            {plugin.distribution: work.plugin}, build_revision="benchmark-build"
-        )
-    )
+    catalog = Catalog(compile_live_catalog({plugin.distribution: work.plugin}))
     contract = catalog.compiled.graph.nodes["root"].node
     if contract.kind != "metric":
         message = "Benchmark requires a metric"

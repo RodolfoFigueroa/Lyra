@@ -31,31 +31,13 @@ Use uv for Python environment and package management:
 uv sync
 ```
 
-Install the selected plugins and configure each process before starting it:
-
-- Give the API and workers the same `/lyra_data/config/lyra.toml`
-- Supply both API keys to the API
-- Supply resource credentials through files or environment variables on workers that need them
-
-Start the API in one terminal.
+Start Redis locally on Linux, macOS, or Windows Subsystem for Linux (WSL). From the repository root, launch the API and worker with the city plugin.
 
 ```bash
-uv run python -m lyra.server.main
+uv run lyra-plugin dev --project examples/city-plugin
 ```
 
-Start the worker service in a second terminal. It reads the queue name and concurrency from the same configuration file.
-
-```bash
-uv run python -m lyra.server.worker_launcher
-```
-
-The development Compose stack is the preferred integration environment:
-
-```bash
-docker compose -f docker/docker-compose-dev.yml up --build
-```
-
-For editable plugin development, dependency changes, and multiple plugin checkouts, see [the deployment example](examples/lyra-deployment/README.md). Source edits need a manual process restart; contract edits also need manifest regeneration.
+Press Ctrl-C once to let the worker finish its active job, or twice to interrupt it. Rerun the command to load edits to Lyra or the plugin. See [Run a local plugin server](docs/src/content/docs/plugins/development.mdx) for credentials and additional plugins.
 
 ## Required verification
 
@@ -69,7 +51,7 @@ After changing Python, run all of these and fix failures caused by the change:
 uv run ruff format .
 uv run ruff check .
 uv run ty check
-uv run pytest \
+uv run pytest -n auto \
   --cov=lyra \
   --cov-report=term-missing \
   --cov-report=xml

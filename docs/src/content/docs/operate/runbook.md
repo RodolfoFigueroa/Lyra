@@ -33,6 +33,8 @@ In `workers list`, check each worker’s current job and heartbeat age (time sin
 
 In `queue show`, `pending_depth` counts waiting jobs. If jobs are waiting and `observed_workers` is empty, check the worker service’s startup logs. If the health check reports Redis is unavailable, restore the connection first.
 
+Before updating packages or configuration, follow the [deployment update procedure](../updates/#drain-and-restart) to empty the queue during downtime.
+
 ## Inspect retained jobs
 
 List up to 20 running jobs. To inspect one, replace `your_job_id_here` with an ID from the list.

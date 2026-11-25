@@ -82,7 +82,6 @@ def test_concrete_metrics_and_shared_origin_revisions(
                 assert root.origins == [origin]
                 assert root.code_revision == "measure-1"
                 assert root.primary_input == "places"
-                assert report.build_revision is None
                 assert report.request.inputs["places"].ids == ids
                 scope = root.inputs["places"].provider_scope
                 assert scope is not None

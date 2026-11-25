@@ -94,7 +94,7 @@ For example, a metric reusing blocks A and B while computing D has outcome `mixe
 
 A handler that runs and returns an empty table is still `executed` when it reused nothing. A use with no requested partitions, invocation, or reuse is `skipped`. Both can belong to a successful empty result.
 
-These outcomes summarize current work without counts or event histories for individual rows or partitions. They don’t reconstruct which historical execution produced cached values. Runs with different job IDs or build revisions can share the same [cache identity](../caching/#reuse-tables-across-executions).
+These outcomes summarize current work without counts or event histories for individual rows or partitions. They don’t reconstruct which historical execution produced cached values. Runs with different job IDs can share the same [cache identity](../caching/#reuse-tables-across-executions).
 
 Even when a metric reuses every result or skips a catalog, Lyra still validates each intervention set. Find the set by its `scope` in `report.intervention_validations`, then read its `membership_lookup` value.
 
@@ -135,7 +135,7 @@ Read the provider’s outcome alongside the operation stages: forwarding a reuse
 
 ## Read revisions and direct origins
 
-Use the declared revisions to identify the implementation and deployment behind a result. `node.code_revision` records the definition’s implementation revision, including `None`. `report.build_revision` separately identifies the [deployment build](../../operate/configuration/#assign-a-deployment-build-revision), or is `None` for local execution without one. The API and workers compare build revisions before acquisition; a mismatch fails the job with `deployment_changed`.
+Read `node.code_revision` to see which implementation revision the author declared for a node. If the author omitted the revision, the field contains `None`.
 
 An origin identifies an external data source that a metric or provider declares it reads directly. Each entry in `node.origins` has these fields:
 

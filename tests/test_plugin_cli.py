@@ -286,11 +286,9 @@ def test_deployment_uses_shared_image_configuration_and_dependencies() -> None:
     assert all(service["build"] == services[0]["build"] for service in services)
     assert all(service["volumes"] == services[0]["volumes"] for service in services)
     project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
-    for filename in ("lyra.toml", "lyra.dev.toml"):
-        config = LyraConfig.model_validate(tomllib.loads((root / filename).read_text()))
-        assert config.build_revision
-        assert all(
-            plugin.distribution in project["dependencies"]
-            for plugin in config.plugins.installed
-            if plugin.enabled
-        )
+    config = LyraConfig.model_validate(tomllib.loads((root / "lyra.toml").read_text()))
+    assert all(
+        plugin.distribution in project["dependencies"]
+        for plugin in config.plugins.installed
+        if plugin.enabled
+    )

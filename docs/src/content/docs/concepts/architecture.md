@@ -36,19 +36,18 @@ During catalog compilation, Lyra validates:
 
 Each public metric has its own request and output contracts. Private metrics can supply dependencies, and you can execute them through `run_development()`.
 
-A discovery fingerprint identifies the catalog metadata you can inspect through the public API. Administrators can also list installed plugins with `lyra-admin catalog show`. Workers check the [build revision](../identity/#distinguish-discovery-from-computation-identity) to decide whether they can run a submitted job.
+The [discovery fingerprint](../identity/#distinguish-discovery-from-computation-identity) identifies public catalog metadata. If you have administrator access, run `lyra-admin catalog show` to inspect the catalog and its plugins.
 
 ## Execute a job
 
-A job begins when you submit a registered metric with `inputs` and `parameters` mappings. The API validates your selections and applies each node’s Pydantic model to prepare [effective parameter values](../../reference/parameters/#defaults-and-validators). The queued payload records:
+A job begins when you submit a registered metric with `inputs` and `parameters` mappings. The API validates your selections and applies each node’s Pydantic model to prepare [effective parameter values](../../reference/parameters/#defaults-and-validators). The API saves these details with the queued job.
 
-- The normalized request and complete effective values for each node use
-- The deployment build revision
-- Location scopes and pinned data revisions
+- The normalized request and effective parameters for each use of a node
+- The [computation identity](../identity/#distinguish-discovery-from-computation-identity), including the selected routes
+- Provider scopes and their data revisions
+- Requested [interventions](../../use/spatial-inputs/#prepare-changes-for-a-catalog) and their targets
 
-If the build revisions differ, the worker fails the job with `deployment_changed` before acquiring resources or calling handlers. You can resubmit against the current deployment.
-
-A compatible worker revalidates the queued values, including explicit defaults, and prepares the request against its live catalog. The executor validates the complete plan before acquiring resources.
+The worker prepares the same request using its own catalog and checks it against the plan the API accepted. If the plans disagree, the worker fails the job with `bound_plan` before opening resources or running handlers.
 
 The worker resolves IDs and canonical routes, then executes dependencies sequentially. It passes each handler its declared arguments:
 

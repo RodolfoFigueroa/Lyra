@@ -45,16 +45,13 @@ Lyra includes the effective dataset identity in cache keys for calculations that
 
 ## Distinguish discovery from computation identity
 
-Lyra uses three identities for different decisions:
+Editing a metric’s description changes what callers see in the catalog. A worker can still run an accepted job and reuse its cached values after that edit.
 
 | Identity | Purpose |
 | --- | --- |
 | Discovery fingerprint | Identifies public catalog metadata, including descriptions |
-| Deployment `build_revision` | Checks whether API and workers use the same immutable build |
 | [Computation identity](../caching/#keep-cached-results-current) | Determines whether a calculation can reuse cached results |
 
-Give the API and workers the same build and `build_revision`. Assign a new revision whenever you change executable code, plugin declarations, or [provider routing rules](../selection/). Even a change to a declaration’s description requires a new revision.
+Changing a selected route can change the computation a job would run. If the worker’s plan differs from the [accepted plan](../lifecycle/#submission-captures-the-request), the worker fails the job with `bound_plan` before opening resources.
 
-A worker compares its build revision with the revision in the queued request before acquiring resources or calling handlers. A mismatch fails the job with `deployment_changed`; you can resubmit against the current catalog. A compatible worker prepares the request against its live definitions. The executor then validates the complete plan before acquiring resources.
-
-The [computation key](../caching/#reuse-tables-across-executions) combines `(name, code_revision)` with the calculation’s scopes and complete effective inputs. Build revisions and discovery fingerprints don’t invalidate cached results. Editing only a description preserves cache reuse, although deploying that edit requires a new build revision.
+For reuse across runs, the [computation key](../caching/#reuse-tables-across-executions) combines `(name, code_revision)` with the calculation’s scopes and effective inputs.

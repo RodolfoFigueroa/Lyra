@@ -25,15 +25,15 @@ The API server validates your request against the selected metric. Before queuei
 - The [canonical route](../selection/) for each named input
 - Pinned location revisions, which fix the requested data versions
 
-Before acquiring resources, the worker checks your job in this order:
+When the worker receives a job, it checks whether its current definitions can execute the plan the API accepted.
 
-1. Match the accepted job ID to the queue record and compare the accepted [build revision](../../operate/configuration/#assign-a-deployment-build-revision) with the worker’s revision
-2. Prepare the request using the worker’s plugin definitions and revalidate its effective parameters with Pydantic
-3. Run the executor’s plan validation before loading data or reusing cached results
+1. The worker matches the accepted job ID to the queue record.
+2. It prepares the request using its own definitions and checks the effective parameter values.
+3. It checks the selected computation and routes, including their provider scopes and interventions.
 
-If the build revisions differ, the worker fails the job with `deployment_changed` before acquiring resources. Submit a new job to use the current deployment.
+The worker can still run the job if you update an unrelated plugin. If you change a selected dependency’s revision, the plans disagree. The worker reports `bound_plan` for an incompatible plan before opening resources or running handlers.
 
-After validation, the worker resolves your selected IDs inside a [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials), which manages data clients. The worker fails the job if it cannot honor an accepted binding.
+After validation, the worker resolves your selected IDs inside a [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials), which manages data clients.
 
 [Provenance](../provenance/) records your selections and effective parameters, including defaults and nulls. It separates the accepted request from observations of resolved inputs and calculations that ran or reused cached results. Your plugin must honor the captured identities; Lyra can’t detect source changes that its declarations omit.
 

@@ -360,7 +360,7 @@ def test_preflight_failure_clears_previous_observations(queued: Queued) -> None:
 
 @pytest.mark.parametrize("cached", [False, True])
 @pytest.mark.parametrize("missing_metric", [False, True])
-def test_deployment_changed_before_lookup_or_acquisition(
+def test_bound_plan_before_lookup_or_acquisition(
     queued: Queued, *, missing_metric: bool, cached: bool
 ) -> None:
     _, _, envelope, native, seen, provider, adapter = queued
@@ -372,12 +372,12 @@ def test_deployment_changed_before_lookup_or_acquisition(
         seen.clear()
         provider.reset_mock()
         adapter.reset_mock()
-    payload["accepted"]["plan"]["build_revision"] = "older-build"
+    payload["accepted"]["plan"]["computation_identity"] = "older-build"
     if missing_metric:
         payload["accepted"]["plan"]["request"]["metric"] = "missing"
-    with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
+    with pytest.raises(worker.BoundPlanError):
         worker.run_metric_task(payload)
-    assert native.meta["failure"]["error"]["type"] == "deployment_changed"
+    assert native.meta["failure"]["error"]["type"] == "bound_plan"
     assert "execution" not in native.meta
     assert seen == []
     provider.assert_not_called()

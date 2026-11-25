@@ -120,7 +120,6 @@ def test_captured_graph_describes_named_outputs_and_direct_origins(
     report.capture(root, catalog, plan)
     description = report.descriptions[report.use_id(root)]
     assert report.request == plan.request
-    assert report.build_revision is None
     assert description.parameters == {"year": 2025}
     assert description.primary_input is None
     assert description.origins == []
@@ -157,15 +156,12 @@ def test_captured_graph_describes_named_outputs_and_direct_origins(
 
 
 def test_routed_request_preserves_source_selections() -> None:
-    catalog = compile_live_catalog(
-        definitions(binding="matching"), build_revision="build-3"
-    )
+    catalog = compile_live_catalog(definitions(binding="matching"))
     plan = prepare_execution(catalog, request())
     root = bind_execution(catalog, plan)
     report = ReportCollection("a" * 32)
     report.capture(root, catalog, plan)
     assert report.request == plan.request
-    assert report.build_revision == "build-3"
     assert {use.node for use in report.uses.values() if use.kind == "operation"} == {
         "first",
         "finish",

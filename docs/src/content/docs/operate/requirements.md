@@ -38,6 +38,6 @@ The city example ships its geometry, observations, and membership data. It needs
 
 ## Choose your deployment project
 
-The repository includes `examples/lyra-deployment`, with production and editable development configurations. It is the starting point for [Deploy Lyra](../deployment/).
+Start with `examples/lyra-deployment` to [deploy Lyra with Docker Compose](../deployment/).
 
 For an independent deployment repository, adapt source paths and container layout together. Pin production Git sources to full commits and commit the deployment lockfile. Review [plugin installation](../plugins/) when adding another package.

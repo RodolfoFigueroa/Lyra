@@ -547,8 +547,10 @@ def generate_config_reference(generated: Path) -> dict[str, Any]:
             "reference/generated/configuration",
         ),
         (
-            "Lyra reads settings from `/lyra_data/config/lyra.toml` once at startup. "
-            "Database passwords and API credentials come from environment variables."
+            "The API and worker load `/lyra_data/config/lyra.toml` at startup. "
+            "Pass a path with `--config` to load another file. "
+            "Supply API credentials through environment variables. "
+            "Keep the Redis URL private if it contains credentials."
         ),
         "",
         (

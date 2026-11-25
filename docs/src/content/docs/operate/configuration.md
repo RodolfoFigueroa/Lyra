@@ -25,32 +25,6 @@ Supply secrets through the environment according to each process’s role:
 
 The API requires both keys even when you disable MCP. Use different values for the agent and administrator keys. Give consumers the agent key and keep the administrator key for operators.
 
-## Assign a deployment build revision
-
-Set the required top-level `build_revision` to a release identifier that you never reuse for different deployment contents. The API and workers read this value from their shared configuration at startup.
-
-For example, set the revision before any TOML table headers:
-
-```toml {1}
-build_revision = "release_1"
-```
-
-Choose a revision that meets these rules:
-
-- Use 1 to 256 characters.
-- Start with a letter from `A` to `Z` or `a` to `z`, or a digit.
-- Use only those letters, digits, and `._:+-` afterward.
-
-Assign a new revision when you change any of these deployment inputs:
-
-- Executable code, including dependencies
-- Plugin declarations or the enabled plugin set
-- The rules for [routing location selections between providers](../../concepts/selection/)
-
-Publish code and configuration together. In the [example deployment](../deployment/), replace the sample revision whenever you change one of these inputs, including during development. You can use a commit ID if it identifies every input. Keep the current revision when you change only the queue name.
-
-The discovery fingerprint identifies public catalog metadata; it does not prove deployment compatibility. Changing only `build_revision` preserves [computation cache reuse](../caching/). Local execution needs no deployment revision or queue setup.
-
 ## Configure plugin resources
 
 Follow [Configure plugin data resources](../resources/) for named settings, secret references, and the designated location provider. Supply required credentials to the workers that acquire that data.
@@ -75,7 +49,7 @@ uv run lyra-admin --json config validate ./lyra.toml
 
 The command checks the file’s syntax and configuration fields, including the plugin entries. You can run it without credentials or a running server.
 
-On success, `--json` prints `{"valid": true, "schema_version": 6}`. The command exits with code 2 for invalid configuration or code 1 if it can’t read the file.
+On success, `--json` prints `{"valid": true, "schema_version": 7}`. The command exits with code 2 for invalid configuration or code 1 if it can’t read the file.
 
 After deployment, check `/ready` for Redis availability. Set `redis.readiness_timeout_seconds` to change the probe’s default timeout of 1s. Workers connect to plugin data sources during job execution.
 

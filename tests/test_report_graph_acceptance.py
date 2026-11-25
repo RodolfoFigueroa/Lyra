@@ -136,7 +136,6 @@ def test_shared_and_distinct_uses_with_cached_consumer(
         assert root_node.parameters["options"] == {"items": [1, None]}
         assert first.parameters["mode"] == "default"
         assert first.code_revision == different.code_revision == "middle-1"
-        assert report.build_revision is None
         connections = {
             (b.source_use_id, b.source_parameter, b.target_use_id, b.target_parameter)
             for b in report.parameter_bindings

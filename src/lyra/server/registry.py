@@ -36,15 +36,13 @@ class Catalog:
         return hashlib.sha256(encoded.encode()).hexdigest()
 
     @classmethod
-    def load(
-        cls, plugins: PluginsConfig, *, build_revision: str | None = None
-    ) -> "Catalog":
+    def load(cls, plugins: PluginsConfig) -> "Catalog":
         """Load and compile enabled live plugin definitions.
 
         Returns:
             Captured contracts for this application.
         """
-        return cls(load_installed_plugins(plugins, build_revision=build_revision))
+        return cls(load_installed_plugins(plugins))
 
     def get_loaded_metric_names(self) -> list[str]:
         """Return sorted public concrete metric names."""

@@ -139,8 +139,6 @@ A shared use aggregates its actual work. A handler returning an empty table can 
 
 Use `node.code_revision` and `node.origins` to read declarations even for reused or skipped work. Lyra deduplicates origins by `(id, revision)` and preserves their informational descriptions. `None` revisions identify fixed, unversioned contents. A provider’s origins don’t become a consuming metric’s direct origins.
 
-Read `report.build_revision` separately to identify the deployment build; it can be `None` locally. Reporting adds no cache invalidation token.
-
 For operations, inspect these fields on `node.operation`:
 
 - `target_scope`: declared target provider scope
@@ -187,12 +185,13 @@ Use the contracts above to adapt your calculation without a Lyra checkout or liv
 
 API and workers use the same live definitions to prepare requests. Both processes import enabled distributions through their entry-point factories, so every plugin dependency must work in both. Keep loading and request preparation free of external input/output (I/O).
 
-Deploy the same immutable build and `build_revision` to the API and workers. Assign a new revision when you change executable code, plugin declarations, or provider routing rules. Each queued request records:
+The API records the accepted plan when it queues a job.
 
-- Normalized selections and complete effective values for each node use
-- Pinned location scopes
-- The build revision
+- Normalized selections and effective parameters for each use of a node
+- The selected computation identity, including routes
+- Pinned provider scopes
+- Requested interventions and their targets
 
-Workers reject a different build with `deployment_changed` before acquiring resources or running handlers; you can resubmit. Compatible workers prepare the request against their live definitions. The executor validates the complete plan before acquiring resources.
+The worker checks the plan against its current definitions. If the plan is incompatible, the worker reports `bound_plan` before opening resources or running handlers.
 
-The public discovery fingerprint describes metadata. Author `code_revision` values identify metric and operation implementations for computation reuse. A build revision is not a cache invalidation token.
+The discovery fingerprint identifies public catalog metadata. Update `code_revision` when a metric or operation changes the result for the same inputs.

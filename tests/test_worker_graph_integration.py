@@ -766,9 +766,7 @@ def test_worker_normalized_route(
                     for item in work.prepared.inputs
                 }.get("parameters", {}),
             ),
-            catalog=registry.Catalog.load(
-                config.plugins, build_revision=config.build_revision
-            ),
+            catalog=registry.Catalog.load(config.plugins),
             jobs=jobs,
             job_id_factory=lambda: native.id,
         )
@@ -917,10 +915,6 @@ def test_worker_rejects_changed_opaque_revision(
     native = native_job(monkeypatch)
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     install(tmp_path, monkeypatch, [declare(after)])
-    config = worker.require_worker_config().model_copy(
-        update={"build_revision": "replacement"}
-    )
-    worker.initialize_worker(config=config)
-    with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
+    with pytest.raises(worker.BoundPlanError, match="Selected computation"):
         worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
     calls.assert_not_called()

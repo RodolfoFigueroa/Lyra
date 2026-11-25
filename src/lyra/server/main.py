@@ -1,5 +1,6 @@
 """FastAPI construction and application resource ownership."""
 
+import argparse
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import AsyncGeneratorType
 
@@ -11,7 +12,7 @@ with command_imports(__name__):
     from fastapi.responses import JSONResponse
     from redis.exceptions import RedisError
 
-    from lyra.contracts.config import LyraConfig
+    from lyra.contracts.config import DEFAULT_CONFIG_PATH, LyraConfig
     from lyra.runtime.terminal_history import HistoryUnavailableError
     from lyra.server.config import (
         ApiCredentials,
@@ -42,7 +43,7 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGeneratorType:
         try:
-            catalog = Catalog.load(config.plugins, build_revision=config.build_revision)
+            catalog = Catalog.load(config.plugins)
             async with AsyncExitStack() as stack:
                 connection = create_sync_client(config.redis)
                 stack.callback(connection.close)
@@ -114,4 +115,6 @@ def run_server(config: LyraConfig | None = None) -> None:
 
 
 if __name__ == "__main__":
-    run_server()
+    parser = argparse.ArgumentParser(description="Launch the Lyra API.")
+    parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
+    run_server(load_config(parser.parse_args().config))

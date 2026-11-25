@@ -14,16 +14,13 @@ Install your plugin in the image that the API and workers share. Then add its di
 
 1. ## Add the dependency to the deployment <span id="1-add-the-dependency-to-the-deployment"></span>
 
-   Add the plugin and its sources to the deployment project’s dependencies. Update and commit the lockfile, then rebuild the image.
-
-   The example has separate production and development dependency sets. When changing its packages, update both locks from `examples/lyra-deployment`:
+   Add the plugin and its source to the deployment project’s dependencies. From `examples/lyra-deployment`, update the lockfile.
 
    ```sh
    uv lock
-   uv lock --project dev
    ```
 
-   Use the same package versions in API and worker containers. Include every dependency plugin and any native libraries the plugins need. Configure credentials for private sources during the image build.
+   Commit the lockfile and rebuild the shared API and worker image. Include every dependency plugin and any native libraries the plugins need. Configure credentials for private sources during the image build.
 
 1. ## Select the installed distribution <span id="2-select-the-installed-distribution"></span>
 
@@ -60,13 +57,9 @@ Install your plugin in the image that the API and workers share. Then add its di
 
 </Steps>
 
-## Develop with editable sources
+## Run a local plugin server <span id="develop-with-editable-sources"></span><span id="add-another-checkout"></span>
 
-Use [editable plugin development](../../plugins/development/) for source mounts and process restarts.
-
-## Add another checkout
-
-Follow [add another checkout](../../plugins/development/#add-another-checkout) to extend the deployment with another source project.
+Run `uv run lyra-plugin dev` from your plugin checkout. To test several plugins together, [add another checkout to the local session](../../plugins/development/#add-another-checkout).
 
 ## Enable a location provider
 

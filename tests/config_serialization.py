@@ -111,7 +111,6 @@ def render_config_toml(config: LyraConfig) -> str:
     """
     lines: list[str] = [
         f"schema_version = {config.schema_version}",
-        f'build_revision = "{config.build_revision}"',
         "",
     ]
     if config.result_store_path is not None:

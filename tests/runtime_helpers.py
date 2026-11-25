@@ -18,9 +18,7 @@ def make_runtime(
     jobs = ServerJobStore(connection, config.jobs, config.result_store_path)
     return ApplicationRuntime(
         config=config,
-        catalog=catalog
-        if catalog is not None
-        else Catalog.load(config.plugins, build_revision=config.build_revision),
+        catalog=catalog if catalog is not None else Catalog.load(config.plugins),
         redis=connection,
         async_redis=asynchronous,
         jobs=jobs,

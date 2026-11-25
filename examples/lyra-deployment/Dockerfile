@@ -14,12 +14,6 @@ FROM sources AS production-builder
 WORKDIR /workspace/lyra/examples/lyra-deployment
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-editable
 
-FROM sources AS development
-WORKDIR /workspace/lyra/examples/lyra-deployment/dev
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
-ENV VIRTUAL_ENV=/app/.venv PATH="/app/.venv/bin:$PATH"
-CMD ["python", "-m", "lyra.server.main"]
-
 FROM python:3.11-slim AS production
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/app/.venv PATH="/app/.venv/bin:$PATH"

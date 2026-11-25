@@ -117,12 +117,11 @@ def test_nested_operation_results_and_sources_keep_original_caller_scope() -> No
 def test_live_route_changes_invalidate_only_selected_computations(
     change: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = compile_live_catalog(definitions(), build_revision="same-build")
+    original = compile_live_catalog(definitions())
     accepted = prepare_execution(original, request())
     restored = PreparedExecution.model_validate_json(accepted.model_dump_json())
     current = compile_live_catalog(
         definitions({change: "alternate" if change == "preference" else "changed"}),
-        build_revision="same-build",
     )
     changed = prepare_execution(current, request())
     if change == "origin":

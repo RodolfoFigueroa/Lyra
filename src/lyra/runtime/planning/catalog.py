@@ -31,7 +31,6 @@ from lyra.sdk.resources import BaseIO, resource_metadata
 class CompiledCatalog:
     """Captured contracts shared by application and local execution."""
 
-    build_revision: str | None = None
     resources: Mapping[str, type[BaseIO]]
     implementations: Mapping[str, BoundPlugin]
     provider_registry: Mapping[str, RegisteredProvider]
@@ -50,8 +49,6 @@ class CompiledCatalog:
 
 def compile_live_catalog(
     definitions: Mapping[str, PluginDefinition],
-    *,
-    build_revision: str | None = None,
 ) -> CompiledCatalog:
     """Compile live registrations and retain their executable implementations.
 
@@ -102,7 +99,6 @@ def compile_live_catalog(
         implementations=MappingProxyType(implementations),
         provider_registry=registry,
         dependency_routes=compile_dependency_routes(graph, routes),
-        build_revision=build_revision,
     )
 
 

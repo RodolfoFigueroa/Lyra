@@ -302,11 +302,10 @@ def test_invalid_author_revision(kind: type, revision: object) -> None:
         kind(name="test", description="Test", code_revision=revision)
 
 
-def test_deployment_revision_preserves_persistent_cache(tmp_path: Path) -> None:
+def test_editorial_change_preserves_persistent_cache(tmp_path: Path) -> None:
     calls: list[str] = []
-    plugins = definitions(calls)
-    for revision in ("build-1", "build-2"):
-        catalog = compile_live_catalog(plugins, build_revision=revision)
+    for description in ("Original", "Edited"):
+        catalog = compile_live_catalog(definitions(calls, description))
         executor = GraphExecutor(
             catalog,
             Mock(),

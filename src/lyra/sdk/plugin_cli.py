@@ -11,9 +11,11 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lyra.contracts.config import DEFAULT_API_PORT, normalize_distribution_name
 from lyra.contracts.dependencies import describe_dependency
 from lyra.contracts.plugins import PluginInfo, PluginInspection
 from lyra.runtime.planning.native_bindings import bind_self_contained
+from lyra.sdk import dev
 from lyra.sdk.diagrams import render_mermaid
 from lyra.sdk.loading import PluginLoadError, load_plugin_definition
 
@@ -245,7 +247,7 @@ def build_parsers() -> list[argparse.ArgumentParser]:
     """
     parser = argparse.ArgumentParser(
         prog="lyra-plugin",
-        description="Inspect live Lyra plugin definitions.",
+        description="Develop and inspect Lyra plugins.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     parsers = [parser]
@@ -278,7 +280,32 @@ def build_parsers() -> list[argparse.ArgumentParser]:
         dest="json_output",
         help="Emit structured JSON instead of a human-readable table.",
     )
-    return [*parsers, diagram_parser, describe_parser]
+    develop = subparsers.add_parser(
+        "dev", help="Run a local API and worker with editable plugins."
+    )
+    develop.add_argument("--project", type=Path, default=Path.cwd())
+    develop.add_argument(
+        "--plugin",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional plugin checkout (repeatable).",
+    )
+    develop.add_argument(
+        "--redis-url",
+        default=dev.DEFAULT_REDIS_URL,
+        help="Redis connection URL (default: %(default)s).",
+    )
+    develop.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_API_PORT,
+        help="Loopback API port (default: %(default)s).",
+    )
+    develop.add_argument(
+        "--resources", type=Path, help="TOML resource settings for the worker."
+    )
+    return [*parsers, diagram_parser, describe_parser, develop]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -305,6 +332,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_command(args: argparse.Namespace) -> int:
+    if args.command == "dev":
+        projects = {}
+        for path in [args.project, *args.plugin]:
+            distribution, _, _ = _project_configuration(path)
+            name = normalize_distribution_name(distribution)
+            if name in projects:
+                msg = f"Duplicate plugin distribution: {name}"
+                raise PluginBuildError(msg)
+            projects[name] = path.resolve()
+        return dev.launch(projects, args.port, args.resources, args.redis_url)
     if args.command == "diagram":
         paths = [args.project, *args.include_project]
         if args.output is not None and any(

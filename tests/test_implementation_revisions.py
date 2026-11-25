@@ -6,14 +6,12 @@ from unittest.mock import Mock
 import geopandas as gpd
 import pandas as pd
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import LocationDependency
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.origins import Origin
 from lyra.contracts.plugins import PluginManifest
-from lyra.contracts.revisions import BuildRevision
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.runtime.planning.preparation import prepare_execution
@@ -105,13 +103,6 @@ def test_omission_and_explicit_none_have_identical_declarations_and_plans() -> N
 def test_decorators_reject_invalid_revisions(revision: object, owner: str) -> None:
     with pytest.raises(PluginDefinitionError):
         compile_live_catalog({"test": definitions({"code_revision": revision}, owner)})
-
-
-@pytest.mark.parametrize("revision", [None, 1, True, "", " ", " revision ", "x" * 257])
-def test_build_revision_retains_deployment_contract(revision: object) -> None:
-    with pytest.raises(ValidationError):
-        TypeAdapter(BuildRevision).validate_python(revision)
-    assert TypeAdapter(BuildRevision).validate_python("build-02") == "build-02"
 
 
 @pytest.mark.parametrize("owner", ["root", "select", "tracts"])

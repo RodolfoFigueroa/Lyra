@@ -31,8 +31,7 @@ from lyra.server.config import (
 
 def _valid_config(base: Path) -> dict[str, Any]:
     return {
-        "schema_version": 6,
-        "build_revision": "test-build-1",
+        "schema_version": 7,
         "api": {
             "host": DEFAULT_API_HOST,
             "port": 5219,
@@ -72,7 +71,7 @@ def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     config = LyraConfig.model_validate(_valid_config(tmp_path))
 
-    assert config.schema_version == 6
+    assert config.schema_version == 7
     assert config.api.host == DEFAULT_API_HOST
     assert config.api.port == 5219
     assert config.api.public_base_url == "https://lyra.example.test"
@@ -180,7 +179,7 @@ def test_config_contract_requires_known_schema_version(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
     raw["schema_version"] = 1
 
-    _assert_invalid(raw, "Input should be 6")
+    _assert_invalid(raw, "Input should be 7")
 
 
 @pytest.mark.parametrize(
@@ -387,21 +386,6 @@ def test_contract_validation_has_no_environment_or_filesystem_effects(
         assert isinstance(config.resources["source"].secrets["token"], SecretReference)
         config.worker_temp_dir()
     forbidden.assert_not_called()
-
-
-@pytest.mark.parametrize("revision", [None, "", " ", "build one", "x" * 257, 1])
-def test_invalid_build_revision(tmp_path: Path, revision: object) -> None:
-    data = _valid_config(tmp_path)
-    data["build_revision"] = revision
-    with pytest.raises(ValidationError, match="build_revision"):
-        parse_config_toml(data)
-
-
-def test_missing_build_revision(tmp_path: Path) -> None:
-    data = _valid_config(tmp_path)
-    del data["build_revision"]
-    with pytest.raises(ValidationError, match="build_revision"):
-        parse_config_toml(data)
 
 
 def test_result_store_path_default_and_absolute_override(tmp_path: Path) -> None:

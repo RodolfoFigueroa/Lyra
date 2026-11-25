@@ -176,7 +176,6 @@ def test_shared_operation_and_finalized_data_are_complete_and_detached() -> None
         root_use_id=state.root_use_id,
         nodes=list(state.nodes),
         parameter_bindings=state.parameter_bindings,
-        build_revision=state.build_revision,
     )
     operation = operations[0]
     state.descriptions[operation.use_id].parameters["count"] = 99

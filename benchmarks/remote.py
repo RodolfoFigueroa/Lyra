@@ -12,9 +12,9 @@ from lyra.contracts.config import JobsConfig, LyraConfig
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope
 from lyra.contracts.references import new_job_id
 from lyra.server import worker
+from lyra.server.registry import Catalog
 from test_support.canonical_execution import canonical_workload
 from test_support.receiving_workloads import receiving_workload
-from test_support.worker_workloads import canonical_worker_catalog
 
 
 class BoundWorkerSuite:
@@ -41,19 +41,16 @@ class BoundWorkerSuite:
         self.scratch = TemporaryDirectory()
         self.config = Mock(
             spec=LyraConfig,
-            build_revision="benchmark-build",
             jobs=JobsConfig(),
             result_store_path=Path(self.scratch.name) / "results.sqlite3",
             resources={},
         )
-        self.catalog = canonical_worker_catalog(self.work)
+        self.catalog = Catalog(self.work.executor.catalog)
 
         self.envelope = JobEnvelope(
             job_id=self.native.id,
             accepted=AcceptedJob(
-                plan=WorkerRequest.from_plan(self.work.prepared).model_copy(
-                    update={"build_revision": "benchmark-build"}
-                ),
+                plan=WorkerRequest.from_plan(self.work.prepared),
                 catalog_fingerprint="benchmark",
                 plugin=self.catalog.compiled.manifests[
                     self.catalog.compiled.graph.nodes[

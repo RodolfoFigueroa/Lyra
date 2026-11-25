@@ -17,7 +17,7 @@ from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.provider_scope import DatasetScope, EffectiveScope
 from lyra.contracts.references import JobId
-from lyra.contracts.revision_tokens import BuildRevision, ImplementationRevision
+from lyra.contracts.revision_tokens import ImplementationRevision
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.value_identity import check_json_value, same_json
 
@@ -165,7 +165,6 @@ class ExecutionReport(BaseModel):
     root_use_id: LocalName
     nodes: list[ReportNode]
     parameter_bindings: list[ParameterBinding]
-    build_revision: BuildRevision | None
     intervention_validations: list[InterventionValidation] = Field(default_factory=list)
 
     @field_validator(

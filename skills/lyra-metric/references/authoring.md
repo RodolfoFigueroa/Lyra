@@ -734,7 +734,7 @@ Parameter identity includes defaults and nulls. Omitting a parameter matches sup
 Operational settings don’t contribute to stored-value keys:
 
 - Resource aliases and credentials
-- Job IDs and deployment build revisions
+- Job IDs
 
 `off` and `full` identify complete initially bound selections. Selecting a subset of a full upstream result still references that complete computation.
 

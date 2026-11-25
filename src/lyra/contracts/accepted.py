@@ -28,7 +28,7 @@ from lyra.contracts.locations import (
 )
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.contracts.revisions import BuildRevision, RevisionBinding, RevisionPlan
+from lyra.contracts.revisions import RevisionBinding, RevisionPlan
 from lyra.contracts.types import JsonObject, validate_json_object
 
 _ParameterObject = Annotated[JsonObject, BeforeValidator(validate_json_object)]
@@ -124,7 +124,6 @@ class PreparedExecution(BaseModel):
     dependency_routes: dict[str, AcceptedSource]
     revisions: RevisionPlan
     computation_identity: str = Field(min_length=1)
-    build_revision: BuildRevision | None
     outputs: dict[str, OutputMetadata] = Field(min_length=1)
     locations: tuple[LocationContract, ...]
     intervention_targets: dict[str, ProviderDeclaration] = Field(default_factory=dict)
@@ -249,12 +248,11 @@ def _validate_dependency_routes(
 
 
 class WorkerRequest(BaseModel):
-    """Normalized values accepted for execution by the matching worker build."""
+    """Normalized values accepted for execution by the worker."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     request: SubmittedRequest
     parameter_uses: dict[StrictStr, _ParameterObject]
-    build_revision: BuildRevision | None
     computation_identity: str = Field(min_length=1)
     provider_scopes: dict[str, RevisionBinding]
     intervention_targets: dict[str, ProviderDeclaration] = Field(default_factory=dict)
@@ -270,7 +268,6 @@ class WorkerRequest(BaseModel):
         return cls(
             request=plan.request,
             parameter_uses=plan.parameter_uses,
-            build_revision=plan.build_revision,
             computation_identity=plan.computation_identity,
             provider_scopes=plan.required_scopes(),
             intervention_targets=plan.intervention_targets,
