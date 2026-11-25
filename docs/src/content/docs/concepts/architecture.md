@@ -12,7 +12,7 @@ The API, workers, and local runners build their catalogs from the same enabled [
 
 Lyra loads only the installed distributions, or Python packages, that you enable. Each distribution registers a factory as the `plugin` entry point in `lyra.plugins`. The factory runs synchronously, takes no arguments, and returns `PluginDefinition`.
 
-For deployment, select distributions in `lyra.toml`; for local execution, pass their names to `LocalRunner(plugins=[...])`. Both paths load live definitions before preparing requests:
+For deployment, select distributions in `lyra.toml`; for local execution, pass their names to `LocalRunner(plugins=[...])`. Both paths load live definitions before preparing requests. For server jobs, the API uses Redis Queue (RQ) to queue work in Valkey.
 
 ```text
 Selected installed distributions
@@ -21,7 +21,7 @@ Selected installed distributions
       → worker catalog → compatible request preparation
       → local catalog → local execution
 
-Client → authenticated API → Redis / Redis Queue (RQ)
+Client → authenticated API → RQ job queue in Valkey
   → worker → executor validation → resources and handlers
   → retained result → client download
 ```
@@ -76,7 +76,7 @@ Use this table to identify which component handles discovery, execution, or resu
 | `lyra.api` | Synchronous and asynchronous HTTP clients and the administrative command-line interface |
 | `lyra.utils` | Date and geometry helpers, plus Earth Engine helpers with the `earth-engine` extra |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
-| Redis | Dispatch, live job and worker state, and temporary failure diagnostics |
+| Valkey | Dispatch, live job and worker state, and temporary failure diagnostics |
 | SQLite | Shared immutable values, terminal job history, schemas, reports, and final-result descriptions |
 | PostGIS | Optional plugin-owned spatial data and queries |
 | Model Context Protocol (MCP) adapter | Agent tools using the same submission and result services |

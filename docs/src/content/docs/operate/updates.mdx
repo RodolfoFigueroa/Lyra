@@ -32,26 +32,26 @@ Use the current deployment settings to select the queue, including when the upda
 
 <Steps>
 
-1. Pause new submissions at the proxy. Stop the API and all workers that consume the queue. Let active jobs finish during shutdown. In the example, stop both services and keep Redis running on its own.
+1. Pause new submissions at the proxy. Stop the API and all workers for this queue, allowing active jobs to finish during shutdown. Keep Valkey running so you can clear the queue.
 
    ```sh
    docker compose stop api worker
-   docker compose up -d redis
+   docker compose up -d valkey
    ```
 
-2. Read `redis.url` and `jobs.queue` from the current `lyra.toml`. The queue defaults to `lyra` if you omit `jobs.queue`. Check both values before continuing. **Emptying the queue discards all jobs still waiting on it.**
+2. Read `valkey.url` and `jobs.queue` from the current `lyra.toml`. The queue defaults to `lyra` if you omit `jobs.queue`. Check both values before continuing. **Emptying the queue discards all jobs still waiting on it.**
 
-3. Empty the queue with Redis Queue (RQ). For the example’s default settings, run the command in a one-off worker container.
+3. Run `rq empty` against the selected queue. For the Compose example, use a one-off worker container.
 
    ```sh
    docker compose run --rm --no-deps worker \
-     rq empty --url redis://redis:6379/0 --serializer json lyra
+     rq empty --url redis://valkey:6379/0 --serializer json lyra
    ```
 
-   For another deployment, set the shell variables `redis_url` and `queue_name` to the values you checked. Run this command in the Lyra server environment.
+   For another deployment, set the shell variables `valkey_url` and `queue_name` to the values you checked. Run this command in the Lyra server environment.
 
    ```sh
-   rq empty --url "$redis_url" --serializer json "$queue_name"
+   rq empty --url "$valkey_url" --serializer json "$queue_name"
    ```
 
 </Steps>

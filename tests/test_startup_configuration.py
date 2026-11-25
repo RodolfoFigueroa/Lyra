@@ -32,7 +32,7 @@ def test_offline_validation_needs_no_credentials_or_runtime_files(
     path.chmod(0o444)
 
     assert admin_cli.main(["--json", "config", "validate", str(path)]) == 0
-    assert json.loads(capsys.readouterr().out) == {"valid": True, "schema_version": 7}
+    assert json.loads(capsys.readouterr().out) == {"valid": True, "schema_version": 8}
     assert path.read_bytes() == before
     assert not (tmp_path / "plugins").exists()
 

@@ -10,7 +10,7 @@ x-app: &app
     - lyra_data:/lyra_data
     - ${LYRA_CONFIG_FILE:-./lyra.toml}:/lyra_data/config/lyra.toml:ro
   depends_on:
-    redis:
+    valkey:
       condition: service_started
 
 services:
@@ -30,8 +30,8 @@ services:
     <<: *app
     stop_grace_period: 5h5m
     command: python -m lyra.server.worker_launcher
-  redis:
-    image: redis:alpine
+  valkey:
+    image: valkey/valkey:9.2.0-alpine
 
 volumes:
   lyra_data:

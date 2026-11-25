@@ -292,9 +292,8 @@ def build_parsers() -> list[argparse.ArgumentParser]:
         help="Additional plugin checkout (repeatable).",
     )
     develop.add_argument(
-        "--redis-url",
-        default=dev.DEFAULT_REDIS_URL,
-        help="Redis connection URL (default: %(default)s).",
+        "--valkey-url",
+        help="Use an external Valkey endpoint and clear this checkout's waiting queue.",
     )
     develop.add_argument(
         "--port",
@@ -341,7 +340,7 @@ def _run_command(args: argparse.Namespace) -> int:
                 msg = f"Duplicate plugin distribution: {name}"
                 raise PluginBuildError(msg)
             projects[name] = path.resolve()
-        return dev.launch(projects, args.port, args.resources, args.redis_url)
+        return dev.launch(projects, args.port, args.resources, args.valkey_url)
     if args.command == "diagram":
         paths = [args.project, *args.include_project]
         if args.output is not None and any(

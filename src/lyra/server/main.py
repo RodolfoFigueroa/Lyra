@@ -20,7 +20,7 @@ with command_imports(__name__):
         load_api_credentials,
         load_config,
     )
-    from lyra.server.db.redis import create_async_client, create_sync_client
+    from lyra.server.db.valkey import create_async_client, create_sync_client
     from lyra.server.logging_config import configure_logging
     from lyra.server.mcp import create_mcp_app
     from lyra.server.mcp.tools import InProcessLyraBackend
@@ -45,9 +45,9 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
         try:
             catalog = Catalog.load(config.plugins)
             async with AsyncExitStack() as stack:
-                connection = create_sync_client(config.redis)
+                connection = create_sync_client(config.valkey)
                 stack.callback(connection.close)
-                async_connection = create_async_client(config.redis)
+                async_connection = create_async_client(config.valkey)
                 stack.push_async_callback(async_connection.aclose)
                 jobs = ServerJobStore(connection, config.jobs, config.result_store_path)
                 jobs.initialize()
@@ -70,7 +70,7 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
             app.state.runtime = None
 
     app = FastAPI(title="Lyra API", version=APP_VERSION, lifespan=lifespan)
-    app.add_exception_handler(RedisError, redis_unavailable_response)
+    app.add_exception_handler(RedisError, valkey_unavailable_response)
     app.add_exception_handler(HistoryUnavailableError, sqlite_unavailable_response)
     register_http_routes(app)
     if config.mcp.enabled:
@@ -91,9 +91,9 @@ def sqlite_unavailable_response(_request: Request, _exc: Exception) -> JSONRespo
     )
 
 
-def redis_unavailable_response(_request: Request, _exc: Exception) -> JSONResponse:
-    """Return explicit unavailability when a native Redis operation fails."""
-    return JSONResponse(status_code=503, content={"detail": "Redis is unavailable."})
+def valkey_unavailable_response(_request: Request, _exc: Exception) -> JSONResponse:
+    """Return explicit unavailability when a native Valkey operation fails."""
+    return JSONResponse(status_code=503, content={"detail": "Valkey is unavailable."})
 
 
 def run_server(config: LyraConfig | None = None) -> None:

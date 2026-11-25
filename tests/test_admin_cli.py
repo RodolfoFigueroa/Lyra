@@ -38,7 +38,7 @@ READINESS: dict[str, JsonValue] = {
     "status": "ready",
     "sqlite": {"status": "ok"},
     "api_version": "1.0.0",
-    "redis": {"status": "ok"},
+    "valkey": {"status": "ok"},
 }
 
 
@@ -61,7 +61,7 @@ CASES = (
         "admin/status",
         {
             "api_version": "1.0.0",
-            "redis": {"status": "ok"},
+            "valkey": {"status": "ok"},
             "metric_count": 1,
             "queue": "batch",
             "worker_concurrency": 1,
@@ -326,7 +326,7 @@ def test_unhealthy_readiness_preserves_response(
         **READINESS,
         "status": "not_ready",
         "sqlite": {"status": "unavailable"},
-        "redis": {"status": "unavailable"},
+        "valkey": {"status": "unavailable"},
     }
     assert admin_cli.main(["--json", "health"]) == 1
     output = capsys.readouterr()

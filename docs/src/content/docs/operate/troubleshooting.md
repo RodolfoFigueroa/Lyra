@@ -27,7 +27,8 @@ If a process fails to start or a metric is missing, check the deployment inputs 
 | Symptom | Check |
 | --- | --- |
 | Process exits during startup | TOML syntax, required credentials, and readable paths |
-| Liveness works but readiness fails | Redis readiness details |
+| `/live` succeeds but `/ready` reports `degraded` | Check the API’s connection to Valkey. |
+| `/ready` returns HTTP 503 | Check that the API can read the configured SQLite result store. |
 | Metric is absent from the catalog | Installed distribution, enabled entry, factory import, and registered metrics |
 | Worker fails to start | Plugin imports, name collisions, and graph validation |
 
@@ -68,7 +69,7 @@ Execution stops at the first failure and publishes no partial outputs. A new sub
 
 ## Distinguish missing results from active work
 
-Check terminal history by job ID. Restore Redis access to inspect queued and running jobs.
+Check terminal history by job ID. Restore Valkey access to inspect queued and running jobs.
 
 A local wait timeout leaves the remote job running. Reconnect with its ID. See [job handling](../../use/jobs/) and [results](../../use/results/) for the consumer-facing behavior.
 

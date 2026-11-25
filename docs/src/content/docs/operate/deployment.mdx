@@ -1,6 +1,6 @@
 ---
 title: Deploy Lyra
-description: Start the city example deployment with a shared image, configuration, and Redis.
+description: Start the city example deployment with a shared image, configuration, and Valkey.
 contentType: How-to
 contentPlan: operate/deployment
 sidebar: { label: "Deploy Lyra" }
@@ -10,7 +10,7 @@ import { Steps } from '@astrojs/starlight/components';
 
 Use Docker Compose to run the city plugin on your server. Build one image for the API and workers, then check API readiness and worker heartbeats.
 
-Complete [deployment preparation](../requirements/) first. Compose starts Redis. The city plugin includes all its data and needs no additional data service.
+Follow the [deployment requirements](../requirements/) before you start. Compose starts Valkey for the job queue, and the city plugin reads its bundled dataset.
 
 <Steps>
 
@@ -27,7 +27,7 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
 
    For local development, the public URL can be `http://localhost:5219`. For remote use, configure your public HTTPS URL and [reverse proxy](../configuration/#configure-a-reverse-proxy).
 
-   The example’s Redis URL, `redis://redis:6379/0`, matches its Compose service. Its plugin configuration enables `lyra-city-example`, including the bundled city dataset. The first server job uses `street-1` from this provider.
+   The example sets `valkey.url` to `redis://valkey:6379/0`, where `valkey` is the Compose service name. The configuration enables `lyra-city-example` and its bundled dataset. The first server job uses `street-1` from this provider.
 
    If you completed the city tutorial in this checkout, the default `CITY_PLUGIN_SOURCE=../city-plugin` includes your changes. For a separate copy, set `CITY_PLUGIN_SOURCE` in `.env` to that project’s absolute directory. [Export your entry-point factory](../../plugins/tutorial/package/) before building the deployment image.
 
@@ -74,7 +74,7 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
    docker compose logs --tail=100 api worker
    ```
 
-   Expect HTTP 200 from both endpoints. A successful `/live` check means the API is running. A successful `/ready` check means SQLite is readable. Inspect the Redis field to confirm queue availability.
+   Expect HTTP 200 from both endpoints. `/live` confirms that the API is running. In the `/ready` response, check that both `sqlite.status` and `valkey.status` are `ok`.
 
    Check for active workers from the API container, where Compose sets the administrator key.
 

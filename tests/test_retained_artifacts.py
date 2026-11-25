@@ -142,7 +142,7 @@ def assert_committed(service: ResultService, job_id: str) -> None:
     assert b"".join(service.stream_table(job_id, "answer"))
 
 
-def test_admin_history_during_redis_outage(
+def test_admin_history_during_valkey_outage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     _, runtime = install_definitions(tmp_path, monkeypatch, {"plugin": definition([])})

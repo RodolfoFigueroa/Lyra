@@ -94,7 +94,7 @@ FIRST_JOB_ID = f"{1:032x}"
 SECOND_JOB_ID = f"{2:032x}"
 
 
-pytestmark = pytest.mark.usefixtures("dummy_redis_clients", "_close_managed_clients")
+pytestmark = pytest.mark.usefixtures("dummy_valkey_clients", "_close_managed_clients")
 
 _COMPLETED_AT = datetime(2026, 7, 9, 12, 5, tzinfo=UTC)
 create_mcp_app = partial(
@@ -2547,12 +2547,12 @@ class InterruptedBackend(FakeMCPBackend):
 
 
 @pytest.mark.parametrize("operation", ["submit", "observe", "download"])
-@pytest.mark.parametrize("failure", ["timeout", "cancel", "redis", "os"])
+@pytest.mark.parametrize("failure", ["timeout", "cancel", "valkey", "os"])
 def test_direct_operation_failure_boundaries(
     operation: str, failure: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     backend = InterruptedBackend([])
-    if failure == "redis":
+    if failure == "valkey":
         backend.failure = RedisConnectionError("private address")
     elif failure == "os":
         backend.failure = OSError("private address")

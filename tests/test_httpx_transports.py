@@ -31,9 +31,9 @@ from tests.client_helpers import (
     _job_list_response,
     _job_response,
     _liveness_response,
-    _redis_unavailable_response,
     _result_response,
     _status_response,
+    _valkey_unavailable_response,
 )
 from tests.httpx_download_helpers import ChunkStream, TemporaryFileOptions, destinations
 from tests.job_id_helpers import CLIENT_JOB_ID
@@ -225,7 +225,7 @@ def test_service_and_pending_errors(transport: TransportHarness) -> None:
     client = transport.open()
     transport.responses = [
         httpx.Response(
-            503, json=_redis_unavailable_response(), headers={"Retry-After": "3"}
+            503, json=_valkey_unavailable_response(), headers={"Retry-After": "3"}
         ),
         httpx.Response(202, json=_status_response()),
         httpx.Response(202, text="broken"),
@@ -234,7 +234,7 @@ def test_service_and_pending_errors(transport: TransportHarness) -> None:
         ServiceUnavailableError, match="may have been accepted"
     ) as service:
         transport.resolve(client.request(endpoints.create_job("heavy_metric")))
-    assert service.value.code == "redis_unavailable"
+    assert service.value.code == "valkey_unavailable"
     assert service.value.retryable
     assert service.value.retry_after_seconds == 3
     with pytest.raises(JobNotReadyError) as pending:
@@ -416,7 +416,7 @@ def test_download_streams_before_consuming_next_chunk(
     [
         (202, json.dumps(_status_response()), JobNotReadyError),
         (202, "invalid pending", DownloadError),
-        (503, json.dumps(_redis_unavailable_response()), ServiceUnavailableError),
+        (503, json.dumps(_valkey_unavailable_response()), ServiceUnavailableError),
         (404, "missing", DownloadError),
         (302, "redirect", DownloadError),
         (500, "failed", DownloadError),
@@ -449,7 +449,7 @@ def test_download_rejected_before_opening_destination(
         assert error.value.job_id == CLIENT_JOB_ID
         assert error.value.snapshot.status == "running"
     elif isinstance(error.value, ServiceUnavailableError):
-        assert error.value.code == "redis_unavailable"
+        assert error.value.code == "valkey_unavailable"
         assert error.value.retry_after_seconds == 3
     assert not destinations
     assert stream.closed

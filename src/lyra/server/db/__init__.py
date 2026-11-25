@@ -1,1 +1,1 @@
-"""Redis clients for job storage and queues."""
+"""Valkey clients for job storage and queues."""

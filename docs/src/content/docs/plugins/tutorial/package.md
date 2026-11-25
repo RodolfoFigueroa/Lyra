@@ -98,7 +98,7 @@ Give the operator a known request to check after enabling your plugin. Include t
 }
 ```
 
-The result contains three street rows with maintenance lengths 100 m, 0 m, and 300 m. Include those expected results and explain the synthetic score scale and bundled dataset, so the operator can recognize a successful run. The plugin requires no data service; server execution adds Lyra’s API, Redis, and workers.
+The result contains three street rows with maintenance lengths 100 m, 0 m, and 300 m. Document these values, the synthetic score scale, and the bundled dataset so the operator can verify the calculation. The plugin reads its data locally. For a server deployment, Lyra also needs the API, Valkey, and a worker.
 
 To [deploy the city plugin](../../../operate/deployment/), build the image from your packaged project. If you already run Lyra, [enable the plugin in your deployment](../../../operate/plugins/).
 

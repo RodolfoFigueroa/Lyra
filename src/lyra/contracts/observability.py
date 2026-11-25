@@ -18,10 +18,10 @@ class StorageHealth(StrictBaseModel):
     status: ReadinessStatus
 
 
-class RedisHealth(StrictBaseModel):
-    """Redis readiness observation."""
+class ValkeyHealth(StrictBaseModel):
+    """Valkey readiness observation."""
 
-    status: ReadinessStatus = Field(description="Redis readiness state.")
+    status: ReadinessStatus = Field(description="Valkey readiness state.")
 
 
 class LivenessResponse(StrictBaseModel):
@@ -36,7 +36,7 @@ class ReadinessResponse(StrictBaseModel):
 
     status: ServiceReadinessStatus = Field(description="Overall API readiness state.")
     api_version: str = Field(min_length=1, description="Running Lyra API version.")
-    redis: RedisHealth = Field(description="Redis readiness details.")
+    valkey: ValkeyHealth = Field(description="Valkey readiness details.")
     sqlite: StorageHealth
 
 
@@ -110,7 +110,7 @@ class AdminStatusResponse(StrictBaseModel):
     """High-level operational status for the Lyra service."""
 
     api_version: str = Field(min_length=1)
-    redis: RedisHealth
+    valkey: ValkeyHealth
     metric_count: int = Field(ge=0)
     queue: str = Field(min_length=1)
     worker_concurrency: int = Field(gt=0)

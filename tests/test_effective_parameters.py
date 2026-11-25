@@ -223,7 +223,7 @@ def test_execution_uses_accepted_factory_values() -> None:
     GraphExecutor(catalog, Mock()).execute(restored)
 
 
-@pytest.mark.usefixtures("dummy_redis_clients")
+@pytest.mark.usefixtures("dummy_valkey_clients")
 @pytest.mark.parametrize("explicit", [False, True])
 def test_live_defaults_survive_submission_and_worker(
     tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, *, explicit: bool
@@ -305,7 +305,7 @@ def test_live_defaults_survive_submission_and_worker(
         worker.set_runner_temp_base(None)
 
 
-@pytest.mark.usefixtures("dummy_redis_clients")
+@pytest.mark.usefixtures("dummy_valkey_clients")
 def test_distinct_defaulted_uses_keep_their_accepted_values_during_execution(
     tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -389,7 +389,7 @@ def test_numeric_identity_and_nested_transport() -> None:
     assert key(1, 1) != key(1, 1.0)
 
 
-@pytest.mark.usefixtures("dummy_redis_clients")
+@pytest.mark.usefixtures("dummy_valkey_clients")
 @pytest.mark.parametrize(
     "changed",
     [{"new": 1}, {"n": 2}, {"n": 1.0}, {"n": True}],

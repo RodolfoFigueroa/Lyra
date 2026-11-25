@@ -11,7 +11,7 @@ from lyra.server import main
 from lyra.server.runtime import require_runtime
 from tests.config_helpers import api_credentials, load_test_config
 
-pytestmark = pytest.mark.usefixtures("dummy_redis_clients")
+pytestmark = pytest.mark.usefixtures("dummy_valkey_clients")
 
 
 def test_lifespan_owns_mounted_mcp_session_manager(
@@ -39,22 +39,22 @@ def test_lifespan_owns_mounted_mcp_session_manager(
     assert calls == ["mcp-start", "mcp-stop"]
 
 
-def test_lifespan_owns_redis_clients(
+def test_lifespan_owns_valkey_clients(
     tmp_path: Path,
-    dummy_redis_clients: tuple[Mock, Mock],
+    dummy_valkey_clients: tuple[Mock, Mock],
 ) -> None:
     config = load_test_config(tmp_path)
     app = main.create_app(config, credentials=api_credentials())
 
     async def run_lifespan() -> None:
         async with app.router.lifespan_context(app):
-            assert app.state.runtime.redis is dummy_redis_clients[0]
-            assert app.state.runtime.async_redis is dummy_redis_clients[1]
+            assert app.state.runtime.valkey is dummy_valkey_clients[0]
+            assert app.state.runtime.async_valkey is dummy_valkey_clients[1]
 
     asyncio.run(run_lifespan())
 
-    dummy_redis_clients[0].close.assert_called_once()
-    dummy_redis_clients[1].aclose.assert_awaited_once()
+    dummy_valkey_clients[0].close.assert_called_once()
+    dummy_valkey_clients[1].aclose.assert_awaited_once()
 
 
 def test_run_server_configures_trusted_proxy_sources(
@@ -96,10 +96,10 @@ def test_run_server_configures_trusted_proxy_sources(
 
 
 @pytest.mark.parametrize("failure_stage", ["mcp", "body"])
-def test_lifespan_closes_redis_on_failure(
+def test_lifespan_closes_valkey_on_failure(
     failure_stage: str,
     tmp_path: Path,
-    dummy_redis_clients: tuple[Mock, Mock],
+    dummy_valkey_clients: tuple[Mock, Mock],
 ) -> None:
     app = main.create_app(load_test_config(tmp_path), credentials=api_credentials())
 
@@ -118,8 +118,8 @@ def test_lifespan_closes_redis_on_failure(
                 raise RuntimeError(message)
 
     asyncio.run(exercise())
-    dummy_redis_clients[0].close.assert_called_once()
-    dummy_redis_clients[1].aclose.assert_awaited_once()
+    dummy_valkey_clients[0].close.assert_called_once()
+    dummy_valkey_clients[1].aclose.assert_awaited_once()
 
 
 def test_dependency_rejects_inactive_runtime() -> None:

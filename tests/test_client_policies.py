@@ -29,9 +29,9 @@ from tests.client_helpers import (
     FakeSession,
     _job_response,
     _readiness_response,
-    _redis_unavailable_response,
     _result_response,
     _status_response,
+    _valkey_unavailable_response,
 )
 from tests.client_scenarios import AsyncReply, Reply, Scenario
 from tests.job_id_helpers import CLIENT_JOB_ID
@@ -84,7 +84,7 @@ def test_structured_unavailability(
 ) -> None:
     headers = {} if retry_after is None else {"Retry-After": retry_after}
     scenario.replies = [
-        Reply(status=503, payload=_redis_unavailable_response(), headers=headers)
+        Reply(status=503, payload=_valkey_unavailable_response(), headers=headers)
     ]
     operations = {
         "health": scenario.client.health.liveness,
@@ -99,7 +99,7 @@ def test_structured_unavailability(
     with pytest.raises(ServiceUnavailableError) as error:
         scenario.resolve(operations[resource]())
     assert error.value.retry_after_seconds == expected
-    assert error.value.code == "redis_unavailable"
+    assert error.value.code == "valkey_unavailable"
     assert error.value.retryable
     assert len(scenario.calls) == 1
 
@@ -522,7 +522,7 @@ def test_tables_structured_unavailability(scenario: Scenario) -> None:
     scenario.replies = [
         Reply(
             status=503,
-            payload=_redis_unavailable_response(),
+            payload=_valkey_unavailable_response(),
             headers={"Retry-After": "5"},
         )
     ]
@@ -876,7 +876,7 @@ def test_run_retrieval_failure_checks_deadline(
     download: bool,
     expires: bool,
 ) -> None:
-    failure = Reply(status=503, payload=_redis_unavailable_response())
+    failure = Reply(status=503, payload=_valkey_unavailable_response())
     scenario.replies = [
         Reply(status=202, payload=_job_response()),
         status_reply("succeeded"),

@@ -24,10 +24,10 @@ def load_test_config(
     plugins: list[Path] | None = None,
 ) -> LyraConfig:
     raw_config = {
-        "schema_version": 7,
+        "schema_version": 8,
         "result_store_path": base / "results.sqlite3",
         "api": {"public_base_url": "http://127.0.0.1:5219"},
-        "redis": {"url": "redis://redis:6379/0"},
+        "valkey": {"url": "redis://valkey:6379/0"},
         "logging": {},
         "jobs": {},
         "plugins": {"installed": [plugin_config(path) for path in plugins or []]},

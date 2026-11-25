@@ -1,18 +1,18 @@
-"""Explicit Redis client factories with bounded operation timeouts."""
+"""Explicit Valkey client factories with bounded operation timeouts."""
 
 import redis
 import redis.asyncio as aioredis
 from redis.backoff import NoBackoff
 from redis.retry import Retry
 
-from lyra.contracts.config import RedisConfig
+from lyra.contracts.config import ValkeyConfig
 
 
-def create_sync_client(settings: RedisConfig) -> redis.Redis:
+def create_sync_client(settings: ValkeyConfig) -> redis.Redis:
     """Create the synchronous coordination connection.
 
     Returns:
-        A synchronous Redis client.
+        A synchronous Valkey client.
     """
     return redis.from_url(
         settings.url,
@@ -22,11 +22,11 @@ def create_sync_client(settings: RedisConfig) -> redis.Redis:
     )
 
 
-def create_async_client(settings: RedisConfig) -> aioredis.Redis:
+def create_async_client(settings: ValkeyConfig) -> aioredis.Redis:
     """Create the asynchronous readiness connection.
 
     Returns:
-        An asynchronous Redis client.
+        An asynchronous Valkey client.
     """
     return aioredis.from_url(
         settings.url,

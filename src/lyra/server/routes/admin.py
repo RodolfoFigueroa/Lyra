@@ -29,7 +29,7 @@ from lyra.contracts.observability import (
     ConfigSummaryResponse,
     InstalledPluginSummary,
     QueueSummary,
-    RedisHealth,
+    ValkeyHealth,
     WorkerConfigSummary,
     WorkerDetail,
     WorkersResponse,
@@ -84,12 +84,12 @@ def _plugin_response(plugin: InstalledPluginConfig) -> InstalledPluginResponse:
     )
 
 
-def _redis_health(connection: Redis) -> RedisHealth:
+def _valkey_health(connection: Redis) -> ValkeyHealth:
     try:
         pong = connection.ping()
     except RedisError:
-        return RedisHealth(status="unavailable")
-    return RedisHealth(status="ok" if pong else "unavailable")
+        return ValkeyHealth(status="unavailable")
+    return ValkeyHealth(status="ok" if pong else "unavailable")
 
 
 def _worker_config_summary(config: LyraConfig) -> WorkerConfigSummary:
@@ -157,12 +157,12 @@ def get_status(runtime: RuntimeDependency) -> AdminStatusResponse:
     """Summarize deployment health and active runtime configuration.
 
     Returns:
-        API, Redis, catalog, queue, worker, and retention status.
+        API, Valkey, catalog, queue, worker, and retention status.
     """
     config = runtime.config
     return AdminStatusResponse(
         api_version=APP_VERSION,
-        redis=_redis_health(runtime.redis),
+        valkey=_valkey_health(runtime.valkey),
         metric_count=len(runtime.catalog.get_loaded_metric_names()),
         queue=config.jobs.queue,
         worker_concurrency=config.worker.concurrency,

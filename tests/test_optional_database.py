@@ -34,7 +34,7 @@ def test_api_resolves_only_api_keys(
         configuration.LyraConfig.model_validate(raw)
 
 
-@pytest.mark.usefixtures("dummy_redis_clients")
+@pytest.mark.usefixtures("dummy_valkey_clients")
 def test_api_lifecycle_serves_readiness(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
     app = main.create_app(config, credentials=api_credentials())
@@ -42,7 +42,7 @@ def test_api_lifecycle_serves_readiness(tmp_path: Path) -> None:
         assert set(client.get("/ready").json()) == {
             "status",
             "api_version",
-            "redis",
+            "valkey",
             "sqlite",
         }
 
@@ -51,10 +51,10 @@ def test_api_lifecycle_serves_readiness(tmp_path: Path) -> None:
 def test_readiness(tmp_path: Path, *, healthy: bool) -> None:
     config = load_test_config(tmp_path)
     runtime = make_runtime(config)
-    runtime.async_redis.ping = AsyncMock(return_value=healthy)
+    runtime.async_valkey.ping = AsyncMock(return_value=healthy)
     response = Response()
     result = asyncio.run(readiness(response, runtime))
-    assert result.redis.status == ("ok" if healthy else "unavailable")
+    assert result.valkey.status == ("ok" if healthy else "unavailable")
     assert response.status_code == 200
     assert result.status == ("ready" if healthy else "degraded")
 

@@ -31,14 +31,14 @@ from lyra.server.config import (
 
 def _valid_config(base: Path) -> dict[str, Any]:
     return {
-        "schema_version": 7,
+        "schema_version": 8,
         "api": {
             "host": DEFAULT_API_HOST,
             "port": 5219,
             "public_base_url": "https://lyra.example.test/",
         },
-        "redis": {
-            "url": "redis://redis:6379/0",
+        "valkey": {
+            "url": "redis://valkey:6379/0",
         },
         "logging": {
             "level": "INFO",
@@ -71,12 +71,12 @@ def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     config = LyraConfig.model_validate(_valid_config(tmp_path))
 
-    assert config.schema_version == 7
+    assert config.schema_version == 8
     assert config.api.host == DEFAULT_API_HOST
     assert config.api.port == 5219
     assert config.api.public_base_url == "https://lyra.example.test"
     assert config.api.forwarded_allow_ips == DEFAULT_FORWARDED_ALLOW_IPS
-    assert config.redis.url == "redis://redis:6379/0"
+    assert config.valkey.url == "redis://valkey:6379/0"
     assert config.mcp.enabled is False
     assert config.mcp.mount_path == DEFAULT_MCP_MOUNT_PATH
     assert config.logging.level == "INFO"
@@ -179,14 +179,18 @@ def test_config_contract_requires_known_schema_version(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
     raw["schema_version"] = 1
 
-    _assert_invalid(raw, "Input should be 7")
+    _assert_invalid(raw, "schema_version")
 
 
 @pytest.mark.parametrize(
     ("section", "field", "value", "match"),
     [
         ("api", "port", 0, "greater than or equal to 1"),
-        ("redis", "url", "postgres://db:5432/lyra", "redis.url"),
+        ("valkey", "url", "redis://:6379", "valkey.url"),
+        ("valkey", "url", "unix://relative/path", "valkey.url"),
+        ("valkey", "url", "unix:relative", "valkey.url"),
+        ("valkey", "url", "unix:/tmp/socket", "valkey.url"),
+        ("valkey", "url", "postgres://db:5432/lyra", "valkey.url"),
         ("logging", "level", "NOPE", "logging.level"),
         ("jobs", "rq_retention_seconds", 0, "greater than 0"),
         ("jobs", "execution_timeout_seconds", 0, "greater than 0"),
@@ -348,7 +352,7 @@ def test_config_contract_reports_missing_agent_api_key_env(
 
 def test_config_contract_rejects_empty_required_sections(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
-    del raw["redis"]
+    del raw["valkey"]
 
     _assert_invalid(raw, "Field required")
 
@@ -399,3 +403,13 @@ def test_result_store_path_default_and_absolute_override(tmp_path: Path) -> None
     raw["result_store_path"] = "relative/results.sqlite3"
     with pytest.raises(ValidationError, match="absolute"):
         parse_config_toml(raw)
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["redis://valkey:6379/0", "rediss://valkey:6380/1", "unix:///tmp/valkey.sock"],
+)
+def test_config_accepts_valkey_transports(tmp_path: Path, endpoint: str) -> None:
+    raw = _valid_config(tmp_path)
+    raw["valkey"]["url"] = endpoint
+    assert LyraConfig.model_validate(raw).valkey.url == endpoint

@@ -34,10 +34,10 @@ from tests.client_helpers import (
     _plugin_repo_list_response,
     _queue_response,
     _readiness_response,
-    _redis_unavailable_response,
     _result_descriptor_response,
     _result_response,
     _status_response,
+    _valkey_unavailable_response,
     _worker_detail_response,
     _workers_response,
     install_sync_handler,
@@ -262,7 +262,7 @@ def test_sync_client_exposes_structured_database_unavailability(
         monkeypatch,
         lambda *_args, **_kwargs: FakeSyncResponse(
             status_code=503,
-            payload=_redis_unavailable_response(),
+            payload=_valkey_unavailable_response(),
             headers={"Retry-After": "5"},
         ),
     )
@@ -272,7 +272,7 @@ def test_sync_client_exposes_structured_database_unavailability(
             "metric", inputs={}, parameters={}
         )
 
-    assert exc_info.value.code == "redis_unavailable"
+    assert exc_info.value.code == "valkey_unavailable"
     assert exc_info.value.retryable is True
     assert exc_info.value.retry_after_seconds == 5
 
@@ -759,7 +759,7 @@ def test_async_client_exposes_structured_database_unavailability(
     FakeSession.responses = [
         FakeAsyncResponse(
             status=503,
-            payload=_redis_unavailable_response(),
+            payload=_valkey_unavailable_response(),
             headers={"Retry-After": "5"},
         )
     ]
@@ -772,7 +772,7 @@ def test_async_client_exposes_structured_database_unavailability(
             )
         )
 
-    assert exc_info.value.code == "redis_unavailable"
+    assert exc_info.value.code == "valkey_unavailable"
     assert exc_info.value.retryable is True
     assert exc_info.value.retry_after_seconds == 5
 

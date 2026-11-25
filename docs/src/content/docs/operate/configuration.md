@@ -49,9 +49,19 @@ uv run lyra-admin --json config validate ./lyra.toml
 
 The command checks the file’s syntax and configuration fields, including the plugin entries. You can run it without credentials or a running server.
 
-On success, `--json` prints `{"valid": true, "schema_version": 7}`. The command exits with code 2 for invalid configuration or code 1 if it can’t read the file.
+On success, `--json` prints `{"valid": true, "schema_version": 8}`. The command exits with code 2 for invalid configuration or code 1 if it can’t read the file.
 
-After deployment, check `/ready` for Redis availability. Set `redis.readiness_timeout_seconds` to change the probe’s default timeout of 1s. Workers connect to plugin data sources during job execution.
+## Connect the API and workers to Valkey
+
+Set `valkey.url` to an endpoint that both the API and workers can reach.
+
+| Connection | Example |
+| --- | --- |
+| Network | `redis://valkey:6379/0` |
+| Encrypted network | `rediss://valkey.example.com:6380/0` |
+| Unix socket | `unix:///run/valkey/valkey.sock` |
+
+After deployment, check `valkey.status` in the `/ready` response. A value of `ok` confirms that Valkey answered the probe. Set `valkey.readiness_timeout_seconds` to change the default timeout of 1s. Workers connect to plugin data sources when they run a job.
 
 ## Set the public URL
 

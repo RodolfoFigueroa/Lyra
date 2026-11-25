@@ -17,7 +17,7 @@ services:
     networks:
       - lyra_net
     depends_on:
-      - lyra-redis
+      - lyra-valkey
     healthcheck:
       test:
         - CMD
@@ -29,9 +29,9 @@ services:
       retries: 20
       start_period: 5s
 
-  lyra-redis:
-    image: redis:alpine
-    container_name: lyra-redis
+  lyra-valkey:
+    image: valkey/valkey:9.2.0-alpine
+    container_name: lyra-valkey
     restart: unless-stopped
     networks:
       - lyra_net
@@ -44,7 +44,7 @@ services:
     networks:
       - lyra_net
     depends_on:
-      lyra-redis:
+      lyra-valkey:
         condition: service_started
 
 networks:
