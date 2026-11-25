@@ -32,7 +32,7 @@ Issues in `docs/scripts/`, `docs/astro.config.mjs`, `docs/public/`, `docs/conten
 ### `[ ] TOOL-03` `starlight-pydocs` dumps 2,711 internal symbols across 169 pages while hiding public client methods
 - **Locations:** `docs/astro.config.mjs:97-127`, `src/lyra/api/client/sync.py:200-534`, `src/lyra/api/client/async_.py:203-547`, `docs/src/content/docs/reference/python.md:18,24,31`
 - **Problem:**
-  - Exports every internal module in `src/lyra/` (169+ HTML pages, 850 KB `api/lyra/llms.txt`, 570 KB `symbols.json`, now also including `lyra.runtime.terminal_history` and `lyra.server.terminal_jobs` added in `20c90a3b`):
+  - Exports every internal module in `src/lyra/` (170+ HTML pages, 850 KB `api/lyra/llms.txt`, 570 KB `symbols.json`, including `lyra.runtime.terminal_history` & `lyra.server.terminal_jobs` from `20c90a3b`, and `lyra.sdk.dev` & `lyra.server.dev_queue` from `0cf17003`):
     - `runtime`: 44 pages / 705 symbols (`sqlite_schema`, `sqlite_store`, `input_capture`, `lineage`, `reuse`, `planning/*`, etc.)
     - `server`: 36 pages / 365 symbols (internal FastAPI routes, RQ workers, `response_budget`, `result_projection`, etc.)
     - `contracts`: 38 pages / 1,043 symbols (internal helpers `strict`, `value_identity`, `revision_tokens`, `job_paths`, etc.)
@@ -63,15 +63,15 @@ Issues in `docs/scripts/`, `docs/astro.config.mjs`, `docs/public/`, `docs/conten
 - **Fix:**
   - Once `starlight-pydocs` is scoped to public symbols (`TOOL-03`), also tighten `remark-api-links.mjs`: only autolink exact qualified names (`lyra.*` / `Class.method`) or unique public PascalCase class names—never bare lowercase attribute/module suffixes like `context`, `execute`, `parquet`, `location_id`, `executed`.
 
-### `[ ] TOOL-05` `generate_config_reference()` has factual bugs, missing `const: 6`, broken `\|` escapes, and verbose layout
-- **Locations:** `docs/scripts/generate_docs.py:451-601`, `docs/src/content/docs/reference/generated/configuration.md`
+### `[ ] TOOL-05` `generate_config_reference()` has factual bugs, missing `const: 7`, broken `\|` escapes, and verbose layout
+- **Locations:** `docs/scripts/generate_docs.py:451-603`, `docs/src/content/docs/reference/generated/configuration.md`
 - **Problems:**
-  1. **False merging claim** (`generate_docs.py:555-557`, `configuration.md:11`): *"Lyra does not merge section defaults into a section you supply."* False—supplying partial sections (`jobs={"queue": "custom"}`, `mcp={"enabled": True}`, `api={"public_base_url": "..."}`) **does** apply optional field defaults in `LyraConfig.model_validate`.
-  2. **Stale secret-source claim** (`generate_docs.py:550-551`, `configuration.md:9`): *"Database passwords and API credentials come from environment variables."* Resource secrets also accept UTF-8 `file` paths, and core Lyra has no database password env var.
-  3. **Missing `schema_version = 6` constraint** (`generate_docs.py:375-386,493`, `configuration.md:86-95`): `schema_constraints()` ignores `"const"` and `"enum"`, so `schema_version: Literal[6]` shows `Constraints: —`.
-  4. **Broken literal `\|` in HTML** (`generate_docs.py:582`, `configuration.md:72,226,340`): Passes bullet-list values through `markdown_cell()`, rendering literal `string \| null` in built HTML in 4 places.
+  1. **False merging claim** (`generate_docs.py:557-559`, `configuration.md:11`): *"Lyra does not merge section defaults into a section you supply."* False—supplying partial sections (`jobs={"queue": "custom"}`, `mcp={"enabled": True}`, `api={"public_base_url": "..."}`) **does** apply optional field defaults in `LyraConfig.model_validate`.
+  2. ~~**Stale secret-source claim**~~ — **Resolved in commit `0cf17003`** (`generate_docs.py:550-553` now documents `--config`, environment API credentials, and Redis URL privacy, removing `"Database passwords"`).
+  3. **Missing `schema_version = 7` constraint** (`generate_docs.py:375-386,493`, `configuration.md:75-84`): `schema_constraints()` ignores `"const"` and `"enum"`, so `schema_version: Literal[7]` (`"const": 7` in `config.schema.json:317`) still shows `Constraints: —`.
+  4. **Broken literal `\|` in HTML** (`generate_docs.py:584`, `configuration.md:62,216,330`): Passes bullet-list values through `markdown_cell()`, rendering literal `string \| null` in built HTML in 4 places.
   5. **Verbose layout**: Duplicates every top-level heading (`## api` followed immediately by `### api`) and uses 6-line bullet blocks per field instead of compact per-section Markdown tables.
-- **Fix:** Fix the intro prose, include `const`/`enum` in `schema_constraints()`, stop escaping `|` outside tables, and render each config section as a clean Markdown table.
+- **Fix:** Fix the merging prose, include `const`/`enum` in `schema_constraints()`, stop escaping `|` outside tables, and render each config section as a clean Markdown table.
 
 ### `[ ] TOOL-06` `generate_http_reference()` drops binary Arrow responses and actual error status codes
 - **Locations:** `docs/scripts/generate_docs.py:209-324`, `docs/src/content/docs/reference/generated/http.md`, `src/lyra/server/routes/*.py`
@@ -81,13 +81,14 @@ Issues in `docs/scripts/`, `docs/astro.config.mjs`, `docs/public/`, `docs/conten
   3. `GET /jobs/{job_id}/result/inspection` (`routes/jobs.py:171-172`, `http.md:345,348`) declares `ActiveResultOutput | TerminalResultOutput` for both `200` and `202` instead of `TerminalResultOutput` (`200`) and `ActiveResultOutput` (`202`).
 - **Fix:** Inspect all content types in `generate_http_reference()` (showing `application/vnd.apache.arrow.stream`), and declare the real status codes/models on the FastAPI routes so both `/openapi.json` and `http.md` are accurate.
 
-### `[ ] TOOL-07` `generate_cli_reference()` formatting and missing argparse help
-- **Locations:** `docs/scripts/generate_docs.py:604-650`, `docs/src/content/docs/reference/generated/cli.md`, `src/lyra/sdk/plugin_cli.py`, `src/lyra/api/admin_cli.py`
+### `[ ] TOOL-07` `generate_cli_reference()` formatting, missing `lyra.server.main`, and missing argparse help
+- **Locations:** `docs/scripts/generate_docs.py:604-652`, `docs/src/content/docs/reference/generated/cli.md`, `src/lyra/sdk/plugin_cli.py`, `src/lyra/api/admin_cli.py`, `src/lyra/server/main.py`, `src/lyra/server/worker_launcher.py`
 - **Problems:**
-  - Renders ``## `worker launcher` `` in backticks as if it were a shell command (`generate_docs.py:609,634`); actual invocation is `python -m lyra.server.worker_launcher`.
-  - Flattens 22 `##` headings and emits generic `"Inspect help for ..."` fallback text on 8 subcommands whose argparse parsers lack `description=`.
-  - Several CLI options lack `help=` strings (`--project`, `--include-project`, `--output` on `lyra-plugin diagram`; `--limit`, `--status`, `--offset`, `id`, `name`, `PATH` on `lyra-admin`).
-- **Fix:** Use actual command `python -m lyra.server.worker_launcher`, group subcommands under `lyra-plugin` / `lyra-admin` / worker launcher, and add missing `description=` and `help=` text in the parsers.
+  - Renders ``## `worker launcher` `` in backticks as if it were a shell command (`generate_docs.py:611,636`); actual invocation is `python -m lyra.server.worker_launcher`.
+  - Commit `0cf17003` added `--config` to `python -m lyra.server.main` (`src/lyra/server/main.py:391-393`), but defined its `ArgumentParser` inline under `if __name__ == "__main__":`—so **`lyra.server.main` is completely omitted** from `cli.md` while `worker_launcher` is included.
+  - Flattens 23 `##` headings and emits generic `"Inspect help for ..."` fallback text on 9 subcommands whose argparse parsers lack `description=`—including the newly added `lyra-plugin dev` (`cli.md:64-66`, `plugin_cli.py:257-259`).
+  - Several CLI options lack `help=` strings (`--project` on `lyra-plugin dev`, `--config` on `worker_launcher`, `--project`/`--include-project`/`--output` on `lyra-plugin diagram`, `--limit`/`--status`/`--offset`/`id`/`name`/`PATH` on `lyra-admin`).
+- **Fix:** Expose `build_parser()` on `lyra.server.main` and include it in `cli.md`; use actual commands (`python -m lyra.server.main`, `python -m lyra.server.worker_launcher`); group subcommands under `lyra-plugin` / `lyra-admin` / server launchers; and add missing `description=` and `help=` text in the parsers.
 
 ### `[ ] TOOL-08` Static MCP example JSON files fail Pydantic validation
 - **Locations:**
@@ -117,13 +118,15 @@ Issues in `docs/scripts/`, `docs/astro.config.mjs`, `docs/public/`, `docs/conten
   - `contentPlan:` frontmatter across all 66 authored pages + `docs/src/pages/404.astro:9`
 - **Why:** High-maintenance mirror of headings that adds friction to every edit without preventing factual drift or bad prose. (Optionally keep `contentType` if useful for editorial review, or drop both.)
 
-### `[ ] TOOL-11` Strip all 25 legacy `<span id="...">` anchor hacks
-- **Locations:**
+### `[ ] TOOL-11` Strip all 29 legacy `<span id="...">` anchor hacks
+- **Locations:** (Commit `0cf17003` added 4 more legacy spans on top of the original 25.)
   - `docs/src/content/docs/quickstart.mdx:23,34,49,77,90,109` (6 headings, including 3 spans on line 23 with a trailing-hyphen typo `set-your-connection-details-`)
-  - `docs/src/content/docs/operate/deployment.mdx:17,34,45,55,69`
-  - `docs/src/content/docs/operate/plugins.mdx:15,28,41`
+  - `docs/src/content/docs/operate/deployment.mdx:17,34,45,55,67`
+  - `docs/src/content/docs/operate/plugins.mdx:15,25,38,60` (line 60 adds `<span id="develop-with-editable-sources"></span><span id="add-another-checkout"></span>`)
+  - `docs/src/content/docs/operate/updates.mdx:29,59` (`drain-and-restart`, `recreate-the-example`)
+  - `docs/src/content/docs/plugins/development.mdx:13` (`develop-with-editable-sources`)
   - `docs/src/content/docs/plugins/agent-assisted-authoring.mdx:17,43,53,76,88,98`
   - `docs/src/content/docs/plugins/publish-and-debug.mdx:15,51`
   - `docs/src/content/docs/plugins/dependencies.mdx:86,112`
   - `docs/src/content/docs/plugins/tutorial/testing.md:132` (creates broken trailing-hyphen slug `test-a-data-loading-failure-`)
-- **Fix:** Remove all `<span id="..."></span>` tags, update any internal links to the natural heading slugs, and remove the `<span id=` strip regex from `generate_docs.py:854` (and its assertion in `tests/test_docs_contract.py:133,144`).
+- **Fix:** Remove all `<span id="..."></span>` tags, update any internal links to the natural heading slugs, and remove the `<span id=` strip regex from `generate_docs.py:856` (and its assertion in `tests/test_docs_contract.py:133,144`).

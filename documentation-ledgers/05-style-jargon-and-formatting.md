@@ -55,7 +55,7 @@ Current corpus has 90+ US spellings (`catalog`, `normalize`, `serialize`, `behav
 - `docs/src/content/docs/concepts/lifecycle.md:56` (`cancelling` → `canceling`)
 
 ### `[ ] STYLE-08` Standardize sidebar labels & `contentType`
-- Fix mechanical Python `str.title()` capitalization of articles/prepositions/conjunctions (`A`, `An`, `And`, `For`, `In`, `The`, `To`, `With`) across `docs/navigation.json` (`"Build A City Plugin"`, `"Develop And Deliver"` vs `"Deploy and Operate"`), `docs/scripts/generate_docs.py:189`, and 34 page frontmatter `sidebar.label` entries. Pick standard Title Case (lowercase minor words) or sentence case matching H1s.
+- Fix mechanical Python `str.title()` capitalization of articles/prepositions/conjunctions (`A`, `An`, `And`, `For`, `In`, `The`, `To`, `With`) across `docs/navigation.json` (`"Build A City Plugin"`, `"Develop And Deliver"` vs `"Deploy and Operate"`), `docs/scripts/generate_docs.py:189`, and 32 remaining page frontmatter `sidebar.label` entries (`operate/updates.mdx` and `plugins/development.mdx` already switched to proper Title Case in `0cf17003`). Pick standard Title Case (lowercase minor words) or sentence case matching H1s.
 - Add or standardize missing `sidebar.label` on `use/location-exports.md`, `reference/locations.md`, `reference/location-artifacts.md`.
 - Align tutorial chapter titles between `plugins/tutorial/index.md:54-61`, page `title`s, and `sidebar.label`s.
 - Fix wrong `contentType` values:
@@ -75,7 +75,7 @@ Every other file uses unwrapped single-line paragraphs and curly apostrophes (`�
 - **Hyphenation:** Decide between closed (`nonblank`, `nonempty`, `nonnegative`, `noncanonical`) and hyphenated (`non-null`) consistently.
 - **Contractions:** Use contractions consistently (`don’t`, `doesn’t`, `you’ll`) instead of alternating contracted and formal forms across sibling guides.
 - **Acronym first use:** Spell out `MCP`, `CLI`, `CIDR`, `WGS84`, `TOML` on first use per page where not in the allowed-abbreviations list (`use/results.md:37`, `use/rest-api.md:130`, `use/mcp.md:102`, `operate/configuration.md:24,92`, `operate/caching.md:68`, `operate/plugins.mdx:52`).
-- **List/code lead-ins & punctuation:** Introduce lists with colons (`operate/runbook.md:45`, `operate/updates.md:71`, `use/rest-api.md:67`, `operate/admin-cli.md:47`, `plugins/tutorial/index.md:24`); match trailing periods on full-sentence list items (`operate/caching.md:49-51`, `operate/updates.md:73-76`, `use/rest-api.md:56-61`, `use/mcp.md:27-32`).
+- **List/code lead-ins & punctuation:** Introduce lists with colons (`operate/runbook.md:47`, `use/rest-api.md:67`, `operate/admin-cli.md:47`, `plugins/tutorial/index.md:24`); match trailing periods on full-sentence list items (`operate/caching.md:49-51`, `use/rest-api.md:56-61`, `use/mcp.md:27-32`). *(Note: `operate/updates.mdx` fixed its list periods in `0cf17003`.)*
 - **Extra blank line / empty structure:** Remove extra blank line at `use/results.md:298`; add H2 headings to `plugins/earth-engine.md`; fix mixed numbered/unnumbered H2s in `use/mcp.md:15-218`.
 - **GitHub repo casing:** Use `https://github.com/RodolfoFigueroa/Lyra/...` everywhere (fix lowercase `/lyra/` in `operate/caching.md:69`, `reference/index.md:47`, `plugins/canonical-selection.md:48`, `plugins/location-providers.md:133,139`).
 
@@ -86,7 +86,7 @@ Every other file uses unwrapped single-line paragraphs and curly apostrophes (`�
 ### `[ ] STYLE-11` Standardize `.md` vs `.mdx` and `<Steps>`
 - Convert JSX-free `.mdx` files to `.md`: `plugins/dependencies.mdx`, `plugins/quickstart.mdx` (if not deleted).
 - Standardize `plugins/tutorial/*` so all chapters use `.mdx` + `<Steps>` + `<CodeExample>` (currently Ch. 1–5 do, Ch. 6–8 abruptly drop `<Steps>` and `<CodeExample>`).
-- Decide whether multi-step `operate/` procedures (`updates.md`, `troubleshooting.md`) should use `<Steps>` like `deployment.mdx` and `plugins.mdx`.
+- Decide whether `operate/troubleshooting.md` should use `<Steps>` like `deployment.mdx`, `plugins.mdx`, and `updates.mdx` (converted in `0cf17003`).
 
 ### `[ ] STYLE-12` Stop splitting decorators from `def` across two fenced blocks
 Rejoin `@metric(...)` / `@location_operation(...)` and their function bodies (drop *"Append the handler immediately after its decorator"*) in:

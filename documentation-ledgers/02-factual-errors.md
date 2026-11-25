@@ -33,7 +33,7 @@ Every factual discrepancy found across `docs/`, verified directly against `src/l
 - `[ ] FACT-05` **False claim that cross-field Python validators run only in the worker (failing with `invalid_input`)**
   - **Docs:** `docs/src/content/docs/use/jobs.md:58`, `docs/src/content/docs/use/rest-api.md:112`, `docs/src/content/docs/operate/troubleshooting.md:61`
   - **Truth:** The API loads live plugins (`server/main.py:44`) and runs full Pydantic validation during `POST /jobs` (`server/job_submission.py:114-119`, `runtime/invocation.py:80`), rejecting cross-field validator errors immediately with HTTP `422` (`routes/jobs.py:88-89`). Worker replay failures raise `BoundPlanError` (`type: "bound_plan"`, `server/worker.py:359-365`), not `invalid_input`.
-  - **Fix:** Remove this myth from all 3 pages; distinguish submission errors (`404` unknown metric, `422` invalid parameters/selections/interventions) from worker errors (unknown location IDs, base-dataset intervention conflicts, provider/handler/output failures, `deployment_changed`/`bound_plan`).
+  - **Fix:** Remove this myth from all 3 pages; distinguish submission errors (`404` unknown metric, `422` invalid parameters/selections/interventions) from worker errors (unknown location IDs, base-dataset intervention conflicts, provider/handler/output failures, `bound_plan`).
 
 - `[ ] FACT-06` **Nonexistent top-level `metric` field on downloaded job result**
   - **Doc:** `docs/src/content/docs/use/mcp.md:100` — *"Use the result’s `metric` field to identify the requested calculation."*
@@ -94,15 +94,12 @@ Every factual discrepancy found across `docs/`, verified directly against `src/l
   - **Truth:** Handlers receive `geopandas.GeoDataFrame`s (`skills/lyra-metric/SKILL.md:37`).
   - **Fix:** Replace with `GeoDataFrame` phrasing.
 
-- `[ ] FACT-17` **Nonexistent Dockerfile stage `"runtime"`**
-  - **Doc:** `docs/src/content/docs/plugins/development.md:48` — *"Add native libraries required by the plugin to the runtime stage."*
-  - **Truth:** `examples/lyra-deployment/Dockerfile:1,13,17,23` defines `sources`, `production-builder`, `development`, and `production`.
-  - **Fix:** Change `"runtime stage"` to `"production stage"` (and note `sources` for build headers).
+- `[x] FACT-17` **Nonexistent Dockerfile stage `"runtime"`** (`plugins/development.md:48`) — **Resolved in commit `0cf17003`**: the Docker Compose dev workflow and `plugins/development.md` were deleted and replaced by `plugins/development.mdx` (`lyra-plugin dev`).
 
 ### Deploy & Operate (`operate/`)
 
 - `[ ] FACT-18` **Obsolete single-location-provider restriction**
-  - **Docs:** `docs/src/content/docs/operate/resources.md:38-42` (*"Enable exactly one plugin that declares a location provider... rejects multiple enabled provider declarations"*); echoed in `operate/configuration.md:56` (*"the designated location provider"*).
+  - **Docs:** `docs/src/content/docs/operate/resources.md:38-42` (*"Enable exactly one plugin that declares a location provider... rejects multiple enabled provider declarations"*); echoed in `operate/configuration.md:30` (*"the designated location provider"*).
   - **Truth:** `src/lyra/runtime/planning/provider_registry.py:96-126` supports multiple providers across multiple plugins and only rejects duplicate `provider_id`s. Directly contradicted by `operate/plugins.mdx:73-75` and `examples/city-plugin`.
   - **Fix:** Delete `operate/resources.md:38-42` and update `configuration.md:56`.
 
@@ -127,15 +124,15 @@ Every factual discrepancy found across `docs/`, verified directly against `src/l
 
 - `[x] FACT-22` **Retention vs API access contradiction** (`operate/runbook.md:71`) — **Resolved in commit `20c90a3b`**: `runbook.md:71` now accurately states that SQLite retains terminal status, structured failures, and stored results indefinitely, while `jobs.rq_retention_seconds` governs RQ records and admin tracebacks.
 - `[ ] FACT-23` **`LYRA_DATA_DIR` presented as a configurable variable** (`operate/caching.md:15`, `config.example.toml:10`): Hardcoded constant `Path("/lyra_data")` in `src/lyra/contracts/config.py:15`, not an env var. Write `/lyra_data/results.sqlite3`.
-- `[ ] FACT-24` **Worker failure types & field names wrong in troubleshooting** (`operate/troubleshooting.md:53-55`): Omit `deployment_changed` and `bound_plan` (`server/worker.py:245-248,327-387`), and call JSON field `path` (or `receiving_input`) `"input"`.
+- `[ ] FACT-24` **Worker failure types & field names wrong in troubleshooting** (`operate/troubleshooting.md:53-55`): Omits `bound_plan` (`server/worker.py:246,322-375`; note `deployment_changed` was removed in `0cf17003`), and calls JSON field `path` (or `receiving_input`) `"input"`.
 - `[ ] FACT-25` **Undocumented operator footguns**:
   - `operate/admin-cli.md:24,98-103`: `lyra-admin` CLI defaults to HTTP (`secure=False`, `admin_cli.py:216`) while `LyraAdminClient`/`AsyncLyraAdminClient` default to HTTPS (`secure=True`, `sync.py:650`). Also `lyra-admin jobs list` requires `--status` (`admin_cli.py:165-169`).
-  - `operate/configuration.md:86-88`: `mcp.mount_path` rejects trailing `/` (`config.py:233-235`, though clients call `/mcp/`); `api.public_base_url` rejects single-label Docker hostnames (`config.py:139-144`).
-  - `operate/deployment.mdx:97-103`: `/lyra_data/` list omits `/lyra_data/secrets/` (created by both Dockerfiles and used in `operate/resources.md:31`). Also `examples/lyra-deployment/Dockerfile:32` still creates unused `/lyra_data/artifacts`.
-  - `operate/configuration.md:98-100`: Link label `"Configure computation caching"` mismatches target `"Configure shared result storage"`, and operators don't *"enable persistent reuse"* in `lyra.toml` (cache policies are declared in plugin code).
-  - `operate/configuration.md:104`: `config-summary` reports only the API process's subset of settings (`routes/admin.py:182-188`, now returning `rq_retention_seconds`), not worker config.
+  - `operate/configuration.md:60-62`: `mcp.mount_path` rejects trailing `/` (`config.py:233-235`, though clients call `/mcp/`); `api.public_base_url` rejects single-label Docker hostnames (`config.py:139-144`).
+  - `operate/deployment.mdx:95-101`: `/lyra_data/` list omits `/lyra_data/secrets/` (created by both Dockerfiles and used in `operate/resources.md:31`). Also `examples/lyra-deployment/Dockerfile:26` still creates unused `/lyra_data/artifacts`.
+  - `operate/configuration.md:72-74`: Link label `"Configure computation caching"` mismatches target `"Configure shared result storage"`, and operators don't *"enable persistent reuse"* in `lyra.toml` (cache policies are declared in plugin code).
+  - `operate/configuration.md:78`: `config-summary` reports only the API process's subset of settings (`routes/admin.py:182-188`, returning `rq_retention_seconds`), not worker config.
   - ~~`operate/runbook.md:49`~~ — **Resolved in commit `20c90a3b`** (now accurately states `"Completed jobs: newest completion first, then descending job ID"`, backed by SQLite `terminal_statuses()`).
-  - `operate/updates.md:17-21`: Update table omits bumping `build_revision` for code/plugin/dependency changes.
+  - ~~`operate/updates.md:17-21` (`build_revision`)~~ — **Obsolete / resolved in commit `0cf17003`** (`build_revision` removed).
 - `[ ] FACT-26` **Missing mandatory Pandera schema constraints**:
   - `plugins/location-providers.md:40-44`: Omits mandatory Pandera `checks` on `location_id` and mandatory `nullable=False` on `geometry` (`src/lyra/sdk/provider_schema.py:45-64`).
   - `plugins/outputs.md:79-84,211`: Omits that `coerce=True`, column `default=`, unnamed checks, and schema-level `dtype` are rejected at registration (`src/lyra/sdk/output_schema.py:65,152,212-223`), and that reserved columns (`location_id`, `row_key`, `source_location_id`) trigger registration errors when misused (`L235-240`).
@@ -183,12 +180,12 @@ Commit `20c90a3b` moved terminal job status, structured failures, and job JSON r
   - **Truth:** `ResultLifetime` and the `lifetime` field were removed from `TerminalResultOutput` (`src/lyra/contracts/inspection.py:64-73`, `src/lyra/contracts/jobs.py:212`).
   - **Fix:** Change to `| Inspect output summaries and previews | client.results.inspect(job_id) |`.
 
-- `[ ] FACT-38` **Outdated `/ready` probe checks miss `degraded` Redis outages**
+- `[ ] FACT-38` **Outdated `/ready` probe check misses `degraded` Redis outages**
   - **Docs:**
-    - `docs/src/content/docs/operate/configuration.md:80`: *"After deployment, check `/ready` for Redis availability."*
-    - `docs/src/content/docs/operate/updates.md:73`: *"- `GET /ready` returns HTTP 200"*
-  - **Truth:** `src/lyra/server/routes/health.py:86-97` returns HTTP `200` with `status: "ready"` when both SQLite and Redis are healthy, HTTP `200` with `status: "degraded"` when SQLite is healthy but Redis is unavailable, and HTTP `503` (`not_ready`) only when SQLite is unavailable. Checking only HTTP `200` passes when Redis is dead and new job submissions will fail.
-  - **Fix:** Instruct operators to verify HTTP `200` **and** `status == "ready"` (`sqlite.status == "ok"` and `redis.status == "ok"`), noting that `degraded` means read-only access to completed jobs without queue/submission availability.
+    - `docs/src/content/docs/operate/configuration.md:54`: *"After deployment, check `/ready` for Redis availability."*
+    - ~~`docs/src/content/docs/operate/updates.md:73`~~ — **Resolved in commit `0cf17003`** (`operate/updates.mdx:73` now explicitly requires `` `GET /ready` returns HTTP 200 with `status` set to `ready`. ``).
+  - **Truth:** `src/lyra/server/routes/health.py:86-97` returns HTTP `200` with `status: "ready"` when both SQLite and Redis are healthy, HTTP `200` with `status: "degraded"` when SQLite is healthy but Redis is unavailable, and HTTP `503` (`not_ready`) only when SQLite is unavailable. (Note also that `examples/lyra-deployment/compose.yml:25`'s healthcheck only checks HTTP `200`, so `--wait` passes even when Redis is down.)
+  - **Fix:** Instruct operators in `operate/configuration.md:54` to verify HTTP `200` **and** `status == "ready"` (`sqlite.status == "ok"` and `redis.status == "ok"`).
 
 - `[ ] FACT-39` **Leftover *"expired job"* headings & obsolete post-queue-expiry framing**
   - **Docs:**
@@ -197,3 +194,16 @@ Commit `20c90a3b` moved terminal job status, structured failures, and job JSON r
     - `docs/src/content/docs/use/location-exports.md:160`: Still says *"after transient jobs expire"*.
     - `docs/src/content/docs/use/results.md:379` (`## Keep access after queue expiry`) and `docs/src/content/docs/use/mcp.md:193` (`Use these tools after queue expiry`): Still frame `/results/*` and `/executions/*` as special post-expiry workarounds, even though terminal `/jobs/{job_id}` status, inspections, and JSON downloads now also survive queue expiry and Redis outages via SQLite.
   - **Fix:** Update heading/wording and simplify the result-retrieval framing to distinguish endpoints by **payload format** (JSON vs Arrow table vs description vs report) rather than queue expiry. Also note in `use/results.md:390` that `500 invalid_job_result` can originate from corrupt SQLite terminal metadata (`src/lyra/server/terminal_jobs.py:86-91`) as well as missing stored outputs.
+
+---
+
+## Drift & Gaps After Commit `0cf17003` (`lyra-plugin dev`, `--config`, `build_revision` removal)
+
+Commit `0cf17003` removed `build_revision` and `deployment_changed` (relying on accepted computation-plan checks → `bound_plan`), bumped `schema_version = 7`, deleted Docker Compose dev stacks in favor of `lyra-plugin dev`, rewrote `plugins/development.mdx` and `operate/updates.mdx`, and added `--config` to both `lyra.server.main` and `lyra.server.worker_launcher`. Remaining doc drift:
+
+- `[ ] FACT-40` **Stale wording and omissions around `updates.mdx`, `--config`, and `lyra-plugin dev`**
+  - `docs/src/content/docs/operate/configuration.md:17`: Still mentions only mounting at `/lyra_data/config/lyra.toml` without noting `--config` (`src/lyra/server/main.py:392`, `worker_launcher.py:143`).
+  - `docs/src/content/docs/operate/configuration.md:78,80`: Still refers to `operate/updates.mdx` as *"the drain and restart procedure"* (it now stops services and empties waiting jobs with `rq empty`) and routes *"use an editable checkout"* through a 1-sentence stub in `operate/plugins.mdx:60` instead of linking directly to `plugins/development.mdx`.
+  - `docs/src/content/docs/operate/runbook.md:36` & `docs/src/content/docs/plugins/development.mdx:25`: Link to legacy `<span id=>` anchors (`../updates/#drain-and-restart`, `../../quickstart/#set-your-connection-details`) rather than natural headings.
+  - `docs/src/content/docs/plugins/development.mdx:52`: Links to `../../operate/resources/` (which still carries obsolete `FACT-18`), and doesn't note that `lyra-plugin dev` leaves MCP disabled (`mcp.enabled = False`, no `--mcp` flag in `src/lyra/sdk/dev.py:130-142`).
+  - **Fix:** Update `operate/configuration.md` and `operate/runbook.md` links/wording, document `--config` in `operate/configuration.md`, and note MCP limitation + `source keys.env` convenience in `plugins/development.mdx`.

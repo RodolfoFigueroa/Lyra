@@ -1,6 +1,6 @@
 # Ledger 03: Information Architecture Consolidation Plan
 
-Target: reduce **66 authored pages → ~33 focused authored pages** (+ 4 slimmed generated reference pages + scoped public Python API). Every topic gets **one canonical home**.
+Target: reduce **66 authored pages → ~34 focused authored pages** (+ 4 slimmed generated reference pages + scoped public Python API). Every topic gets **one canonical home**.
 
 ---
 
@@ -11,14 +11,14 @@ Target: reduce **66 authored pages → ~33 focused authored pages** (+ 4 slimmed
 | Saved descriptions / Arrow tables / location inputs / execution reports | `use/python-client.md`, `use/rest-api.md`, `use/mcp.md`, `use/results.md`, `use/location-exports.md`, `use/local-execution.md:240` | `use/results.md` (other `use/*` pages show happy path + link) |
 | Atomic file writes & temp cleanup | Repeated 8+ times across `use/python-client.md`, `use/results.md`, `use/location-exports.md` | One short callout in `use/results.md` |
 | Mutation isolation (*"editing cannot change stored data"*) | Repeated 11+ times across `use/*`, `plugins/*`, `concepts/*`, `reference/*` | State once in `concepts/how-lyra-works.md` & `use/results.md` |
-| Revision invalidation rules (`build_revision` vs `code_revision` vs `origins`) | `concepts/identity.md`, `concepts/caching.md`, `operate/configuration.md`, `operate/caching.md`, `operate/updates.md`, `operate/runbook.md`, `plugins/authoring.md`, `plugins/outputs.md`, `plugins/location-providers.md` | One 3-row table in `concepts/caching-and-revisions.md` + link everywhere else |
+| Revision invalidation rules (`code_revision` vs `origins`; `build_revision` removed in `0cf17003`) | `concepts/identity.md`, `concepts/caching.md`, `operate/caching.md`, `operate/updates.mdx`, `operate/runbook.md`, `plugins/authoring.md`, `plugins/outputs.md`, `plugins/location-providers.md` | One 2-row table in `concepts/caching-and-revisions.md` + link everywhere else |
 | Verbatim 7-line transaction-atomicity paragraph | `concepts/graphs.md:70-76`, `concepts/caching.md:114-120`, `operate/caching.md:37-43` | Keep once in `concepts/caching-and-revisions.md` |
 | `city_street_maintenance` dependency graph walkthrough | `plugins/tutorial/dependencies.mdx` AND `plugins/dependencies.mdx:13-83` | Tutorial teaches it; `plugins/dependencies.md` is a concise How-to |
 | Block-to-street operation tutorial | `plugins/tutorial/blocks.mdx` AND `plugins/location-operations.md` (and `location-example.mdx` blocks/lots) | Tutorial teaches it; `plugins/location-operations.md` is a concise How-to; delete `location-example.mdx` |
 | Plugin packaging & `lyra-plugin describe`/`diagram` | `plugins/tutorial/package.md`, `plugins/quickstart.mdx`, `plugins/publish-and-debug.mdx` | Delete `plugins/quickstart.mdx`; keep short Ch. 6 finish in tutorial + complete How-to in `plugins/packaging.md` |
 | `FakeCityProvider` + `resource_overrides` failure test | `plugins/tutorial/testing.md:132-171` AND `plugins/testing.md:53-112` | Brief intro in tutorial; complete patterns (`BoundPlugin`, Hypothesis, `tmp_path`) in `plugins/testing.md` |
 | `lyra-admin` commands & offline config validation | `operate/deployment.mdx`, `operate/configuration.md`, `operate/runbook.md`, `operate/admin-cli.md`, `operate/troubleshooting.md`, `reference/generated/cli.md` | `operate/monitoring.md` + `reference/generated/cli.md` |
-| 1-sentence redirect H2 stubs | `operate/configuration.md:54,98`, `operate/plugins.mdx:63,67`, `operate/runbook.md:85`, `plugins/runtime.md:52-66` (4 stubs), `plugins/location-operations.md:180-187` (2 stubs), `plugins/authoring.md:118-120` | Delete all 12 stub sections |
+| 1-sentence redirect H2 stubs | `operate/configuration.md:28,72`, `operate/plugins.mdx:60`, `operate/runbook.md:87`, `plugins/runtime.md:52-66` (4 stubs), `plugins/location-operations.md:180-187` (2 stubs), `plugins/authoring.md:118-120` | Delete all 11 stub sections |
 
 ---
 
@@ -66,23 +66,23 @@ Target: reduce **66 authored pages → ~33 focused authored pages** (+ 4 slimmed
 - `[ ] IA-30` **Keep & structure** `plugins/earth-engine.md` (62L) — add H2 headings and a complete `@metric` snippet (or fold as a subsection of `plugins/resources.md`).
 - `[ ] IA-31` **Keep & improve** `plugins/testing.md` (142L) — add `result_store_path=tmp_path / "results.sqlite3"`, drop unexplained repo-internal *"service-access guard"* claim, fix `L106` dead `.tables`.
 - `[ ] IA-32` **Merge & rename** `plugins/publish-and-debug.mdx` (61L) + `plugins/quickstart.mdx` (48L) → `plugins/packaging.md` (*Package and inspect a plugin*): add minimal from-scratch `pyproject.toml` + layout template, entry points, `lyra-plugin describe`/`diagram`, operator handoff. **Delete `plugins/quickstart.mdx` and `plugins/publish-and-debug.mdx`.**
-- `[ ] IA-33` **Move** `plugins/development.md` (54L) → fold into `operate/plugins.mdx` (it's a `examples/lyra-deployment` Docker Compose workflow; fix `FACT-17`). **Delete `plugins/development.md`.**
+- `[ ] IA-33` **Keep & polish** `plugins/development.mdx` (52L, *Run a local plugin server*) — Commit `0cf17003` replaced the old Docker Compose editable-mount guide with the native `lyra-plugin dev` CLI guide, so it now genuinely belongs in `Build Plugins`! Strip `<span id="develop-with-editable-sources">`, fix `FACT-40` (broken link to `operate/resources/`, note MCP is disabled in `dev`, mention `source keys.env` & cache directory).
 - `[ ] IA-34` **Keep & clean** `plugins/agent-assisted-authoring.mdx` (115L) — fix `FACT-16`, strip `<span id=>` anchors.
 
-### 5. Deploy and Operate — `operate/` (10 → 5–6 pages)
+### 5. Deploy and Operate — `operate/` (10 → 6 pages)
 - `[ ] IA-35` **Merge** `operate/requirements.md` (43L) → *"Before you start"* section at top of `operate/deployment.mdx`. **Delete `operate/requirements.md`.**
-- `[ ] IA-36` **Rewrite** `operate/deployment.mdx` (109L) — reconcile root `docker/` vs `examples/lyra-deployment/`, fix step order, add non-Docker launch commands & `/lyra_data/secrets/` layout.
-- `[ ] IA-37` **Expand & consolidate** `operate/configuration.md` (110L) ← absorb `operate/resources.md:11-36` (TOML resource config & secrets + add PostGIS example; **delete** wrong `resources.md:38-42` `FACT-18`) and operator storage/SQLite settings from `operate/caching.md` (`result_store_path`, single-host/no-NFS warning, online backups, growth planning; **delete** verbatim copy-paste `L37-43` and false pagination `FACT-19`). Move Python embedding (`create_app`/`launch_worker`) out of operator config. Add minimal complete `lyra.toml` and nginx/Caddy reverse-proxy snippet. **Delete `operate/resources.md` and `operate/caching.md`.**
-- `[ ] IA-38` **Keep & fold** `operate/plugins.mdx` (79L) ← absorb `plugins/development.md` (editable Compose mounts), delete 2 redirect stubs (`L63-69`).
-- `[ ] IA-39` **Merge** `operate/runbook.md` (87L) + `operate/admin-cli.md` (112L) → `operate/monitoring.md` (*Monitor and administer a deployment*): health (`/ready` `ready`/`degraded`/`not_ready` SQLite+Redis semantics from `20c90a3b`), logs (`stderr` `FACT-20`), `lyra-admin` & `LyraAdminClient` (with `secure=True` & `--status` notes `FACT-25`), RQ interruption recovery & `jobs.rq_retention_seconds`, SQLite terminal history during Redis outages. Delete stub (`runbook.md:85-87`). **Delete `operate/runbook.md` and `operate/admin-cli.md`.**
-- `[ ] IA-40` **Keep & tighten** `operate/updates.md` (80L) — cut duplicated revision prose to a 2-sentence summary + link; add `build_revision` to update table (`FACT-25`).
-- `[ ] IA-41` **Keep & fix** `operate/troubleshooting.md` (75L) — fix `FACT-05`, `FACT-21`, `FACT-24`; keep strictly symptom → diagnosis → fix.
+- `[ ] IA-36` **Rewrite** `operate/deployment.mdx` (107L) — reconcile root `Dockerfile`/`docker/docker-compose.yml` vs `examples/lyra-deployment/`, fix step order, add bare-metal `--config` launch commands & `/lyra_data/secrets/` layout.
+- `[ ] IA-37` **Expand & consolidate** `operate/configuration.md` (84L) ← absorb `operate/resources.md:11-36` (TOML resource config & secrets + add PostGIS example; **delete** wrong `resources.md:38-42` `FACT-18`) and operator storage/SQLite settings from `operate/caching.md` (`result_store_path`, single-host/no-NFS warning, online backups, growth planning; **delete** verbatim copy-paste `L37-43` and false pagination `FACT-19`). Document `--config`, fix `FACT-38` (`/ready` `ready` vs `degraded`) & `FACT-40`. Move Python embedding (`create_app`/`launch_worker`) out of operator config. Add minimal complete `lyra.toml` (`schema_version = 7`) and nginx/Caddy reverse-proxy snippet. **Delete `operate/resources.md` and `operate/caching.md`.**
+- `[ ] IA-38` **Keep & tighten** `operate/plugins.mdx` (73L) — production image plugin installation & multi-provider setup; delete 1-sentence stub (`L60`, linking cleanly to `plugins/development.mdx` for local dev).
+- `[ ] IA-39` **Merge** `operate/runbook.md` (89L) + `operate/admin-cli.md` (112L) → `operate/monitoring.md` (*Monitor and administer a deployment*): health (`/ready` `ready`/`degraded`/`not_ready` SQLite+Redis semantics from `20c90a3b`), logs (`stderr` `FACT-20`), `lyra-admin` & `LyraAdminClient` (with `secure=True` & `--status` notes `FACT-25`), RQ interruption recovery & `jobs.rq_retention_seconds`, SQLite terminal history during Redis outages. Delete stub (`runbook.md:87-89`) and fix `L36` anchor (`FACT-40`). **Delete `operate/runbook.md` and `operate/admin-cli.md`.**
+- `[ ] IA-40` **Keep & tighten** `operate/updates.mdx` (78L, already converted to `.mdx` + `<Steps>` and `build_revision` removed in `0cf17003`) — cut duplicated revision prose to a 2-sentence summary + link, strip `<span id=>` anchors (`L29,59`).
+- `[ ] IA-41` **Keep & fix** `operate/troubleshooting.md` (75L) — fix `FACT-05`, `FACT-21`, `FACT-24` (`bound_plan`, no `deployment_changed`); keep strictly symptom → diagnosis → fix.
 
 ### 6. Understand Lyra — `concepts/` (8 → 5 pages, reordered big-picture first)
-- `[ ] IA-42` **Merge & move to #1**: `concepts/model.md` (63L) + `concepts/architecture.md` (95L) → `concepts/how-lyra-works.md` (*How Lyra works*: metrics, providers, plugins, local vs server architecture, component boundaries; fix `FACT-03`).
+- `[ ] IA-42` **Merge & move to #1**: `concepts/model.md` (63L) + `concepts/architecture.md` (94L) → `concepts/how-lyra-works.md` (*How Lyra works*: metrics, providers, plugins, local vs server architecture, accepted-plan validation, component boundaries; fix `FACT-03`, `FACT-36`).
 - `[ ] IA-43` **Merge as #2**: `concepts/graphs.md` (76L) + `concepts/selection.md` (27L stub) → `concepts/graphs.md` (*Dependency graphs and location routing*: add routing diagram, fix `FACT-02`, delete copy-pasted `L70-76`).
-- `[ ] IA-44` **Keep as #3**: `concepts/lifecycle.md` (72L, now titled *How jobs execute and complete*) — *Jobs, timeouts, and terminal history* (SQLite durable terminal history + Redis live queue/`jobs.rq_retention_seconds`).
-- `[ ] IA-45` **Merge as #4**: `concepts/identity.md` (60L) + `concepts/caching.md` (147L) → `concepts/caching-and-revisions.md` (*Revisions, interventions, and caching*: concrete examples of what breaks if you don't bump a revision, 3-row revision table, overlapping selections example, trim storage-engine internals).
+- `[ ] IA-44` **Keep as #3**: `concepts/lifecycle.md` (72L, now titled *How jobs execute and complete*) — *Jobs, timeouts, and terminal history* (accepted computation-plan verification → `bound_plan`, SQLite durable terminal history + Redis live queue/`jobs.rq_retention_seconds`).
+- `[ ] IA-45` **Merge as #4**: `concepts/identity.md` (57L) + `concepts/caching.md` (147L) → `concepts/caching-and-revisions.md` (*Revisions, interventions, and caching*: discovery fingerprint vs computation identity, concrete examples of what breaks if you don't bump `code_revision` or `origins`, 2-row revision table, overlapping selections example, trim storage-engine internals).
 - `[ ] IA-46` **Rewrite as #5**: `concepts/provenance.md` (164L → ~90L) — open with one small concrete `ExecutionReport` example, cut defensive negative specs, clearly separate saved `ExecutionReport` from transient `runner.inspect()`.
 
 ### 7. Reference — `reference/` (8 → 6 authored + 4 slimmed generated)
@@ -96,7 +96,7 @@ Target: reduce **66 authored pages → ~33 focused authored pages** (+ 4 slimmed
 
 ---
 
-## Target `docs/navigation.json` Structure (~33 Authored Pages)
+## Target `docs/navigation.json` Structure (~34 Authored Pages)
 
 ```text
 Start Here (4)
@@ -114,7 +114,7 @@ Run Metrics (6)
   ├── Monitor jobs and handle failures (use/jobs)
   └── Read, download, and export results (use/results)  [note: 7 if jobs stays separate, 6 if merged]
 
-Build Plugins (16 = 1 landing + 6–7 tutorial + 9 guides)
+Build Plugins (17 = 1 landing + 6–7 tutorial + 10 guides)
   ├── Choose an authoring guide (plugins/index)
   ├── Build a city plugin (plugins/tutorial/* — 6–7 balanced .mdx chapters)
   ├── Write and register metrics (plugins/authoring)
@@ -125,13 +125,14 @@ Build Plugins (16 = 1 landing + 6–7 tutorial + 9 guides)
   ├── Resources and runtime context (plugins/resources)
   ├── Use Earth Engine in metrics (plugins/earth-engine)
   ├── Test a plugin (plugins/testing)
+  ├── Run a local plugin server (plugins/development)
   ├── Package and inspect a plugin (plugins/packaging)
   └── Use agent-assisted authoring (plugins/agent-assisted-authoring)
 
 Deploy and Operate (6)
   ├── Deploy Lyra (operate/deployment) [includes requirements]
   ├── Configure Lyra, resources, and storage (operate/configuration)
-  ├── Install and develop plugins in Docker (operate/plugins)
+  ├── Install plugins in Docker (operate/plugins)
   ├── Monitor and administer a deployment (operate/monitoring)
   ├── Update a deployment safely (operate/updates)
   └── Troubleshoot a deployment (operate/troubleshooting)
@@ -139,7 +140,7 @@ Deploy and Operate (6)
 Understand Lyra (5)
   ├── How Lyra works (concepts/how-lyra-works)
   ├── Dependency graphs and location routing (concepts/graphs)
-  ├── Jobs, timeouts, and result lifetimes (concepts/lifecycle)
+  ├── Jobs, timeouts, and terminal history (concepts/lifecycle)
   ├── Revisions, interventions, and caching (concepts/caching-and-revisions)
   └── Execution reports and provenance (concepts/provenance)
 

@@ -68,24 +68,25 @@ Concrete user-experience fixes and missing essentials for each area of `docs/`.
   Deleting `location-example.mdx` removes #3; align standalone guide snippets to `city-plugin` conventions (or clearly distinguish `location-plugin` when showcasing managed PostGIS/Parquet queries).
 - `[ ] UX-14` **Improve `plugins/testing.md`:** Document `LocalRunner(..., result_store_path=tmp_path / "results.sqlite3")` so tests don't pollute `.lyra/results.sqlite3`, and remove the assumption that external plugin authors have the repo-internal `no_external_services` fixture (`plugins/testing.md:111`).
 - `[ ] UX-15` **Add missing imports across plugin snippets:** `JsonValue` (`pydantic`), `Origin`/`RunContext`/`Resource` (`lyra.sdk`), `PluginDefinitionError`/`MetricResultError`/`LocationAcquisitionError`/`LocationProviderContractError` (`lyra.contracts.errors`), `LocalRunner` (`lyra.runtime.local`).
+- `[ ] UX-15b` **Polish `plugins/development.mdx` (`lyra-plugin dev`):** Explain that `keys.env` can be sourced directly (`set -a; source ...; set +a`), state where the cache lives (`$XDG_CACHE_HOME/lyra/lyra-dev-*` or `~/.cache/lyra/lyra-dev-*`), note that `lyra-plugin dev` runs with MCP disabled (`mcp.enabled=False`), and fix its link to `operate/resources/` (once merged into `operate/configuration.md`).
 
 ---
 
 ## 5. Deploy and Operate (`operate/*`)
 
-- `[ ] UX-16` **Reconcile root `docker/` vs `examples/lyra-deployment/`:** Currently `operate/` ignores root `Dockerfile`, `config.example.toml`, `.env.example`, and `docker/docker-compose*.yml` (which have different service names, Redis URLs, no plugins installed, and no `stop_grace_period` on workers). Either explain clearly what the root files are for (base image / dev infra) vs `examples/lyra-deployment/` (deployment template), or consolidate them.
-- `[ ] UX-17` **Fix `operate/deployment.mdx` step sequence:**
-  - Explain `lyra.toml` & `build_revision` *before* `docker compose up -d --build` (currently `build_revision` is mentioned after Step 4 starts containers).
+- `[ ] UX-16` **Reconcile root `Dockerfile`/`docker/docker-compose.yml` vs `examples/lyra-deployment/`:** Commit `0cf17003` deleted `docker/docker-compose-dev.yml` and fixed `config.example.toml`'s Redis URL, but `operate/` still ignores root `Dockerfile`, `config.example.toml`, `.env.example`, and `docker/docker-compose.yml` (different service names, no plugins installed, no `stop_grace_period` on workers). Clarify what the root files are for (base image) vs `examples/lyra-deployment/` (production deployment template), or consolidate them.
+- `[ ] UX-17` **Fix `operate/deployment.mdx` step sequence:** *(Note: `0cf17003` removed `build_revision` from Step 4.)*
+  - Briefly explain the minimal `lyra.toml` structure before Step 1 asks operators to edit `api.public_base_url`.
   - List `uv` as a prerequisite if validating offline on the host, or show validating inside the container.
   - Remind operators to `export LYRA_ADMIN_API_KEY=...` when switching from `docker compose exec api lyra-admin` to host `uv run lyra-admin`.
 - `[ ] UX-18` **Fill critical production deployment gaps:**
-  - Include a **minimal complete `lyra.toml`** in `operate/configuration.md`.
-  - Document **non-Docker / bare-metal launch commands** (`python -m lyra.server.main`, `python -m lyra.server.worker_launcher`) and explicitly warn that `/lyra_data/config/lyra.toml` is currently hardcoded with no `--config` or env override (`src/lyra/server/main.py:90`, `worker_launcher.py:105`).
+  - Include a **minimal complete `lyra.toml`** (`schema_version = 7`) in `operate/configuration.md`.
+  - Document **non-Docker / bare-metal launch commands** (`python -m lyra.server.main --config ...` and `python -m lyra.server.worker_launcher --config ...`, defaulting to `/lyra_data/config/lyra.toml` as added in `0cf17003`).
   - Add a **concrete reverse-proxy snippet** (nginx or Caddy) and warn that MCP DNS-rebinding protection (`src/lyra/server/mcp/server.py:238-242`) rejects mismatched `Host` headers if `Host` does not match `api.public_base_url`.
   - Add a **realistic PostGIS resource configuration example** in `[resources.*]` (currently only fictional `shared_files` + `remote` token).
   - Add an explicit **SQLite single-host / no-NFS warning** and safe **online backup** + **scratch-dir cleanup** (`/lyra_data/cache/jobs` / `worker.temp_dir`) instructions. Emphasize that `/lyra_data/results.sqlite3` now holds **durable terminal job history** as well as cached results and reports, and drives `/ready` HTTP `503` readiness.
-  - Add a **Redis eviction, degraded-mode, & auth/TLS (`rediss://`) note**: warn against `allkeys-lru` evicting active RQ keys, and explain `GET /ready` returning HTTP `200` `degraded` when Redis is down (completed jobs stay readable from SQLite, but new submissions and live queue queries fail; `FACT-38`).
-  - Put one crisp **3-row revision table** (*"What revision do I bump?"*: `build_revision` vs `code_revision` vs `origin`/provider revision) in one place and link to it.
+  - Add a **Redis eviction, degraded-mode, & auth/TLS (`rediss://`) note**: warn against `allkeys-lru` evicting active RQ keys, and explain `GET /ready` returning HTTP `200` `degraded` when Redis is down (completed jobs stay readable from SQLite, but new submissions and live queue queries fail; note `examples/lyra-deployment/compose.yml`'s healthcheck passes on HTTP `200`, so check `status == "ready"`, `FACT-38`).
+  - Put one crisp **2-row revision table** (*"What revision do I bump?"*: `code_revision` vs `origin`/provider identity; `build_revision` was removed in `0cf17003`) in one place and link to it.
 
 ---
 
