@@ -128,7 +128,7 @@ An empty application cache can still benefit from operating-system caches. These
 
 ## View CI reports
 
-The [Benchmarks workflow](../.github/workflows/benchmarks.yml) runs on pushes to `main` and supports manual runs on a selected repository branch. Performance differences do not block merges or releases. Execution and report-publication failures remain visible in the workflow.
+The [Benchmarks workflow](../.github/workflows/benchmarks.yml) runs on pushes to `main` that change at least one path outside its exclusion list. For example, a test-only push skips ASV, while a change to shared workloads in `test_support/` triggers it. You can also start a manual run on a selected branch. Performance differences do not block merges or releases. Execution and report-publication failures remain visible in the workflow.
 
 Download and extract the `performance-…` artifact from a workflow run. Replace `report_html_directory` with the extracted directory containing `index.html`, then serve the report:
 

@@ -3,6 +3,8 @@
 import json
 from typing import ClassVar
 
+from asv_runner.benchmarks.mark import benchmark
+
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.graph import build_graph
@@ -22,11 +24,13 @@ class CatalogSuite:
     def setup(self, nodes: int) -> None:
         """Prepare live declarations outside the timed operation."""
         self.installed = installed(workload(1, "catalog", nodes).plugin)
-        self.definitions = {
-            item.distribution: item.definition for item in self.installed
-        }
         self.catalog = catalog(self.installed)
+        self.definitions = {
+            owner: plugin.definition
+            for owner, plugin in self.catalog.compiled.implementations.items()
+        }
 
+    @benchmark(version="4")
     def time_graph(self, _nodes: int) -> None:
         """Validate graph dependencies."""
         build_graph(self.definitions)
