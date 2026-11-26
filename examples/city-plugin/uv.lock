@@ -95,15 +95,6 @@ wheels = [
 ]
 
 [[package]]
-name = "filelock"
-version = "4.2.7"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e0/14/73688a22e91cfcfc6837a011ffa572e2ba3c348765f7bd482d8436fa9b6f/filelock-4.2.7.tar.gz", hash = "sha256:31f6f7e3a8b6f0bd89114d30c5d5218ea1cfb63e5c4aa695b7559314a209bc7f", size = 661450, upload-time = "2026-11-02T16:09:15.119Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/1a/1fcf0d3886bad15b92459a0e529dd86a1ec4d9ef30e789df48044fd3698c/filelock-4.2.7-py3-none-any.whl", hash = "sha256:d08972bbca2b8767ee552aff877b091dd111ffb1d22de7de885766ea7d719d5e", size = 164345, upload-time = "2026-11-02T16:09:13.588Z" },
-]
-
-[[package]]
 name = "flexcache"
 version = "0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -223,7 +214,7 @@ wheels = [
 
 [[package]]
 name = "lyra"
-version = "0.27.0"
+version = "0.28.0"
 source = { editable = "../../" }
 dependencies = [
     { name = "jsonschema" },
@@ -236,7 +227,6 @@ dependencies = [
 [package.optional-dependencies]
 runtime = [
     { name = "duckdb" },
-    { name = "filelock" },
     { name = "geopandas" },
     { name = "ibis-framework", extra = ["duckdb", "postgres"] },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -272,7 +262,6 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.4.3,<1.5" },
     { name = "earthengine-api", marker = "extra == 'earth-engine'", specifier = ">=1.7.26" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.136.1" },
-    { name = "filelock", marker = "extra == 'runtime'", specifier = ">=3.32.2" },
     { name = "geopandas", marker = "extra == 'tables'", specifier = ">=1.2.0" },
     { name = "httpx", marker = "extra == 'client'", specifier = ">=0.28.1" },
     { name = "ibis-framework", marker = "extra == 'sdk'", specifier = ">=12,<13" },
