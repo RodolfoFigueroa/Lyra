@@ -10,7 +10,7 @@ Apply consistently across all authored docs:
 
 | Avoid / fix | Use instead | Notes |
 | --- | --- | --- |
-| `retained` (used 60+× for both SQLite & Redis) | **saved** (for completed results & reports); **active / live job** (in consumer docs); **RQ queue record** (in `operate/` only) | After `20c90a3b`, local users and server consumers never need to know about Redis or queue expiry—remove `"retained"` and `"after queue expiry"` caveats outside `operate/` and `concepts/lifecycle.md`. |
+| `retained` (used 60+× for both SQLite & Valkey) | **saved** (for completed results & reports); **active / live job** (in consumer docs); **RQ queue record** (in `operate/` only) | After `20c90a3b` & `16ed7c65`, local users and server consumers never need to know about Valkey or queue expiry—remove `"retained"` and `"after queue expiry"` caveats outside `operate/` and `concepts/lifecycle.md`. |
 | `native` (overloaded 4 ways) | Name the thing literally: **DataFrame / GeoDataFrame**, **target provider records**, **original CRS**, **Python `Intervention`** | Only use "native" if explicitly contrasting with serialized JSON/Arrow. |
 | `effective` (unexplained shorthand) | **resolved parameters (including defaults)** / **dataset after interventions** | Define once in `concepts/` and `reference/parameters.md`. |
 | `publication` / `publish` (in local/user guides) | **save** / **commit to the result store** | Reserve "publish" for publishing packages/catalogs. |
@@ -33,11 +33,11 @@ Apply consistently across all authored docs:
 - `[ ] STYLE-04` **Rewrite identical template openers across all 8 tutorial chapters** (`"Start with ...; you'll..."` at `first-metric.mdx:12`, `select-streets.mdx:12`, `parameters.mdx:12`, `dependencies.mdx:13`, `blocks.mdx:13`, `canonical.md:9`, `testing.md:9`, `package.md:10`).
 - `[ ] STYLE-05` **Smooth cold-open & stop-start paragraph stacks** (e.g., `operate/admin-cli.md:22-28`, `operate/deployment.mdx:53,79`, `operate/runbook.md:59`, `use/local-execution.md:69-81`, `use/mcp.md:80-92`, `use/python-client.md:242-252`, `use/results.md:217-223,294,389-395`).
 - `[ ] STYLE-06` **Fix remaining weasel words & passive/personified spots:**
-  - `operate/runbook.md:15` (`Typical use`), `L81` (`within approximately two minutes`)
+  - `operate/runbook.md:15` (`Typical use`), `L83` (`within approximately two minutes`)
   - `use/jobs.md:40` (`roughly every five seconds`)
   - `operate/caching.md:35` (`Closed alpha doesn’t promise migrations`)
   - `use/results.md:324` (`storage and retrieval promise no implicit row order`)
-  - `use/python-client.md:313`, `use/jobs.md:52`, `operate/configuration.md:86`, `operate/caching.md:57-62` (passive voice)
+  - `use/python-client.md:313`, `use/jobs.md:52`, `operate/configuration.md:70`, `operate/caching.md:57-62` (passive voice)
 
 ---
 
@@ -74,8 +74,8 @@ Every other file uses unwrapped single-line paragraphs and curly apostrophes (`�
 - **HTTP status formatting:** Consistently backtick or consistently leave plain (don't mix `` HTTP `404` `` and `HTTP 404` inside `use/rest-api.md` and `use/results.md`).
 - **Hyphenation:** Decide between closed (`nonblank`, `nonempty`, `nonnegative`, `noncanonical`) and hyphenated (`non-null`) consistently.
 - **Contractions:** Use contractions consistently (`don’t`, `doesn’t`, `you’ll`) instead of alternating contracted and formal forms across sibling guides.
-- **Acronym first use:** Spell out `MCP`, `CLI`, `CIDR`, `WGS84`, `TOML` on first use per page where not in the allowed-abbreviations list (`use/results.md:37`, `use/rest-api.md:130`, `use/mcp.md:102`, `operate/configuration.md:24,92`, `operate/caching.md:68`, `operate/plugins.mdx:52`).
-- **List/code lead-ins & punctuation:** Introduce lists with colons (`operate/runbook.md:47`, `use/rest-api.md:67`, `operate/admin-cli.md:47`, `plugins/tutorial/index.md:24`); match trailing periods on full-sentence list items (`operate/caching.md:49-51`, `use/rest-api.md:56-61`, `use/mcp.md:27-32`). *(Note: `operate/updates.mdx` fixed its list periods in `0cf17003`.)*
+- **Acronym first use:** Spell out `MCP`, `CLI`, `CIDR`, `WGS84`, `TOML` on first use per page where not in the allowed-abbreviations list (`use/results.md:37`, `use/rest-api.md:130`, `use/mcp.md:102`, `operate/configuration.md:24,76`, `operate/caching.md:68`, `operate/plugins.mdx:52`).
+- **List/code lead-ins & punctuation:** Introduce lists with colons (`operate/runbook.md:47`, `use/rest-api.md:67`, `operate/admin-cli.md:47`, `plugins/tutorial/index.md:24`); match trailing periods on full-sentence list items (`operate/caching.md:49-51`, `use/rest-api.md:56-61`, `use/mcp.md:27-32`) and table cells (`operate/troubleshooting.md:30-31` vs `L29,32-33`). *(Note: `operate/updates.mdx` fixed its list periods in `0cf17003`.)*
 - **Extra blank line / empty structure:** Remove extra blank line at `use/results.md:298`; add H2 headings to `plugins/earth-engine.md`; fix mixed numbered/unnumbered H2s in `use/mcp.md:15-218`.
 - **GitHub repo casing:** Use `https://github.com/RodolfoFigueroa/Lyra/...` everywhere (fix lowercase `/lyra/` in `operate/caching.md:69`, `reference/index.md:47`, `plugins/canonical-selection.md:48`, `plugins/location-providers.md:133,139`).
 

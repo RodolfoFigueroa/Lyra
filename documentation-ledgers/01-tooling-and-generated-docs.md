@@ -63,13 +63,13 @@ Issues in `docs/scripts/`, `docs/astro.config.mjs`, `docs/public/`, `docs/conten
 - **Fix:**
   - Once `starlight-pydocs` is scoped to public symbols (`TOOL-03`), also tighten `remark-api-links.mjs`: only autolink exact qualified names (`lyra.*` / `Class.method`) or unique public PascalCase class names—never bare lowercase attribute/module suffixes like `context`, `execute`, `parquet`, `location_id`, `executed`.
 
-### `[ ] TOOL-05` `generate_config_reference()` has factual bugs, missing `const: 7`, broken `\|` escapes, and verbose layout
+### `[ ] TOOL-05` `generate_config_reference()` has factual bugs, missing `const: 8`, broken `\|` escapes, and verbose layout
 - **Locations:** `docs/scripts/generate_docs.py:451-603`, `docs/src/content/docs/reference/generated/configuration.md`
 - **Problems:**
   1. **False merging claim** (`generate_docs.py:557-559`, `configuration.md:11`): *"Lyra does not merge section defaults into a section you supply."* False—supplying partial sections (`jobs={"queue": "custom"}`, `mcp={"enabled": True}`, `api={"public_base_url": "..."}`) **does** apply optional field defaults in `LyraConfig.model_validate`.
-  2. ~~**Stale secret-source claim**~~ — **Resolved in commit `0cf17003`** (`generate_docs.py:550-553` now documents `--config`, environment API credentials, and Redis URL privacy, removing `"Database passwords"`).
-  3. **Missing `schema_version = 7` constraint** (`generate_docs.py:375-386,493`, `configuration.md:75-84`): `schema_constraints()` ignores `"const"` and `"enum"`, so `schema_version: Literal[7]` (`"const": 7` in `config.schema.json:317`) still shows `Constraints: —`.
-  4. **Broken literal `\|` in HTML** (`generate_docs.py:584`, `configuration.md:62,216,330`): Passes bullet-list values through `markdown_cell()`, rendering literal `string \| null` in built HTML in 4 places.
+  2. ~~**Stale secret-source claim**~~ — **Resolved in commits `0cf17003` & `16ed7c65`** (`generate_docs.py:550-553` now documents `--config`, environment API credentials, and Valkey URL privacy, removing `"Database passwords"`).
+  3. **Missing `schema_version = 8` constraint** (`generate_docs.py:375-386,493`, `configuration.md:75-84`): `schema_constraints()` ignores `"const"` and `"enum"`, so `schema_version: Literal[8]` (`"const": 8` in `config.schema.json:313`) still shows `Constraints: —`.
+  4. **Broken literal `\|` in HTML** (`generate_docs.py:584`, `configuration.md:61,70,215,329`): Passes bullet-list values through `markdown_cell()`, rendering literal `string \| null` in built HTML in 4 places.
   5. **Verbose layout**: Duplicates every top-level heading (`## api` followed immediately by `### api`) and uses 6-line bullet blocks per field instead of compact per-section Markdown tables.
 - **Fix:** Fix the merging prose, include `const`/`enum` in `schema_constraints()`, stop escaping `|` outside tables, and render each config section as a clean Markdown table.
 
@@ -85,8 +85,8 @@ Issues in `docs/scripts/`, `docs/astro.config.mjs`, `docs/public/`, `docs/conten
 - **Locations:** `docs/scripts/generate_docs.py:604-652`, `docs/src/content/docs/reference/generated/cli.md`, `src/lyra/sdk/plugin_cli.py`, `src/lyra/api/admin_cli.py`, `src/lyra/server/main.py`, `src/lyra/server/worker_launcher.py`
 - **Problems:**
   - Renders ``## `worker launcher` `` in backticks as if it were a shell command (`generate_docs.py:611,636`); actual invocation is `python -m lyra.server.worker_launcher`.
-  - Commit `0cf17003` added `--config` to `python -m lyra.server.main` (`src/lyra/server/main.py:391-393`), but defined its `ArgumentParser` inline under `if __name__ == "__main__":`—so **`lyra.server.main` is completely omitted** from `cli.md` while `worker_launcher` is included.
-  - Flattens 23 `##` headings and emits generic `"Inspect help for ..."` fallback text on 9 subcommands whose argparse parsers lack `description=`—including the newly added `lyra-plugin dev` (`cli.md:64-66`, `plugin_cli.py:257-259`).
+  - Commit `0cf17003` added `--config` to `python -m lyra.server.main` (`src/lyra/server/main.py:117-120`), but defined its `ArgumentParser` inline under `if __name__ == "__main__":`—so **`lyra.server.main` is completely omitted** from `cli.md` while `worker_launcher` is included.
+  - Flattens 23 `##` headings and emits generic `"Inspect help for ..."` fallback text on 9 subcommands whose argparse parsers lack `description=`—including `lyra-plugin dev` (`cli.md:64-66`, `plugin_cli.py:283-285`, whose `help=` also omits its default private `valkey-server` broker).
   - Several CLI options lack `help=` strings (`--project` on `lyra-plugin dev`, `--config` on `worker_launcher`, `--project`/`--include-project`/`--output` on `lyra-plugin diagram`, `--limit`/`--status`/`--offset`/`id`/`name`/`PATH` on `lyra-admin`).
 - **Fix:** Expose `build_parser()` on `lyra.server.main` and include it in `cli.md`; use actual commands (`python -m lyra.server.main`, `python -m lyra.server.worker_launcher`); group subcommands under `lyra-plugin` / `lyra-admin` / server launchers; and add missing `description=` and `help=` text in the parsers.
 

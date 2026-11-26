@@ -1,6 +1,6 @@
 # Lyra Documentation Overhaul Ledgers
 
-Durable reference ledgers capturing the full read-only audit of `docs/` against `src/lyra/` and `examples/` (audited 2026-11-24; updated through commits `20c90a3bf10c00c9bb0b1b199baae8b5723b3a79` [SQLite job results] and `0cf1700397ee5e39fc50b36d54c505e81e98f7db` [removed `build_revision`/`deployment_changed`, bumped `schema_version = 7`, added `lyra-plugin dev` & `--config`]).
+Durable reference ledgers capturing the full read-only audit of `docs/` against `src/lyra/` and `examples/` (audited 2026-11-24; updated through commits `20c90a3bf10c00c9bb0b1b199baae8b5723b3a79` [SQLite job results], `0cf1700397ee5e39fc50b36d54c505e81e98f7db` [removed `build_revision`/`deployment_changed`, bumped `schema_version = 7`, added `lyra-plugin dev` & `--config`], and `16ed7c6586f3a0c4113ff6a805c2575c31075278` [switched RQ backend from Redis to Valkey, bumped `schema_version = 8`, added `unix:///` Valkey URLs, made `lyra-plugin dev` spin up a private `valkey-server` with optional `--valkey-url`]).
 
 **Context:** Lyra is in closed alpha with no existing clients or deployments. Backwards compatibility, legacy URL fragment anchors, and historical migration notes are unnecessary.
 
@@ -26,7 +26,7 @@ Recommended order minimizes rework by clearing tooling/scaffolding and locking t
 
 ### Stage 1 — Tooling, Generated Reference, and Dead Scaffolding
 - [ ] Fix MCP tool docstrings & `generate_docs.py` (`cleandoc`, strip `Returns:`/`Raises:`, stop embedding raw JSON Schemas in `mcp.md`, unwrap union tables) (`TOOL-01`, `TOOL-02`)
-- [ ] Fix `generate_docs.py` config & HTTP & CLI generators (merging claim, `const: 7`, literal `\|`, Arrow content-type, missing HTTP error statuses, CLI headings/`lyra-plugin dev` help/`lyra.server.main --config`) (`TOOL-05`, `TOOL-06`, `TOOL-07`)
+- [ ] Fix `generate_docs.py` config & HTTP & CLI generators (merging claim, `const: 8`, literal `\|`, Arrow content-type, missing HTTP error statuses, CLI headings/`lyra-plugin dev` help/`lyra.server.main --config`) (`TOOL-05`, `TOOL-06`, `TOOL-07`)
 - [ ] Scope `starlight-pydocs` to public API, expose public client resource classes, remove `api/client-exports` hack (`TOOL-03`)
 - [ ] Restrict `remark-api-links.mjs` so ordinary tokens stop mis-linking to internals (`TOOL-04`)
 - [ ] Regenerate and schema-validate `docs/public/examples/mcp/*.json` (`TOOL-08`)
@@ -40,10 +40,10 @@ Recommended order minimizes rework by clearing tooling/scaffolding and locking t
 
 ### Stage 3 — Section-by-Section Rewrite, Fact-Check, and De-Jargonization
 Apply factual fixes ([02-factual-errors.md](./02-factual-errors.md)), onboarding fixes ([04-onboarding-and-section-rewrites.md](./04-onboarding-and-section-rewrites.md)), and house style ([05-style-jargon-and-formatting.md](./05-style-jargon-and-formatting.md)) together in one pass per section:
-- [ ] **Start Here & Concepts** — lead with metrics, plugins, and local execution (keep Redis out of Start Here and consumer mental models); reorder `concepts/` big-picture first; resolve `FACT-01`–`FACT-03`, `FACT-36`
-- [ ] **Run Metrics (`use/`)** — restructure `use/results.md` around output formats (not Redis/queue expiry) with happy path first; trim duplication in `python-client`, `rest-api`, `mcp`, `local-execution`, `spatial-inputs`, `jobs`; resolve `FACT-04`–`FACT-08`, `FACT-29`, `FACT-34`, `FACT-37`, `FACT-39`
-- [ ] **Build Plugins (`plugins/tutorial/` → `plugins/`)** — rework city tutorial (6–7 chapters, single-module flow, sample outputs, `if __name__ == "__main__":`, redraw `BlockWorkloadDiagram.astro` & `MaintenanceDependenciesDiagram.astro`), then add real code examples & minimal `pyproject.toml` template to standalone guides and polish `plugins/development.mdx` (`lyra-plugin dev`); resolve `FACT-09`–`FACT-16`, `FACT-26`–`FACT-28`, `FACT-30`–`FACT-33`, `FACT-40` (`FACT-17` already resolved in `0cf17003`)
-- [ ] **Deploy & Operate (`operate/`)** — reconcile root `Dockerfile`/`docker/docker-compose.yml` vs `examples/lyra-deployment/`, keep full Redis/SQLite/readiness operational details here, fill production gaps (including `--config` and queue-empty updates); resolve `FACT-18`–`FACT-21`, `FACT-23`–`FACT-25`, `FACT-35`, `FACT-38`, `FACT-40` (`FACT-22` already resolved in `20c90a3b`)
+- [ ] **Start Here & Concepts** — lead with metrics, plugins, and local execution (keep Valkey out of Start Here and consumer mental models); reorder `concepts/` big-picture first; resolve `FACT-01`–`FACT-03`, `FACT-36`
+- [ ] **Run Metrics (`use/`)** — restructure `use/results.md` around output formats (not Valkey/queue expiry) with happy path first; trim duplication in `python-client`, `rest-api`, `mcp`, `local-execution`, `spatial-inputs`, `jobs`; resolve `FACT-04`–`FACT-08`, `FACT-29`, `FACT-34`, `FACT-37`, `FACT-39`
+- [ ] **Build Plugins (`plugins/tutorial/` → `plugins/`)** — rework city tutorial (6–7 chapters, single-module flow, sample outputs, `if __name__ == "__main__":`, redraw `BlockWorkloadDiagram.astro` & `MaintenanceDependenciesDiagram.astro`), then add real code examples & minimal `pyproject.toml` template to standalone guides and polish `plugins/development.mdx` (`lyra-plugin dev` private Valkey & `--valkey-url`); resolve `FACT-09`–`FACT-16`, `FACT-26`–`FACT-28`, `FACT-30`–`FACT-33`, `FACT-40`, `FACT-41` (`FACT-17` already resolved in `0cf17003`)
+- [ ] **Deploy & Operate (`operate/`)** — reconcile root `Dockerfile`/`docker/docker-compose.yml` vs `examples/lyra-deployment/`, keep full Valkey/SQLite/readiness operational details here, fill production gaps (including `--config`, Valkey URL schemes, and queue-empty updates); resolve `FACT-18`–`FACT-21`, `FACT-23`–`FACT-25`, `FACT-35`, `FACT-40`, `FACT-41` (`FACT-22` already resolved in `20c90a3b`; `FACT-38` resolved for docs in `0cf17003` & `16ed7c65`)
 - [ ] **Handwritten Reference (`reference/`)** — tighten `python.md`, `parameters.md`, `target-selection.md`, `units.md`, `location-artifacts.md`, `mcp-payloads.md`; resolve `FACT-27`, `FACT-39`
 
 ### Stage 4 — Final Cross-Corpus Sweep & Verification
